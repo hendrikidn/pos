@@ -104,7 +104,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
 
   return (
     <Modal title={`Bayar ${rp(due)}`} onClose={onClose}>
-      <div className="seg">
+      <div className="seg seg-2">
         {(['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const).map((m) => (
           <button key={m} className={method === m ? 'on' : ''} onClick={() => setMethod(m)}>{METHOD_LABEL[m]}</button>
         ))}

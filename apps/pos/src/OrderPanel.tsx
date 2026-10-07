@@ -45,99 +45,109 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
     return r;
   }
 
-  return (
-    <section className="panel order-panel" aria-label={`Order ${order.number}`}>
-      <header className="order-head">
-        <div>
-          <h2>#{order.number} · {TYPE_LABEL[order.type]}{order.tableNo ? ` · Meja ${order.tableNo}` : ''}</h2>
-          <span className={`pill s-${order.state.status}`}>{STATUS_LABEL[order.state.status]}</span>
-          {order.kitchen && <span className="pill">Dapur: {order.kitchen === 'COOKING' ? 'dimasak' : order.kitchen === 'READY' ? 'siap' : 'disajikan'}</span>}
-        </div>
-        <button className="ghost" onClick={() => ctx.selectOrder(null)}>Tutup</button>
-      </header>
+  const qtyOf = (id: string) => order.items.find((l) => l.itemId === id)?.qty ?? 0;
 
+  return (
+    <section className={`order-panel ${locked ? 'locked' : ''}`} aria-label={`Order ${order.number}`}>
       {!locked && (
-        <>
+        <div className="menu-pane">
           <div className="chips">
             {categories.map((c) => (
               <button key={c} className={`chip ${c === category ? 'on' : ''}`} onClick={() => setCategory(c)}>{c}</button>
             ))}
           </div>
           <div className="menu">
-            {config.menu.filter((m) => m.category === category).map((m) => (
-              <button key={m.id} className="menu-item" onClick={() => void run(ctx, () => engine.addItem(order.id, m.id, 1))}>
-                <span>{m.name}</span>
-                <b>{rp(m.price)}</b>
-              </button>
-            ))}
+            {config.menu.filter((m) => m.category === category).map((m) => {
+              const n = qtyOf(m.id);
+              return (
+                <button key={m.id} className={`menu-item ${n > 0 ? 'has' : ''}`} onClick={() => void run(ctx, () => engine.addItem(order.id, m.id, 1))}>
+                  <span>{m.name}</span>
+                  <b>{rp(m.price)}</b>
+                  {n > 0 && <i className="qty-badge" aria-label={`${n} di keranjang`}>{n}</i>}
+                </button>
+              );
+            })}
           </div>
-        </>
-      )}
-
-      <ul className="cart">
-        {order.items.length === 0 && <li className="muted">Belum ada item. Pilih menu di atas.</li>}
-        {order.items.map((l) => (
-          <li key={l.itemId}>
-            <span className="name">{l.name}{l.sentQty > 0 && <small> · terkirim {l.sentQty}</small>}</span>
-            {!locked ? (
-              <span className="qty">
-                <button aria-label="Kurangi" onClick={() => void run(ctx, () => engine.setQty(order.id, l.itemId, l.qty - 1))}>−</button>
-                <b>{l.qty}</b>
-                <button aria-label="Tambah" onClick={() => void run(ctx, () => engine.setQty(order.id, l.itemId, l.qty + 1))}>+</button>
-              </span>
-            ) : (
-              <b>{l.qty}×</b>
-            )}
-            <span className="amt">{rp(l.qty * l.unitPrice)}</span>
-          </li>
-        ))}
-      </ul>
-
-      <dl className="totals">
-        <div><dt>Subtotal</dt><dd>{rp(totals.subtotal)}</dd></div>
-        {totals.discount > 0 && <div><dt>Diskon</dt><dd>−{rp(totals.discount)}</dd></div>}
-        {totals.tax > 0 && <div><dt>PBJT {config.taxPercent}%</dt><dd>{rp(totals.tax)}</dd></div>}
-        <div className="grand"><dt>Total</dt><dd>{rp(totals.total)}</dd></div>
-        {order.payments.length > 0 && (
-          <div><dt>Dibayar ({order.payments.map((p) => METHOD_LABEL[p.method]).join(', ')})</dt><dd>{rp(totals.total - engine.outstanding(order))}</dd></div>
-        )}
-      </dl>
-
-      {!final && (
-        <div className="actions wrap">
-          <button className="secondary" disabled={order.items.every((l) => l.qty <= l.sentQty)} onClick={() => void run(ctx, () => engine.sendToKitchen(order.id))}>Kirim ke dapur</button>
-          <button className="secondary" disabled={order.items.length === 0} onClick={() => setDlg('discount')}>Diskon</button>
-          <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
-          <button disabled={order.items.length === 0} onClick={() => void startPay()}>Bayar {rp(engine.outstanding(order) || totals.total)}</button>
         </div>
       )}
 
-      {paid && (
-        <div className="receipt-box">
-          <h3>Struk</h3>
-          {order.receipt === 'NONE' ? (
-            <>
-              {(ctx.rt.engine.paperClaimActive() || ctx.rt.printerState() === 'paperOut') && (
-                <p className="notice">Kertas habis. Tawarkan struk digital, atau catat bahwa struk tidak diberikan.</p>
+      <aside className="cart-pane">
+        <header className="order-head">
+          <div>
+            <h2>#{order.number} · {TYPE_LABEL[order.type]}{order.tableNo ? ` · Meja ${order.tableNo}` : ''}</h2>
+            <span className={`pill s-${order.state.status}`}>{STATUS_LABEL[order.state.status]}</span>
+            {order.kitchen && <span className="pill">Dapur: {order.kitchen === 'COOKING' ? 'dimasak' : order.kitchen === 'READY' ? 'siap' : 'disajikan'}</span>}
+          </div>
+          <button className="ghost" onClick={() => ctx.selectOrder(null)}>Tutup</button>
+        </header>
+
+        <ul className="cart">
+          {order.items.length === 0 && <li className="muted">Belum ada item. Ketuk menu untuk menambahkan.</li>}
+          {order.items.map((l) => (
+            <li key={l.itemId}>
+              <span className="name">{l.name}{l.sentQty > 0 && <small> · terkirim {l.sentQty}</small>}</span>
+              {!locked ? (
+                <span className="qty">
+                  <button aria-label="Kurangi" onClick={() => void run(ctx, () => engine.setQty(order.id, l.itemId, l.qty - 1))}>−</button>
+                  <b>{l.qty}</b>
+                  <button aria-label="Tambah" onClick={() => void run(ctx, () => engine.setQty(order.id, l.itemId, l.qty + 1))}>+</button>
+                </span>
+              ) : (
+                <b>{l.qty}×</b>
               )}
-              <div className="actions wrap">
-                <button onClick={() => void run(ctx, () => engine.printReceipt(order.id))}>Cetak struk</button>
-                <button className="secondary" onClick={() => setDlg('decline')}>Struk tidak diberikan…</button>
-                <button className="secondary danger" onClick={() => setDlg('refund')}>Refund</button>
-                <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="muted">{order.receipt === 'PRINTED' ? 'Struk dicetak.' : 'Struk tidak diberikan (tercatat).'}</p>
-              <div className="actions wrap">
-                <button className="secondary danger" onClick={() => setDlg('refund')}>Refund</button>
-                <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
-              </div>
-            </>
+              <span className="amt">{rp(l.qty * l.unitPrice)}</span>
+            </li>
+          ))}
+        </ul>
+
+        <dl className="totals">
+          <div><dt>Subtotal</dt><dd>{rp(totals.subtotal)}</dd></div>
+          {totals.discount > 0 && <div><dt>Diskon</dt><dd>−{rp(totals.discount)}</dd></div>}
+          {totals.tax > 0 && <div><dt>PBJT {config.taxPercent}%</dt><dd>{rp(totals.tax)}</dd></div>}
+          <div className="grand"><dt>Total</dt><dd>{rp(totals.total)}</dd></div>
+          {order.payments.length > 0 && (
+            <div><dt>Dibayar ({order.payments.map((p) => METHOD_LABEL[p.method]).join(', ')})</dt><dd>{rp(totals.total - engine.outstanding(order))}</dd></div>
           )}
-        </div>
-      )}
+        </dl>
+
+        {!final && (
+          <div className="order-actions">
+            <button className="pay" disabled={order.items.length === 0} onClick={() => void startPay()}>Bayar {rp(engine.outstanding(order) || totals.total)}</button>
+            <div className="sub">
+              <button className="secondary" disabled={order.items.every((l) => l.qty <= l.sentQty)} onClick={() => void run(ctx, () => engine.sendToKitchen(order.id))}>Ke dapur</button>
+              <button className="secondary" disabled={order.items.length === 0} onClick={() => setDlg('discount')}>Diskon</button>
+              <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
+            </div>
+          </div>
+        )}
+
+        {paid && (
+          <div className="receipt-box">
+            <h3>Struk</h3>
+            {order.receipt === 'NONE' ? (
+              <>
+                {(ctx.rt.engine.paperClaimActive() || ctx.rt.printerState() === 'paperOut') && (
+                  <p className="notice">Kertas habis. Tawarkan struk digital, atau catat bahwa struk tidak diberikan.</p>
+                )}
+                <div className="actions wrap">
+                  <button onClick={() => void run(ctx, () => engine.printReceipt(order.id))}>Cetak struk</button>
+                  <button className="secondary" onClick={() => setDlg('decline')}>Struk tidak diberikan…</button>
+                  <button className="secondary danger" onClick={() => setDlg('refund')}>Refund</button>
+                  <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="muted">{order.receipt === 'PRINTED' ? 'Struk dicetak.' : 'Struk tidak diberikan (tercatat).'}</p>
+                <div className="actions wrap">
+                  <button className="secondary danger" onClick={() => setDlg('refund')}>Refund</button>
+                  <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </aside>
 
       {dlg === 'pay' && <PayDialog ctx={ctx} order={order} onClose={() => setDlg(null)} />}
       {dlg === 'discount' && <DiscountDialog ctx={ctx} order={order} onClose={() => setDlg(null)} withApproval={withApproval} />}

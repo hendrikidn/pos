@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrderRecord, StaffPublic } from '@pos/pos-core';
 import { ApprovalDialog, Modal, PinPad } from './dialogs';
 import { CustomerDisplay, DISPLAY_CHANNEL, type DisplayView } from './CustomerDisplay';
+import { Logo } from './Logo';
 import { OrderPanel } from './OrderPanel';
 import { hardware, isNative, kioskWanted, loadPrinterSetting, savePrinterSetting, setKioskWanted, type PrinterKind } from './native';
 import { createRuntime, saveSettings, setDemo, type Boot, type Runtime } from './runtime';
@@ -118,14 +119,20 @@ function Login({ ctx }: { ctx: Ctx }) {
   }, [pin]);
   return (
     <div className="login">
+      <Logo size={56} />
       <h1>{config.merchantName}</h1>
       <p className="muted">Pilih nama, lalu masukkan PIN.</p>
-      <div className="staff">
-        {engine.staff().map((s) => (
-          <button key={s.id} className={who?.id === s.id ? 'on' : ''} onClick={() => { setWho(s); setPin(''); }}>{s.name}</button>
-        ))}
+      <div className="login-body">
+        <div className="staff">
+          {engine.staff().map((s) => (
+            <button key={s.id} className={who?.id === s.id ? 'on' : ''} onClick={() => { setWho(s); setPin(''); }}>
+              <span className="avatar" aria-hidden="true">{(s.name.trim()[0] ?? '?').toUpperCase()}</span>
+              {s.name}
+            </button>
+          ))}
+        </div>
+        {who ? <PinPad value={pin} onChange={setPin} max={4} /> : <p className="muted pin-hint">Pilih nama untuk memasukkan PIN.</p>}
       </div>
-      {who && <PinPad value={pin} onChange={setPin} max={4} />}
       {config.demoPins && <p className="muted small">Mode demo — PIN: {Object.entries(config.demoPins).map(([k, v]) => `${k} ${v}`).join(' · ')}</p>}
     </div>
   );
@@ -138,7 +145,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
   const claim = engine.paperClaimActive();
   return (
     <header className="topbar">
-      <div className="brand">{config.merchantName}</div>
+      <div className="brand"><Logo size={32} />{config.merchantName}</div>
       <nav className="tabs">
         {(['order', 'dapur', 'shift', 'pengaturan'] as const).map((t) => (
           <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t === 'order' ? 'Order' : t === 'dapur' ? 'Dapur' : t === 'shift' ? 'Shift' : 'Pengaturan'}</button>
@@ -176,27 +183,34 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
 
   if (!shift) return <OpenShift ctx={ctx} />;
   return (
-    <div className="split">
-      <aside className="panel list">
-        <div className="actions wrap">
+    <div className="pos-orders">
+      <div className="order-strip">
+        <div className="strip-new">
           <button onClick={() => void create('TAKE_AWAY')}>+ Take-away</button>
           <button className="secondary" onClick={() => setAsking('table')}>+ Dine-in</button>
           <button className="secondary" onClick={() => setAsking('employee')}>+ Karyawan</button>
         </div>
-        <ul className="orders">
-          {orders.length === 0 && <li className="muted">Belum ada order di shift ini.</li>}
+        <ul className="strip-list" aria-label="Order di shift ini">
+          {orders.length === 0 && <li className="strip-empty">Belum ada order di shift ini.</li>}
           {orders.map((o) => (
             <li key={o.id}>
               <button className={`order-card ${selected === o.id ? 'on' : ''}`} onClick={() => ctx.selectOrder(o.id)}>
-                <b>#{o.number}</b> {TYPE_LABEL[o.type]}{o.tableNo ? ` · Meja ${o.tableNo}` : ''}
+                <span><b>#{o.number}</b> {TYPE_LABEL[o.type]}{o.tableNo ? ` · Meja ${o.tableNo}` : ''}</span>
                 <span className={`pill s-${o.state.status}`}>{STATUS_LABEL[o.state.status]}</span>
                 <span className="amt">{rp(engine.totals(o).total)}</span>
               </button>
             </li>
           ))}
         </ul>
-      </aside>
-      {current ? <OrderPanel key={current.id} ctx={ctx} order={current} /> : <section className="panel empty">Pilih atau buat order.</section>}
+      </div>
+      {current ? (
+        <OrderPanel key={current.id} ctx={ctx} order={current} />
+      ) : (
+        <section className="empty-orders">
+          <h2>Siap menerima order</h2>
+          <p>Pilih order di atas, atau buat yang baru: Take-away, Dine-in, atau Karyawan.</p>
+        </section>
+      )}
 
       {asking === 'table' && (
         <Modal title="Nomor meja" onClose={() => setAsking(null)}>

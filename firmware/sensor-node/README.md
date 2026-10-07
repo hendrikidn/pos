@@ -31,7 +31,7 @@ LD2410            ESP32-C3 SuperMini
   OUT  ─────────── (tidak dipakai)
 
 OLED SSD1306
-  VCC → 3V3   GND → GND   SDA → GPIO8   SCL → GPIO9
+  VCC → 3V3   GND → GND   SDA → GPIO8   SCL → GPIO5
 ```
 
 Pin dapat diubah di `app/config.h`.
@@ -47,11 +47,26 @@ Satu firmware untuk semua sensor. WiFi, token, dan identitas perangkat **tidak a
 1. Salin `app/secrets.example.h` menjadi `app/secrets.h` dan isi `SERVER_URL` (alamat API; ini satu-satunya yang tertanam).
 2. `pio run -e esp32c3 -t upload` (sekali, lewat USB), lalu `pio device monitor`.
 3. Di dashboard: **Pengaturan → Perangkat → Buat kode pairing** (pilih outlet, jenis Sensor, dan terminal yang disangga, mis. `pos-1`). Catat kode 8 karakter; berlaku 15 menit, sekali pakai.
-4. Nyalakan sensor. Karena belum dipasang, OLED menampilkan **SETUP SENSOR**, nama WiFi `POSGUARD-xxxx`, dan sandinya.
+4. Nyalakan sensor. Karena belum dipasang, OLED menampilkan **SETUP SENSOR**, nama WiFi `POSGUARD-xxxx`, dan sandinya (bawaan `12345678`, diubah di `SETUP_AP_PASS`, `app/config.h`).
 5. Dari HP, sambung ke WiFi itu (portal terbuka otomatis, atau buka `http://192.168.4.1`). Pilih WiFi outlet (2,4 GHz), isi sandinya dan kode pairing, lalu **Pasang perangkat**.
 6. Sensor menyambung ke WiFi, menukar kode dengan token ke server, menyimpannya, dan restart. Perangkat muncul **Online** di dashboard.
 
-**Reset pabrik:** tahan tombol BOOT 10 detik saat sensor berjalan. Identitas, WiFi, dan antrean/rantai event dihapus, lalu sensor kembali ke portal setup. Pakai ini juga bila token dicabut (OLED menampilkan `Kirim: DITOLAK 401`) atau sensor dipindah outlet. Jangan menahan BOOT saat menyalakan: itu masuk mode unggah firmware.
+**Mengganti WiFi (router/sandi berubah):** tidak perlu apa-apa. Bila WiFi tersimpan tidak tersambung selama 3 menit (`WIFI_FALLBACK_MS`), sensor membuka portal **GANTI WIFI** (OLED menampilkan `POSGUARD-xxxx` dan sandinya; di mode ini sandi **acak**, bukan `12345678`, karena tanpa kode pairing). Sambung dari HP, pilih WiFi baru, isi sandinya, tanpa kode pairing. Identitas, token, dan antrean event tetap; sensor tetap mendeteksi selama portal terbuka. Portal menutup sendiri bila WiFi lama pulih atau setelah 10 menit, lalu terbuka lagi bila masih putus.
+
+**Reset pabrik** (hapus identitas, WiFi, dan antrean/rantai event; sensor kembali ke portal setup dan harus dipairing ulang). Tiga cara, tanpa komputer:
+
+1. **Cabut-colok daya 5 kali beruntun** (`RESET_BOOT_COUNT`), masing-masing menyala kurang dari 6 detik. Menekan tombol RESET di board 5 kali cepat juga sama. OLED menampilkan `Reset daya n/5` sebagai umpan balik. Tidak butuh hardware tambahan.
+2. **Tombol BOOT bawaan:** tahan 10 detik saat sensor berjalan (OLED menampilkan `RESET PABRIK`). Agar hitungan tahan tidak terganggu, SCL OLED dipindah dari GPIO9 ke **GPIO5** (kabel SCL OLED harus disambung ke GPIO5, bukan GPIO9; GPIO9 dipakai tombol BOOT). Jangan menahan BOOT saat menyalakan: itu masuk mode unggah firmware. Pin dapat diubah di `app/config.h`.
+3. **Otomatis bila token dicabut:** bila server menolak token (HTTP 401, OLED `Kirim: DITOLAK 401`) terus-menerus selama 30 menit (`AUTH_REJECT_RESET_MS`), sensor mereset dirinya dan membuka portal setup. Dipakai saat perangkat dicabut dari dashboard atau sensor dipindah outlet. Respons non-401 dari server membatalkan hitungan.
+
+Firmware lama tanpa fitur di atas tidak bisa direset lewat tombol; satu kali saja perlu `pio run -e esp32c3 -t erase` lalu `pio run -e esp32c3 -t upload`.
+
+**Pemecahan masalah setup:**
+
+- **Portal SETUP SENSOR tidak muncul, OLED langsung menampilkan layar status** (`WiFi: --`): flash masih berisi identitas lama (upload firmware tidak menghapusnya). Lakukan reset pabrik di atas (cabut-colok 5 kali, atau tahan tombol BOOT 10 detik), atau `-t erase`.
+- **Mengunggah dengan `pio run -t upload` tanpa `-e`** mengunggah semua environment dan yang terakhir (`esp32c3-calibrate`) tertinggal di board, sehingga serial hanya mencetak baris `CSV,...`. Selalu sebutkan `-e esp32c3` untuk firmware normal.
+- **WiFi outlet tidak muncul di daftar / kolom WiFi kosong:** ESP32-C3 hanya mendukung **2,4 GHz**; jaringan 5 GHz tidak bisa dipindai maupun disambungi (batasan chip, bukan firmware). Di router, pakai SSID band 2,4 GHz yang terpisah dari 5 GHz (mis. `damai` dan `damai 5G`), dengan WPA2-PSK (AES). Pada ZTE F670L (IndiHome): **Local Network → WLAN → WLAN SSID Configuration**, SSID1-4 adalah 2,4 GHz dan SSID5 adalah 5 GHz. Akun admin diperlukan; akun `user` biasanya tidak bisa membuka menu ini.
+- Formulir portal memindai WiFi saat boot (diulang hingga 3 kali) dan menyediakan tombol **Pindai ulang WiFi** serta daftar dropdown (nama kembar digabung). Pilih "Ketik nama WiFi manual..." di dropdown bila jaringan tidak terdaftar. Pindai ulang dapat memutus WiFi `POSGUARD-xxxx` 1-2 detik; formulir mengulang sendiri.
 
 **Mode uji tanpa pairing:** definisikan `WIFI_SSID`, `WIFI_PASS`, `DEVICE_ID`, `DEVICE_TOKEN`, `OUTLET_ID` (dan `TERMINAL_ID`) di `secrets.h` dengan token dari `npm run demo`. Dipakai hanya bila flash belum berisi identitas; tidak disimpan ke flash.
 

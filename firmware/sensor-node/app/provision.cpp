@@ -148,23 +148,39 @@ static const char PAGE[] PROGMEM = R"HTML(<!doctype html><html lang="id"><head><
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Setup sensor</title>
 <style>body{font-family:system-ui,sans-serif;max-width:420px;margin:0 auto;padding:16px;background:#f6f7f9;color:#1b1f24}
 h1{font-size:20px}label{display:block;margin:14px 0 4px;font-weight:600}
-input{width:100%;box-sizing:border-box;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px}
+input,select{width:100%;box-sizing:border-box;padding:12px;font-size:16px;border:1px solid #bbb;border-radius:8px}
 button{width:100%;margin-top:18px;padding:14px;font-size:16px;font-weight:600;border:0;border-radius:8px;background:#1b6ef3;color:#fff}
-button:disabled{opacity:.5}.msg{margin-top:16px;padding:12px;border-radius:8px;background:#fff;border:1px solid #ddd}
+button:disabled{opacity:.5}button.net{background:#fff;color:#1b1f24;border:1px solid #bbb;margin-top:8px;font-weight:400;text-align:left}
+.msg{margin-top:16px;padding:12px;border-radius:8px;background:#fff;border:1px solid #ddd}
 .err{border-color:#c0392b;color:#c0392b}.ok{border-color:#1e8e3e;color:#1e8e3e}.small{font-size:13px;color:#555}</style></head><body>
 <h1>Setup sensor POS Guard</h1>
 <p class="small">Perangkat: %MAC%</p>
 <form id="f"><label for="ssid">WiFi outlet (2,4 GHz)</label>
-<input id="ssid" name="ssid" list="nets" autocomplete="off" autocapitalize="off" required>
-<datalist id="nets">%NETS%</datalist>
+<select id="sel">%NETS%</select>
+<input id="ssid" name="ssid" autocomplete="off" autocapitalize="off" placeholder="Nama WiFi" hidden>
+<div id="lst" class="small"></div>
+<button type="button" id="rs" class="net">Pindai ulang WiFi</button>
 <label for="pass">Sandi WiFi</label><input id="pass" name="pass" type="password" autocomplete="off">
-<label for="code">Kode pairing dari dashboard</label>
-<input id="code" name="code" autocomplete="off" autocapitalize="characters" placeholder="ABCD-EFGH" required>
+%CODEBLOCK%
 <button id="go" type="submit">Pasang perangkat</button></form>
 <div id="m" class="msg" hidden></div>
 <script>
 const f=document.getElementById('f'),m=document.getElementById('m'),go=document.getElementById('go');
 function show(t,c){m.hidden=false;m.className='msg '+(c||'');m.textContent=t}
+const ssid=document.getElementById('ssid'),sel=document.getElementById('sel'),lst=document.getElementById('lst'),rs=document.getElementById('rs');
+function add(v,t){const o=document.createElement('option');o.value=v;o.textContent=t;sel.appendChild(o)}
+sel.onchange=()=>{if(sel.value==='__manual'){ssid.hidden=false;ssid.value='';ssid.focus()}else{ssid.hidden=true;ssid.value=sel.value}};
+function fill(nets){nets=[...new Set(nets)];sel.textContent='';lst.textContent='';
+  if(!nets.length){add('__manual','Tidak ada jaringan: ketik manual');sel.value='__manual';sel.onchange();return}
+  add('','-- Pilih WiFi ('+nets.length+') --');nets.forEach(n=>add(n,n));add('__manual','Ketik nama WiFi manual...');sel.value='';sel.onchange()}
+async function scan(){rs.disabled=true;sel.textContent='';add('','Memindai WiFi...');ssid.hidden=true;ssid.value='';
+  try{await fetch('/scan?start=1')}catch(e){}
+  for(let i=0;i<12;i++){await new Promise(r=>setTimeout(r,1500));
+    try{const s=await (await fetch('/scan')).json();if(s.state==='done'){fill(s.nets);rs.disabled=false;return}}catch(e){}}
+  fill([]);lst.textContent='Pemindaian gagal. Ketik nama WiFi manual, atau pindai ulang.';rs.disabled=false}
+rs.onclick=scan;
+const boot=Array.from(sel.options).map(o=>o.value).filter(Boolean);
+if(boot.length)fill(boot);else scan();
 async function poll(){
   try{const r=await fetch('/status');const s=await r.json();
     if(s.state==='working'){show(s.msg);setTimeout(poll,1500);return}
@@ -172,32 +188,66 @@ async function poll(){
     if(s.state==='failed'){show(s.msg,'err');go.disabled=false;return}
   }catch(e){show('Menunggu perangkat... Bila HP terputus dari WiFi POSGUARD, sambungkan lagi; atau lihat layar OLED dan dashboard.');}
   setTimeout(poll,2000)}
-f.addEventListener('submit',async e=>{e.preventDefault();go.disabled=true;show('Mengirim...');
+f.addEventListener('submit',async e=>{e.preventDefault();if(!ssid.value){show('Pilih atau ketik nama WiFi.','err');return}go.disabled=true;show('Mengirim...');
   try{await fetch('/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(f))});poll()}
   catch(err){show('Gagal mengirim. Coba lagi.','err');go.disabled=false}});
 </script></body></html>)HTML";
 
+static const char CODE_HTML[] PROGMEM = R"HTML(<label for="code">Kode pairing dari dashboard</label>
+<input id="code" name="code" autocomplete="off" autocapitalize="characters" placeholder="ABCD-EFGH" required>)HTML";
+static const char KEEP_HTML[] PROGMEM = R"HTML(<p class="small">Perangkat sudah terpasang. Hanya WiFi yang diganti; kode pairing tidak diperlukan.</p>)HTML";
+
 enum class JobState { Idle, Pending, Working, Failed, Done };
 
-[[noreturn]] void provisionPortal(ShowLines show) {
+uint8_t provisionBootCount() {
+    Preferences p;
+    if (!p.begin("posboot", false)) return 0;
+    uint8_t n = p.getUChar("n", 0) + 1;
+    p.putUChar("n", n);
+    p.end();
+    return n;
+}
+
+void provisionBootOk() {
+    Preferences p;
+    if (!p.begin("posboot", false)) return;
+    if (p.getUChar("n", 0)) p.putUChar("n", 0);
+    p.end();
+}
+
+/**
+ * Inti portal. `keep` kosong: pairing awal (tidak kembali; restart setelah berhasil). `keep` terisi: hanya ganti WiFi,
+ * kembali bila WiFi lama pulih atau setelah `maxMs` (0 = tanpa batas).
+ */
+static void runPortal(const DeviceConfig *keep, ShowLines show, Background bg, uint32_t maxMs) {
     String mac = WiFi.macAddress();
     String suffix = mac.substring(12);
     suffix.replace(":", "");
     String apName = "POSGUARD-" + suffix;
     char apPass[12];
-    snprintf(apPass, sizeof apPass, "%08lu", (unsigned long)(esp_random() % 100000000UL));
+    // Pairing awal: sandi tetap SETUP_AP_PASS (kode pairing sekali pakai yang mengamankan perangkat). Mode ganti WiFi tidak
+    // memakai kode pairing, jadi tetap acak agar orang di sekitar tidak bisa mengganti WiFi sensor.
+    if (keep) snprintf(apPass, sizeof apPass, "%08lu", (unsigned long)(esp_random() % 100000000UL));
+    else snprintf(apPass, sizeof apPass, "%s", SETUP_AP_PASS);
 
     // Pindai dulu sebelum AP aktif agar daftar WiFi muncul di formulir.
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     String nets;
-    int n = WiFi.scanNetworks();
-    for (int i = 0; i < n && i < 20; i++) nets += "<option value=\"" + htmlEscape(WiFi.SSID(i)) + "\">";
+    // Pindai pertama sering kosong tepat setelah boot: ulangi sampai 3 kali.
+    int n = 0;
+    for (int attempt = 0; attempt < 3 && n <= 0; attempt++) {
+        if (attempt) delay(500);
+        n = WiFi.scanNetworks();
+    }
+    for (int i = 0; i < n && i < 20; i++) nets += "<option value=\"" + htmlEscape(WiFi.SSID(i)) + "\">" + htmlEscape(WiFi.SSID(i)) + "</option>";
     WiFi.scanDelete();
 
     WiFi.mode(WIFI_AP_STA);
     WiFi.setTxPower(WIFI_TX_POWER);
     WiFi.softAP(apName.c_str(), apPass);
+    // Mode ganti WiFi: terus coba WiFi lama di latar; bila pulih, portal ditutup.
+    if (keep) WiFi.begin(keep->wifiSsid.c_str(), keep->wifiPass.c_str());
     IPAddress ip = WiFi.softAPIP();
 
     DNSServer dns;
@@ -212,6 +262,7 @@ enum class JobState { Idle, Pending, Working, Failed, Done };
         String page = FPSTR(PAGE);
         page.replace("%MAC%", mac);
         page.replace("%NETS%", nets);
+        page.replace("%CODEBLOCK%", keep ? FPSTR(KEEP_HTML) : FPSTR(CODE_HTML));
         web.send(200, "text/html; charset=utf-8", page);
     });
     web.on("/save", HTTP_POST, [&]() {
@@ -219,14 +270,44 @@ enum class JobState { Idle, Pending, Working, Failed, Done };
         jobSsid = web.arg("ssid");
         jobPass = web.arg("pass");
         jobCode = sanitizeCode(web.arg("code"));
-        if (!jobSsid.length() || jobCode.length() != 8) {
+        if (!jobSsid.length() || (!keep && jobCode.length() != 8)) {
             state = JobState::Failed;
-            message = "Isi nama WiFi dan kode pairing 8 karakter.";
+            message = keep ? "Isi nama WiFi." : "Isi nama WiFi dan kode pairing 8 karakter.";
         } else {
             state = JobState::Pending;
             message = "Menyambung ke WiFi...";
         }
         web.send(200, "text/plain", "ok");
+    });
+    // Pindai ulang atas permintaan formulir: ?start=1 memulai (asinkron), tanpa argumen mengambil hasil.
+    // Sementara memindai, AP bisa terputus sebentar; formulir mengulang permintaan sendiri.
+    web.on("/scan", HTTP_GET, [&]() {
+        if (state == JobState::Pending || state == JobState::Working) { web.send(200, "application/json", "{\"state\":\"busy\"}"); return; }
+        int sc = WiFi.scanComplete();
+        if (web.hasArg("start")) {
+            if (sc != WIFI_SCAN_RUNNING) {
+                WiFi.scanDelete();
+                WiFi.scanNetworks(true);
+            }
+            web.send(200, "application/json", "{\"state\":\"scanning\"}");
+            return;
+        }
+        if (sc == WIFI_SCAN_RUNNING) { web.send(200, "application/json", "{\"state\":\"scanning\"}"); return; }
+        if (sc < 0) { web.send(200, "application/json", "{\"state\":\"idle\"}"); return; }
+        String j = "{\"state\":\"done\",\"nets\":[";
+        bool first = true;
+        for (int i = 0; i < sc && i < 20; i++) {
+            String s = WiFi.SSID(i);
+            if (!s.length()) continue;
+            s.replace("\\", "\\\\");
+            s.replace("\"", "\\\"");
+            if (!first) j += ",";
+            first = false;
+            j += "\"" + s + "\"";
+        }
+        j += "]}";
+        WiFi.scanDelete();
+        web.send(200, "application/json", j);
     });
     web.on("/status", HTTP_GET, [&]() {
         const char *s = state == JobState::Done ? "done" : state == JobState::Failed ? "failed" : state == JobState::Idle ? "idle" : "working";
@@ -244,22 +325,45 @@ enum class JobState { Idle, Pending, Working, Failed, Done };
     char l2[32], l3[32];
     snprintf(l2, sizeof l2, "WiFi: %s", apName.c_str());
     snprintf(l3, sizeof l3, "Sandi: %s", apPass);
-    if (show) show("SETUP SENSOR", l2, l3, "Buka 192.168.4.1");
+    const char *title = keep ? "GANTI WIFI" : "SETUP SENSOR";
+    auto showPortal = [&]() { if (show) show(title, l2, l3, "Buka 192.168.4.1"); };
+    showPortal();
 
     auto serve = [&](uint32_t ms) {
         uint32_t t0 = millis();
         while (millis() - t0 < ms) {
             dns.processNextRequest();
             web.handleClient();
+            if (bg) bg();
             delay(5);
         }
     };
 
+    uint32_t openedAt = millis();
+    uint32_t lastShown = millis();
     for (;;) {
         dns.processNextRequest();
         web.handleClient();
+        if (bg) bg();
         delay(5);
-        if (state != JobState::Pending) continue;
+        if (state != JobState::Pending) {
+            if (keep && state != JobState::Working && state != JobState::Done) {
+                // WiFi lama pulih sendiri, atau waktu habis: tutup portal dan kembali bekerja normal.
+                bool back = WiFi.status() == WL_CONNECTED;
+                bool expired = maxMs && millis() - openedAt >= maxMs;
+                if (back || expired) {
+                    web.stop();
+                    dns.stop();
+                    WiFi.softAPdisconnect(true);
+                    WiFi.mode(WIFI_STA);
+                    WiFi.begin(keep->wifiSsid.c_str(), keep->wifiPass.c_str());
+                    return;
+                }
+            }
+            // Layar utama ikut menimpa OLED; tampilkan ulang petunjuk portal secara berkala.
+            if (millis() - lastShown > 2000) { lastShown = millis(); showPortal(); }
+            continue;
+        }
 
         state = JobState::Working;
         if (show) show("Menyambung WiFi", jobSsid.c_str(), "", "");
@@ -268,10 +372,28 @@ enum class JobState { Idle, Pending, Working, Failed, Done };
         while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) serve(200);
         if (WiFi.status() != WL_CONNECTED) {
             WiFi.disconnect(false);
+            if (keep) WiFi.begin(keep->wifiSsid.c_str(), keep->wifiPass.c_str());
             message = "Gagal tersambung ke WiFi. Periksa nama (harus 2,4 GHz) dan sandinya.";
             state = JobState::Failed;
             if (show) show("WiFi gagal", "Periksa nama/sandi", "", "");
             continue;
+        }
+
+        if (keep) {
+            // Hanya ganti WiFi: identitas, token, dan antrean event tetap.
+            DeviceConfig updated = *keep;
+            updated.wifiSsid = jobSsid;
+            updated.wifiPass = jobPass;
+            if (!saveConfig(updated)) {
+                message = "Gagal menyimpan konfigurasi di flash.";
+                state = JobState::Failed;
+                continue;
+            }
+            message = "Berhasil. WiFi diganti ke " + jobSsid + "; sensor akan restart.";
+            state = JobState::Done;
+            if (show) show("WIFI DIGANTI", jobSsid.c_str(), "Memulai ulang...", "");
+            serve(4000);
+            ESP.restart();
         }
 
         // Sertifikat HTTPS divalidasi terhadap tanggal, jadi jam harus sinkron dulu.
@@ -312,4 +434,13 @@ enum class JobState { Idle, Pending, Working, Failed, Done };
         serve(4000);
         ESP.restart();
     }
+}
+
+[[noreturn]] void provisionPortal(ShowLines show) {
+    runPortal(nullptr, show, nullptr, 0);
+    for (;;) delay(1000);  // runPortal pairing awal tidak kembali; pagar untuk atribut noreturn
+}
+
+void provisionWifiPortal(const DeviceConfig &keep, ShowLines show, Background bg, uint32_t maxMs) {
+    runPortal(&keep, show, bg, maxMs);
 }

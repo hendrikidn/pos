@@ -24,3 +24,20 @@ void provisionClear();
  * Perangkat menukar kode dengan token ke server, menyimpannya, lalu restart. Fungsi ini tidak kembali.
  */
 [[noreturn]] void provisionPortal(ShowLines show);
+
+/** Dipanggil berulang selama portal terbuka agar sensor tetap bekerja (radar, antrean, tombol reset). */
+typedef void (*Background)();
+
+/**
+ * Portal ganti WiFi untuk perangkat yang sudah terpasang: identitas dan token tetap, hanya WiFi yang diganti (tanpa kode
+ * pairing). Menyimpan WiFi baru hanya bila berhasil tersambung, lalu restart. Kembali (tanpa restart) bila WiFi lama
+ * tersambung lagi sendiri atau setelah `maxMs` berlalu.
+ */
+void provisionWifiPortal(const DeviceConfig &keep, ShowLines show, Background bg, uint32_t maxMs);
+
+/**
+ * Hitungan boot beruntun untuk reset dengan cabut-colok daya. `provisionBootCount()` menambah hitungan dan
+ * mengembalikannya (panggil sekali saat boot); `provisionBootOk()` mengembalikannya ke 0 setelah perangkat hidup cukup lama.
+ */
+uint8_t provisionBootCount();
+void provisionBootOk();

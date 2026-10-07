@@ -35,6 +35,12 @@ static size_t outboxBytes = 0;
 static bool chainReady = false;
 static String lastPost = "-";
 static uint32_t lastHeartbeat = 0, lastFlush = 0, lastScreen = 0, lastWifiTry = 0;
+static bool rejecting = false;       // server menolak token (401) tanpa jeda sejak rejectSince
+static uint32_t rejectSince = 0;
+static uint32_t wifiDownSince = 0;   // 0 = tersambung; selain itu waktu mulai putus
+static bool portalOpen = false;      // portal ganti WiFi aktif: layar status tidak boleh menimpa OLED
+static bool bootPending = true;      // hitungan boot beruntun belum dikosongkan
+[[noreturn]] static void factoryReset(const char *reason);
 
 // ---------- waktu ----------
 
@@ -194,10 +200,18 @@ static void flushOutbox() {
         }
         lastPost = "OK " + String(count);
     } else {
-        // 401 berarti token dicabut atau salah: butuh reset pabrik (tahan BOOT 10 detik) dan pairing ulang.
+        // 401 berarti token dicabut atau salah. Bila terus ditolak selama AUTH_REJECT_RESET_MS, reset pabrik otomatis.
         lastPost = code == 401 ? String("DITOLAK 401") : code > 0 ? String("HTTP ") + code : String("gagal");
         if (code == 400) Serial.println(resp.substring(0, 200));
+        if (code == 401) {
+            if (!rejecting) { rejecting = true; rejectSince = millis(); }
+            if (millis() - rejectSince >= AUTH_REJECT_RESET_MS) factoryReset("TOKEN DICABUT");
+        } else if (code > 0) {
+            rejecting = false;
+        }
+        return;
     }
+    rejecting = false;
 }
 
 // ---------- tampilan ----------
@@ -210,17 +224,23 @@ static void showLines(const char *l1, const char *l2, const char *l3, const char
     oled.sendBuffer();
 }
 
-/** Tombol BOOT ditahan RESET_HOLD_MS: hapus identitas dan rantai, lalu restart ke portal setup. */
-// Hanya digitalRead: JANGAN memanggil pinMode di pin ini. GPIO9 dipakai I2C OLED, dan pinMode melepasnya dari bus I2C (layar membeku).
+/** Hapus identitas dan rantai, lalu restart ke portal setup. */
+[[noreturn]] static void factoryReset(const char *reason) {
+    showLines("RESET PABRIK", reason, "Menghapus data...", "");
+    provisionClear();
+    provisionBootOk();
+    delay(1500);
+    ESP.restart();
+    for (;;) delay(1000);
+}
+
+/** Tombol di PIN_RESET_BTN (ke GND) ditahan RESET_HOLD_MS. */
 static void checkFactoryReset(uint32_t now) {
     static uint32_t heldSince = 0;
     if (digitalRead(PIN_RESET_BTN) != LOW) { heldSince = 0; return; }
     if (!heldSince) heldSince = now;
     if (now - heldSince < RESET_HOLD_MS) return;
-    showLines("RESET PABRIK", "Menghapus data...", "", "");
-    provisionClear();
-    delay(1000);
-    ESP.restart();
+    factoryReset("Tombol ditahan");
 }
 
 static void drawScreen() {
@@ -255,9 +275,25 @@ void setup() {
     oled.drawStr(0, 26, "memulai...");
     oled.sendBuffer();
 
+    pinMode(PIN_RESET_BTN, INPUT_PULLUP);
+
     if (!LittleFS.begin(true)) Serial.println("LittleFS gagal; antrean tidak tersimpan");
+
+    // Reset dengan cabut-colok daya: RESET_BOOT_COUNT boot beruntun, masing-masing singkat.
+    uint8_t boots = provisionBootCount();
+    if (boots >= RESET_BOOT_COUNT) factoryReset("Cabut-colok daya");
+    if (boots >= 2) {
+        char l[24];
+        snprintf(l, sizeof l, "Reset daya %u/%u", (unsigned)boots, (unsigned)RESET_BOOT_COUNT);
+        showLines(l, "Cabut-colok lagi", "untuk reset pabrik", "");
+        delay(700);
+    }
+
     // Belum dipasang: buka portal setup (tidak kembali; berakhir dengan restart setelah pairing berhasil).
-    if (!provisionLoad(cfg)) provisionPortal(showLines);
+    if (!provisionLoad(cfg)) {
+        provisionBootOk();
+        provisionPortal(showLines);
+    }
     if (!serverIsSecure()) Serial.println("PERINGATAN: SERVER_URL memakai HTTP tanpa enkripsi; hanya untuk uji di jaringan lokal.");
     Serial.printf("perangkat %s, outlet %s, terminal %s\n", cfg.deviceId.c_str(), cfg.outletId.c_str(), cfg.terminalId.length() ? cfg.terminalId.c_str() : "-");
     loadChain();
@@ -278,8 +314,10 @@ void setup() {
     configTime(0, 0, "pool.ntp.org", "time.google.com");
 }
 
-void loop() {
+/** Pekerjaan inti sensor. Juga dipanggil dari portal ganti WiFi agar deteksi dan antrean tetap berjalan. */
+static void tick() {
     uint32_t now = millis();
+    if (bootPending && now > RESET_BOOT_WINDOW_MS) { provisionBootOk(); bootPending = false; }
 
     while (Serial1.available()) {
         ld2410_frame_t f;
@@ -300,7 +338,25 @@ void loop() {
 
     if (now - lastHeartbeat >= HEARTBEAT_MS) { lastHeartbeat = now; emitHeartbeat(); }
     if (now - lastFlush >= FLUSH_MS) { lastFlush = now; flushOutbox(); }
-    if (WiFi.status() != WL_CONNECTED && now - lastWifiTry > 10000) { lastWifiTry = now; WiFi.reconnect(); }
-    if (now - lastScreen >= 500) { lastScreen = now; drawScreen(); }
     checkFactoryReset(now);
+}
+
+void loop() {
+    tick();
+    uint32_t now = millis();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        wifiDownSince = 0;
+    } else {
+        if (!wifiDownSince) wifiDownSince = now ? now : 1;
+        if (now - lastWifiTry > 10000) { lastWifiTry = now; WiFi.reconnect(); }
+        // WiFi tersimpan tidak terjangkau cukup lama (router diganti, sandi berubah): buka portal ganti WiFi.
+        if (now - wifiDownSince >= WIFI_FALLBACK_MS) {
+            portalOpen = true;
+            provisionWifiPortal(cfg, showLines, tick, WIFI_PORTAL_MAX_MS);
+            portalOpen = false;
+            wifiDownSince = millis() ? millis() : 1;  // coba lagi setelah WIFI_FALLBACK_MS berikutnya
+        }
+    }
+    if (now - lastScreen >= 500) { lastScreen = now; if (!portalOpen) drawScreen(); }
 }

@@ -142,7 +142,13 @@ npm run dashboard   # terminal 2: dashboard di http://localhost:3001
 ### 5.1 Pemakaian tetap dengan PostgreSQL
 
 1. Install [Postgres.app](https://postgresapp.com), jalankan, dan buat database `posguard` (klik dua kali pada database default lalu jalankan `create database posguard;`, atau lewat `psql`).
-2. Siapkan database sekali (ganti `USER` dengan nama pengguna Mac Anda, yang menjadi superuser bawaan Postgres.app):
+2. **Admin platform:** buat admin pertama, lalu buat tenant dan token owner dari UI, tanpa token manual.
+   ```
+   export DATABASE_URL=postgres://USER@localhost:5432/posguard
+   npm run api:admin -- --id hendrik --name "Hendrik"        # mencetak token ADMIN (adm_...) sekali
+   ```
+   Jalankan API dan konsol admin (`npm run api`, `npm run admin`), buka http://localhost:3003, masuk dengan token admin, lalu **Tenant baru**. Token owner yang muncul dipakai untuk masuk ke dashboard (langkah 4).
+   Cara lama lewat baris perintah (opsional): siapkan database sekali (ganti `USER` dengan nama pengguna Mac Anda, yang menjadi superuser bawaan Postgres.app):
    ```
    export DATABASE_URL=postgres://USER@localhost:5432/posguard
    npm run api:setup -- --tenant usahaku --tenant-name "Usahaku" --outlet senopati --outlet-name "Kopi Senopati" --terminals pos-1,pos-2

@@ -15,8 +15,9 @@ COPY packages/rules/package.json packages/rules/
 COPY packages/sim/package.json packages/sim/
 COPY apps/api/package.json apps/api/
 COPY apps/dashboard/package.json apps/dashboard/
+COPY apps/admin/package.json apps/admin/
 COPY apps/pos/package.json apps/pos/
-RUN npm ci --workspace=@pos/api --workspace=@pos/dashboard --include-workspace-root
+RUN npm ci --workspace=@pos/api --workspace=@pos/dashboard --workspace=@pos/admin --include-workspace-root
 
 # ---- API ----
 FROM node:22-bookworm-slim AS api
@@ -51,3 +52,21 @@ EXPOSE 3001
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
   CMD node -e "fetch('http://127.0.0.1:3001/login').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 CMD ["npm", "run", "start", "-w", "@pos/dashboard"]
+
+# ---- konsol admin platform: build ----
+FROM deps AS admin-build
+COPY tsconfig.json ./
+COPY apps/admin ./apps/admin
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build -w @pos/admin
+
+# ---- konsol admin platform: jalan ----
+FROM node:22-bookworm-slim AS admin
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
+COPY --from=admin-build --chown=node:node /app ./
+USER node
+EXPOSE 3003
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:3003/login').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+CMD ["npm", "run", "start", "-w", "@pos/admin"]

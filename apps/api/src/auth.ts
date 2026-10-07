@@ -22,12 +22,18 @@ export interface ApiAuth {
   role: ApiRole;
 }
 
-export type Auth = DeviceAuth | ApiAuth;
+/** Admin platform (konsol admin). Bukan pengguna tenant: tidak bisa memakai endpoint tenant, dan sebaliknya. */
+export interface AdminAuth {
+  kind: 'admin';
+  adminId: string;
+}
+
+export type Auth = DeviceAuth | ApiAuth | AdminAuth;
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
-/** Token acak dengan prefiks: `dev_` untuk perangkat, `api_` untuk pengguna dashboard. Hanya hash-nya yang disimpan. */
-export function newToken(prefix: 'dev' | 'api'): string {
+/** Token acak dengan prefiks: `dev_` perangkat, `api_` pengguna dashboard tenant, `adm_` admin platform. Hanya hash-nya yang disimpan. */
+export function newToken(prefix: 'dev' | 'api' | 'adm'): string {
   return `${prefix}_${randomBytes(24).toString('base64url')}`;
 }
 
@@ -68,7 +74,7 @@ export class AuthGuard implements CanActivate {
     }
     if (token.startsWith('api_')) {
       const r = await this.db.admin.query<{ tenant_id: string; user_id: string; role: ApiRole }>(
-        'select tenant_id, user_id, role from api_token where token_hash = $1',
+        'select tenant_id, user_id, role from api_token where token_hash = $1 and revoked_at is null',
         [hash],
       );
       const a = r.rows[0];
@@ -76,8 +82,20 @@ export class AuthGuard implements CanActivate {
       req.auth = { kind: 'api', tenantId: a.tenant_id, userId: a.user_id, role: a.role };
       return true;
     }
+    if (token.startsWith('adm_')) {
+      const r = await this.db.admin.query<{ id: string }>('select id from platform_admin where token_hash = $1 and revoked_at is null', [hash]);
+      const a = r.rows[0];
+      if (!a) throw new UnauthorizedException('token tidak dikenal');
+      req.auth = { kind: 'admin', adminId: a.id };
+      return true;
+    }
     throw new UnauthorizedException('token tidak dikenal');
   }
+}
+
+export function requireAdmin(req: AuthedRequest): AdminAuth {
+  if (req.auth?.kind !== 'admin') throw new ForbiddenException('endpoint ini hanya untuk admin platform');
+  return req.auth;
 }
 
 export function requireDevice(req: AuthedRequest): DeviceAuth {

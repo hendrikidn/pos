@@ -26,6 +26,7 @@
   },
   "scripts": {
     "setup": "tsx src/setup.ts",
-    "start": "tsx src/main.ts"
+    "start": "tsx src/main.ts",
+    "admin": "tsx src/admin-token.ts"
   }
 }

@@ -6,9 +6,11 @@ PostgreSQL, API, dan dashboard berjalan dengan Docker Compose, terpisah dari sit
 Internet ──HTTPS──► web server yang SUDAH ada (80/443)
                       ├─ dolanyu.com                 → proyek lama (tidak diubah)
                       ├─ goldenlamian.dolanyu.com    → proyek lama (tidak diubah)
-                      └─ pos.dolanyu.com
-                           ├─ /v1/*, /healthz ─► 127.0.0.1:18081 ─► API ──┐
-                           └─ lainnya ─────────► 127.0.0.1:18082 ─► Dashboard
+                      ├─ pos.dolanyu.com              (untuk owner tenant, sensor, terminal POS)
+                      │    ├─ /v1/*, /healthz ─► 127.0.0.1:18081 ─► API ──┐
+                      │    └─ lainnya ─────────► 127.0.0.1:18082 ─► Dashboard owner
+                      └─ pos-admin.dolanyu.com        (untuk Anda sebagai admin platform)
+                           └─ semua ───────────► 127.0.0.1:18083 ─► Konsol admin ─► API
                                                                    PostgreSQL (internal Docker, tanpa port)
 ```
 
@@ -21,7 +23,7 @@ Internet ──HTTPS──► web server yang SUDAH ada (80/443)
 | Port 80/443 | **Tidak** | POS tidak membukanya; web server lama yang memakai |
 | Port 3000/3001 (Node) | **Tidak** | Hanya ada di dalam jaringan Docker POS, tidak dipublikasikan ke host |
 | Port 5432 (PostgreSQL) | **Tidak** | Database POS tidak punya port yang dipublikasikan; PostgreSQL proyek lain di host tidak tersentuh |
-| Port 18081, 18082 | Jarang | Satu-satunya port POS di host, hanya di `127.0.0.1`. Cek dulu (langkah 0); ubah di `.env` bila terpakai |
+| Port 18081, 18082, 18083 | Jarang | Satu-satunya port POS di host, hanya di `127.0.0.1`. Cek dulu (langkah 0); ubah di `.env` bila terpakai |
 | Nama container/volume/jaringan | **Tidak** | Semua berawalan `posguard_` / `posguard-` (`name: posguard`) |
 | Docker | Perhatikan | Bila Docker belum terpasang, memasangnya mengubah aturan `iptables`. Biasanya aman, tapi lakukan di jam sepi |
 | RAM/CPU | Mungkin | Build image dashboard butuh RAM besar sesaat; lihat bagian Troubleshooting |
@@ -29,12 +31,12 @@ Internet ──HTTPS──► web server yang SUDAH ada (80/443)
 ## 0. Periksa kondisi VPS (hanya membaca)
 
 ```
-sudo ss -tlnp | grep -E ':(80|443|3000|3001|5432|18081|18082)\b'    # siapa memakai port
+sudo ss -tlnp | grep -E ':(80|443|3000|3001|3003|5432|18081|18082|18083)\b'    # siapa memakai port
 sudo systemctl is-active nginx caddy apache2                          # web server mana yang aktif
 docker --version 2>&1; docker ps 2>&1 | head                          # Docker sudah ada? proyek lama pakai Docker?
 free -h; df -h /                                                      # RAM dan disk
 ```
-Dari sini Anda tahu web server mana yang dipakai (nginx atau Caddy; bila Apache atau Traefik, beri tahu saya dan konfigurasinya saya sesuaikan) dan apakah port 18081/18082 kosong.
+Dari sini Anda tahu web server mana yang dipakai (nginx atau Caddy; bila Apache atau Traefik, beri tahu saya dan konfigurasinya saya sesuaikan) dan apakah port 18081–18083 kosong.
 
 ## 1. Arahkan DNS
 
@@ -43,6 +45,7 @@ Di pengelola DNS `dolanyu.com`, tambahkan record (record situs lama jangan diuba
 | Jenis | Nama | Nilai |
 |---|---|---|
 | A | `pos` | IP publik VPS (sama dengan situs lain) |
+| A | `pos-admin` | IP publik VPS yang sama (untuk konsol admin platform) |
 
 Cek dari komputer Anda: `dig +short pos.dolanyu.com` harus IP VPS.
 
@@ -95,7 +98,7 @@ nano .env
 Di `.env`:
 - `DOMAIN=pos.dolanyu.com`
 - `POSTGRES_PASSWORD=` isi dengan hasil `openssl rand -hex 24`
-- `API_PORT` dan `DASHBOARD_PORT`: biarkan 18081/18082 kecuali bentrok.
+- `API_PORT`, `DASHBOARD_PORT`, `ADMIN_PORT`: biarkan 18081/18082/18083 kecuali bentrok.
 - Opsional: `CORS_ORIGINS` dan `WHATSAPP_*`.
 
 Simpan sandi database di pengelola sandi Anda.
@@ -108,9 +111,10 @@ docker compose up -d --build
 ```
 Build pertama 5–10 menit. Lalu:
 ```
-docker compose ps                         # db, api, dashboard: running/healthy
+docker compose ps                         # db, api, dashboard, admin: running/healthy
 curl http://127.0.0.1:18081/healthz       # {"ok":true}
-curl -I http://127.0.0.1:18082/login      # HTTP 200
+curl -I http://127.0.0.1:18082/login      # HTTP 200 (dashboard owner)
+curl -I http://127.0.0.1:18083/login      # HTTP 200 (konsol admin)
 ```
 Migrasi database berjalan otomatis saat API start. Pada tahap ini POS sudah hidup di VPS, tetapi baru bisa diakses dari VPS itu sendiri. Langkah 6 membukanya lewat domain.
 
@@ -158,9 +162,38 @@ sudo certbot --nginx -d pos.dolanyu.com
 ```
 `certbot --nginx` menambahkan bagian HTTPS dan pengalihan otomatis. `nginx -t` dan `reload` tidak memutus situs lama.
 
+### Konsol admin: `pos-admin.dolanyu.com`
+
+Konsol admin berada di domain **terpisah** dari dashboard owner, jadi sesi, cookie, dan alamatnya tidak bercampur dengan pengguna tenant. Buat file nginx kedua:
+```
+sudo tee /etc/nginx/sites-available/pos-admin.dolanyu.com > /dev/null <<'EOF'
+server {
+    listen 80;
+    listen [::]:80;
+    server_name pos-admin.dolanyu.com;
+
+    # Opsional tetapi disarankan: batasi ke IP Anda. Ganti 203.0.113.10 dengan IP publik Anda, lalu hapus tanda #.
+    # allow 203.0.113.10;
+    # deny all;
+
+    location / {
+        proxy_pass http://127.0.0.1:18083;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+sudo ln -s /etc/nginx/sites-available/pos-admin.dolanyu.com /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d pos-admin.dolanyu.com
+```
+Konsol admin tidak meneruskan jalur API apa pun; ia berbicara ke API sendiri lewat jaringan internal Docker.
+
 ### Caddy (bila situs lama memakai Caddy)
 
-Tambahkan blok ini ke Caddyfile yang ada, lalu `sudo systemctl reload caddy`:
+Tambahkan blok ini ke Caddyfile yang ada (dan satu blok `pos-admin.dolanyu.com { reverse_proxy 127.0.0.1:18083 }` untuk konsol admin), lalu `sudo systemctl reload caddy`:
 ```
 pos.dolanyu.com {
 	tls {
@@ -186,18 +219,25 @@ curl https://pos.dolanyu.com/healthz        # {"ok":true}
 ```
 Buka `https://pos.dolanyu.com/login` di browser; harus tanpa peringatan sertifikat. Situs lama harus tetap normal.
 
-## 7. Buat tenant, outlet, dan token owner (sekali, sebagai `posguard`)
+## 7. Buat admin platform pertama, lalu buat tenant dari konsol
 
+**Admin pertama hanya bisa dibuat lewat server** (belum ada siapa pun yang boleh masuk ke konsol). Sebagai `posguard`:
 ```
 cd ~/pos/deploy
-docker compose run --rm api node_modules/.bin/tsx apps/api/src/setup.ts \
-  --tenant usahaku --tenant-name "Usahaku" \
-  --outlet senopati --outlet-name "Kopi Senopati" \
-  --terminals pos-1,pos-2
+docker compose run --rm api node_modules/.bin/tsx apps/api/src/admin-token.ts --id hendrik --name "Hendrik"
 ```
-Token OWNER dicetak **sekali**; simpan di pengelola sandi. Menjalankan perintah lagi aman: tenant dan outlet yang ada dibiarkan dan token OWNER baru terbit (cara memulihkan token yang hilang).
+Token ADMIN (`adm_...`) dicetak **sekali**; simpan di pengelola sandi. Token ini lebih kuat daripada token owner mana pun: ia bisa membuat tenant dan menerbitkan token owner untuk semua tenant.
 
-Buka `https://pos.dolanyu.com`, tempel token OWNER, lalu pasang sensor di **Pengaturan → Perangkat**.
+Buka `https://pos-admin.dolanyu.com`, masuk dengan token admin, lalu **Tenant baru**:
+1. Isi nama tenant, outlet pertama, terminal POS (mis. `pos-1, pos-2`), dan ID owner.
+2. Klik **Buat tenant**. Token owner muncul **sekali**; salin dan berikan ke pemilik usaha.
+3. Pemilik masuk ke `https://pos.dolanyu.com` dengan token itu, lalu menambah staf, menu, dan memasang sensor di Pengaturan.
+
+Dari halaman tenant Anda juga bisa menambah outlet, menerbitkan token owner baru (mis. token hilang), dan mencabut token. Semua tindakan tercatat di `audit_log`.
+
+Token admin hilang: `docker compose run --rm api node_modules/.bin/tsx apps/api/src/admin-token.ts --id hendrik --rotate` (token lama langsung mati).
+
+> Cara lama tanpa konsol (`apps/api/src/setup.ts`, membuat tenant dan token owner dari baris perintah) masih ada sebagai jalan darurat.
 
 ## 8. Menghubungkan sensor dan terminal
 
@@ -253,7 +293,8 @@ Migrasi baru diterapkan otomatis. Data di volume tidak tersentuh. Web server lam
 - HTTPS wajib: token perangkat dan token owner tidak boleh lewat HTTP polos di internet.
 - Nginx/Caddy harus meneruskan `X-Forwarded-For` (sudah di contoh di atas). API memakai `TRUST_PROXY=1` (satu proxy tepercaya) untuk membedakan pemanggil pada pembatas percobaan kode pairing. Bila ada proxy lain di depan (mis. Cloudflare Proxied), jumlahnya perlu disesuaikan.
 - API terhubung sebagai pemilik database, lalu `SET ROLE app_user` untuk isolasi per tenant (RLS). Itu rancangan yang disengaja.
-- Token OWNER setara kunci utama sistem. Simpan di pengelola sandi dan terbitkan ulang bila bocor (ulangi langkah 7).
+- Token OWNER setara kunci utama satu tenant. Token **ADMIN** setara kunci utama seluruh platform: simpan di pengelola sandi, jangan dibagikan, dan terbitkan ulang (`--rotate`) bila bocor.
+- Konsol admin dipisahkan dari dashboard owner: domain berbeda, cookie berbeda (`SameSite=Strict`, sesi 12 jam), dan jenis token berbeda. Token admin ditolak di endpoint tenant dan sebaliknya (403). Pasang pembatasan IP di nginx (contoh di langkah 6) bila IP Anda tetap.
 - Pembatas percobaan kode pairing disimpan di memori API, jadi reset saat API restart.
 
 ## Troubleshooting
@@ -267,6 +308,8 @@ Migrasi baru diterapkan otomatis. Data di volume tidak tersentuh. Web server lam
 | Login dashboard: "asal permintaan tidak sah" | `Host` tidak diteruskan ke dashboard | Pastikan `proxy_set_header Host $host;` ada pada kedua `location` |
 | Login dashboard: "Token tidak dikenal" | Token dari lingkungan lain (demo/Mac) | Pakai token dari langkah 7 |
 | API restart terus | Sandi database di `.env` berubah setelah volume dibuat | Kembalikan sandi lama (sandi hanya dipakai saat volume pertama dibuat) |
+| Login konsol admin: "Token tidak valid" | Memakai token owner (`api_`) | Konsol hanya menerima token admin (`adm_`) |
+| `admin-token.ts`: "admin sudah ada" | ID admin sudah dibuat | Tambahkan `--rotate` untuk token baru |
 | Build gagal / "Killed" | Memori kurang saat build dashboard | Tambah swap 2 GB (`fallocate -l 2G /swapfile`, `mkswap`, `swapon`) atau build saat situs lain sepi |
 | Sensor: koneksi aman (HTTPS) gagal | Sertifikat belum terbit, domain salah, atau proxy Cloudflare aktif | Pastikan `https://pos.dolanyu.com/healthz` terbuka di browser; set DNS `pos` ke DNS only |
 | Sensor: "kode pairing tidak valid" | Kode kedaluwarsa (15 menit) atau sudah dipakai | Buat kode baru di dashboard |

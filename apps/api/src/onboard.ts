@@ -1,4 +1,5 @@
 import { AdminService } from './admin.service';
+import { newToken, sha256 } from './auth';
 import type { Database } from './db/database';
 
 export interface OnboardOptions {
@@ -42,4 +43,21 @@ export async function onboard(db: Database, opts: OnboardOptions): Promise<Onboa
 
   const ownerToken = await admin.createApiToken(opts.tenantId, opts.ownerId, 'OWNER', 'setup');
   return { tenantCreated, outletCreated, ownerToken };
+}
+
+/**
+ * Membuat admin platform pertama (atau menerbitkan ulang token bila hilang, dengan `rotate`). Hanya lewat CLI di server:
+ * admin pertama tidak mungkin dibuat dari konsol karena belum ada yang boleh masuk.
+ */
+export async function createPlatformAdmin(db: Database, opts: { id: string; name: string; rotate?: boolean }): Promise<{ created: boolean; token: string }> {
+  if (!ID_RE.test(opts.id)) throw new Error(`ID admin "${opts.id}" tidak valid: huruf kecil, angka, - atau _ (2–40 karakter)`);
+  const token = newToken('adm');
+  const existing = await db.admin.query('select 1 from platform_admin where id = $1', [opts.id]);
+  if (existing.rowCount) {
+    if (!opts.rotate) throw new Error(`admin "${opts.id}" sudah ada; tambahkan --rotate untuk menerbitkan token baru (token lama dicabut)`);
+    await db.admin.query('update platform_admin set token_hash = $2, revoked_at = null where id = $1', [opts.id, sha256(token)]);
+    return { created: false, token };
+  }
+  await db.admin.query('insert into platform_admin (id, name, token_hash) values ($1, $2, $3)', [opts.id, opts.name, sha256(token)]);
+  return { created: true, token };
 }

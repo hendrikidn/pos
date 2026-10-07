@@ -11,6 +11,8 @@ import { DeviceController } from './device.controller';
 import { DeviceService } from './device.service';
 import { GuardService } from './guard.service';
 import { IncidentService } from './incident.service';
+import { PlatformController } from './platform.controller';
+import { PlatformService } from './platform.service';
 import { PairingService } from './pairing.service';
 import { IngestService } from './ingest.service';
 import { channelFromEnv, NotificationService, type Channel } from './notification.service';
@@ -33,7 +35,7 @@ export class AppModule {
   static forRoot(db: Database, opts: AppOptions = {}): DynamicModule {
     return {
       module: AppModule,
-      controllers: [ApiController, ConfigController, DeviceController],
+      controllers: [ApiController, ConfigController, DeviceController, PlatformController],
       providers: [
         // useFactory, bukan useValue: Nest menyerialisasi metadata modul dinamis untuk membuat token modul,
         // dan objek database (memori WASM) membuat serialisasi itu gagal.
@@ -44,7 +46,7 @@ export class AppModule {
         { provide: NOTIFIER, useFactory: (svc: NotificationService) => opts.notifier ?? svc, inject: [NotificationService] },
         { provide: CLOCK, useFactory: () => opts.clock ?? Date.now },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, IngestService, GuardService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, DeviceService, PairingService,
+        AdminService, IngestService, GuardService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, DeviceService, PairingService, PlatformService,
       ],
       exports: [AdminService, ConfigService],
     };

@@ -58,5 +58,20 @@ services:
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-18082}:3001"
 
+  # Konsol admin platform (membuat tenant dan token owner). UI terpisah dari dashboard owner dan dipasang di domain sendiri.
+  admin:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: admin
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_URL: http://api:3000
+      DASHBOARD_URL: https://${DOMAIN}
+    ports:
+      - "127.0.0.1:${ADMIN_PORT:-18083}:3003"
+
 volumes:
   pgdata:

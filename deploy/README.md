@@ -325,6 +325,8 @@ docker compose start api dashboard
 ```
 Role `app_user` harus ada sebelum pemulihan karena hak aksesnya dirujuk oleh dump.
 
+**Mulai dari kosong (hanya data uji):** `~/pos/deploy/reset-db.sh --admin ID "Nama"` mencadangkan database, menghapus **seluruh** datanya, membuat ulang tabel lewat migrasi, lalu membuat admin platform baru dan mencetak tokennya (simpan, hanya tampil sekali). Skrip meminta Anda mengetik `HAPUS`. Sensor yang sudah dipasang akan menerima 401 dan perlu direset lalu dipairing ulang. **Jangan dijalankan bila sudah ada data pelanggan nyata.** Tanpa `--admin`, buat admin sendiri sesudahnya (lihat langkah pembuatan token admin).
+
 ## 10. Memperbarui versi (sebagai `posguard`)
 
 ```

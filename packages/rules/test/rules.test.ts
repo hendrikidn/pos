@@ -332,3 +332,101 @@ describe('skoring dan insiden', () => {
     expect(inc).toMatchObject({ score: 21, level: 'LOW' });
   });
 });
+
+describe('R6: makan karyawan di luar kuota atau untuk diri sendiri', () => {
+  const meal = (s: Sim, id: string, at: string | number, employee: string, actor = 'budi') =>
+    s.pos({ type: 'order.created', payload: { orderId: id, orderType: 'EMPLOYEE', employeeId: employee } }, at, actor);
+  const r6 = (hits: RuleHit[]) => hits.filter((h) => h.rule === 'R6');
+
+  it('satu makan per orang per hari (kuota bawaan) tidak memicu apa pun', () => {
+    const s = new Sim();
+    meal(s, 'm1', '12:00:00', 'andi');
+    meal(s, 'm2', '12:05:00', 'sari');
+    expect(r6(run(s, '13:00:00'))).toEqual([]);
+  });
+
+  it('makan kedua orang yang sama pada hari yang sama ditandai, yang pertama tidak', () => {
+    const s = new Sim();
+    meal(s, 'm1', '12:00:00', 'andi');
+    meal(s, 'm2', '15:00:00', 'andi');
+    const hits = r6(run(s, '16:00:00'));
+    expect(hits.map((h) => h.orderId)).toEqual(['m2']);
+    expect(hits[0]).toMatchObject({ weight: 25, modalities: ['POS'], actorIds: ['budi', 'andi'] });
+    expect(hits[0]!.note).toContain('ke-2');
+  });
+
+  it('kuota bisa diatur, dan ke-(kuota+1) yang ditandai', () => {
+    const s = new Sim();
+    for (const [i, hm] of ['11:00:00', '12:00:00', '13:00:00'].entries()) meal(s, `m${i}`, hm, 'andi');
+    const hits = evaluateRules({
+      events: s.events, now: s.t('14:00:00'), terminals: [s.terminalId], capabilities: FULL, config: { r6DailyQuota: 2 },
+    }).filter((h) => h.rule === 'R6');
+    expect(hits.map((h) => h.orderId)).toEqual(['m2']);
+  });
+
+  it('orang berbeda punya kuota sendiri-sendiri', () => {
+    const s = new Sim();
+    meal(s, 'm1', '12:00:00', 'andi');
+    meal(s, 'm2', '12:10:00', 'sari');
+    meal(s, 'm3', '12:20:00', 'dewi');
+    expect(r6(run(s, '13:00:00'))).toEqual([]);
+  });
+
+  it('pembuat = penerima ditandai walau baru satu kali', () => {
+    const s = new Sim();
+    meal(s, 'm1', '12:00:00', 'budi', 'budi');
+    const hits = r6(run(s, '13:00:00'));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.note).toBe('dibuat oleh penerimanya sendiri');
+    expect(hits[0]!.actorIds).toEqual(['budi']);
+  });
+
+  it('melebihi kuota sekaligus untuk diri sendiri: satu hit dengan dua alasan, bukan bobot ganda', () => {
+    const s = new Sim();
+    meal(s, 'm1', '12:00:00', 'budi', 'budi');
+    meal(s, 'm2', '14:00:00', 'budi', 'budi');
+    const hits = r6(run(s, '15:00:00'));
+    expect(hits.map((h) => h.orderId)).toEqual(['m1', 'm2']);
+    expect(hits[1]!.note).toMatch(/ke-2.*; dibuat oleh penerimanya sendiri/);
+    expect(hits.every((h) => h.weight === 25)).toBe(true);
+  });
+
+  it('order karyawan yang di-void tidak menghabiskan kuota', () => {
+    const s = new Sim();
+    meal(s, 'm1', '11:00:00', 'andi');
+    s.pos(voidBody('m1'), '11:02:00');
+    meal(s, 'm2', '12:00:00', 'andi');
+    expect(r6(run(s, '13:00:00'))).toEqual([]);
+  });
+
+  it('batas hari mengikuti zona waktu outlet, bukan UTC', () => {
+    const s = new Sim();
+    // 06:30 dan 08:00 WIB: hari yang sama di WIB, tetapi 23:30 (kemarin) dan 01:00 di UTC
+    meal(s, 'm1', '06:30:00', 'andi');
+    meal(s, 'm2', '08:00:00', 'andi');
+    const wib = evaluateRules({ events: s.events, now: s.t('09:00:00'), terminals: [s.terminalId], capabilities: FULL });
+    expect(r6(wib).map((h) => h.orderId)).toEqual(['m2']);
+    const utc = evaluateRules({ events: s.events, now: s.t('09:00:00'), terminals: [s.terminalId], capabilities: FULL, utcOffsetMinutes: 0 });
+    expect(r6(utc)).toEqual([]);
+  });
+
+  it('hari berbeda: makan kemarin tidak dihitung ke kuota hari ini', () => {
+    const s = new Sim();
+    meal(s, 'm1', s.t('20:00:00') - 24 * 3_600_000, 'andi');
+    meal(s, 'm2', '12:00:00', 'andi');
+    expect(r6(run(s, '13:00:00'))).toEqual([]);
+  });
+
+  it('order biasa (bukan karyawan) tidak pernah memicu R6', () => {
+    const s = new Sim();
+    for (let i = 0; i < 4; i++) s.cashOrder(`o${i}`, `1${i}:00:00`, `1${i}:00:30`);
+    expect(r6(run(s, '15:00:00'))).toEqual([]);
+  });
+
+  it('satu hit R6 berbobot 25 saja tetap LOW; digabung dengan void setelah produksi naik ke insiden yang sama', () => {
+    const s = new Sim();
+    meal(s, 'm1', '12:00:00', 'budi', 'budi');
+    const [inc] = buildIncidents(run(s, '13:00:00'));
+    expect(inc).toMatchObject({ score: 25, level: 'LOW', orderIds: ['m1'] });
+  });
+});

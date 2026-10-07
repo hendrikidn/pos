@@ -10,10 +10,10 @@ Tahap 1 (rekonsiliasi non-tunai), tahap 2 (event log, kunci order, aturan real-t
 |---|---|
 | `packages/domain` | Tipe kanonik (`BankTxn`, `PosPayment`), deduplikasi |
 | `packages/bank-parsers` | Parser BCA, BRI, Mandiri (format mock per transaksi) + slip settlement Mandiri (format asli, ringkasan batch) |
-| `packages/reconciliation` | Pencocokan POS ↔ bank per transaksi (R7, R8, R26, R10) dan per batch settlement (R27, R28) |
+| `packages/reconciliation` | Pencocokan POS ↔ bank per transaksi (R7, R8, R9, R26, R10) dan per batch settlement (R27, R28) |
 | `packages/events` | Tipe event, rantai hash per perangkat, deteksi event hilang/diubah/jam bergeser |
 | `packages/order` | State machine order dan kunci void, diskon (approver, owner, ambang) |
-| `packages/rules` | Aturan real-time R1–R5, R5b, R18, R21–R25, pengelompokan insiden, skor dan level |
+| `packages/rules` | Aturan real-time R1–R6, R5b, R18, R21–R25, aturan pola R14, pengelompokan insiden, skor dan level |
 | `packages/sim` | Simulator aliran event outlet untuk test dan demo |
 | `apps/api` | Backend NestJS + PostgreSQL: ingest event, rekonsiliasi bank, insiden, review, notifikasi |
 | `apps/dashboard` | Dashboard owner (Next.js): daftar insiden, bukti, jendela CCTV, review |

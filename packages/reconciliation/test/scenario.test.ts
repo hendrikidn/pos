@@ -195,3 +195,99 @@ describe('perilaku engine', () => {
     expect(r.r10[0]).toMatchObject({ posGross: 50_000, bankGross: 0, explained: 50_000, residual: 0, flagged: false });
   });
 });
+
+describe('R9: kesesuaian dengan registri EDC', () => {
+  const base = (over: Partial<PosPayment> = {}): PosPayment => ({
+    orderId: 'o1', paidAt: Date.parse('2026-10-01T10:00:00+07:00'), tid: 'T1',
+    method: 'QRIS', amount: 50000, approvalCode: 'A1', ...over,
+  });
+  const bankTxn = (over: Partial<BankTxn> = {}): BankTxn => ({
+    bank: 'BCA', mid: 'M', tid: 'T1', txnDate: '2026-10-01', txnAt: Date.parse('2026-10-01T10:00:30+07:00'),
+    channel: 'QRIS', amount: 50000, mdr: null, netAmount: null, approvalCode: 'A1', rrn: null,
+    status: 'SUCCESS', settlementBatchId: null, settledAt: null, sourceRow: 1, ...over,
+  });
+  const end = Date.parse('2026-10-01T23:59:59+07:00');
+  const cover = { T1: end, T2: end };
+  const r9 = (r: ReturnType<typeof reconcile>) => r.findings.filter((f) => f.rule === 'R9');
+
+  it('TID di registri dan cocok di bank: tidak ada R9', () => {
+    const r = reconcile({ posPayments: [base()], bankTxns: [bankTxn()], coverage: cover, knownTids: ['T1'] });
+    expect(r.findings).toEqual([]);
+  });
+
+  it('TID tidak ada di registri outlet → R9, walau transaksinya cocok di bank', () => {
+    const r = reconcile({ posPayments: [base()], bankTxns: [bankTxn()], coverage: cover, knownTids: ['T2'] });
+    expect(r.findings).toEqual([
+      { rule: 'R9', orderId: 'o1', tid: 'T1', amount: 50000, reasons: ['TID_UNREGISTERED'] },
+    ]);
+  });
+
+  it('tanpa knownTids pemeriksaan registri dilewati (perilaku lama)', () => {
+    const r = reconcile({ posPayments: [base()], bankTxns: [bankTxn()], coverage: cover });
+    expect(r9(r)).toEqual([]);
+  });
+
+  it('TID tak terdaftar yang juga tak ada di bank: R9 dan R7 keduanya muncul', () => {
+    const r = reconcile({ posPayments: [base({ approvalCode: null })], bankTxns: [], coverage: cover, knownTids: ['T2'] });
+    expect(r.findings.map((f) => f.rule).sort()).toEqual(['R7', 'R9']);
+  });
+
+  it('kode approval, nominal, dan waktu cocok di TID lain → satu R9, bukan R7 + R26', () => {
+    const r = reconcile({
+      posPayments: [base()], bankTxns: [bankTxn({ tid: 'T2' })], coverage: cover, knownTids: ['T1', 'T2'],
+    });
+    expect(r.findings).toEqual([
+      { rule: 'R9', orderId: 'o1', tid: 'T1', amount: 50000, reasons: ['APPROVAL_OTHER_TID'], bankIndex: 0, bankTid: 'T2' },
+    ]);
+    expect(r.matches).toHaveLength(1);
+  });
+
+  it('R10 tidak menilai ulang selisih yang sudah dijelaskan R9 (di kedua TID)', () => {
+    const r = reconcile({
+      posPayments: [base()], bankTxns: [bankTxn({ tid: 'T2' })], coverage: cover, knownTids: ['T1', 'T2'],
+    });
+    expect(r.r10).toEqual([
+      expect.objectContaining({ tid: 'T1', posGross: 50_000, bankGross: 0, residual: 0, flagged: false }),
+      expect.objectContaining({ tid: 'T2', posGross: 0, bankGross: 50_000, residual: 0, flagged: false }),
+    ]);
+  });
+
+  it('kode approval sama di TID lain tetapi nominal berbeda: bukan R9 (bisa kebetulan sama)', () => {
+    const r = reconcile({
+      posPayments: [base()], bankTxns: [bankTxn({ tid: 'T2', amount: 30000 })], coverage: cover, knownTids: ['T1', 'T2'],
+    });
+    expect(r9(r)).toEqual([]);
+    expect(r.findings.map((f) => f.rule).sort()).toEqual(['R26', 'R7']);
+  });
+
+  it('kode approval sama di TID lain tetapi jauh di luar jendela waktu: bukan R9', () => {
+    const r = reconcile({
+      posPayments: [base()],
+      bankTxns: [bankTxn({ tid: 'T2', txnAt: Date.parse('2026-10-01T14:00:00+07:00') })],
+      coverage: cover, knownTids: ['T1', 'T2'],
+    });
+    expect(r9(r)).toEqual([]);
+  });
+
+  it('laporan bank tanpa jam: dicocokkan lewat tanggal yang sama', () => {
+    const r = reconcile({
+      posPayments: [base()], bankTxns: [bankTxn({ tid: 'T2', txnAt: null })], coverage: cover, knownTids: ['T1', 'T2'],
+    });
+    expect(r9(r)).toHaveLength(1);
+    const other = reconcile({
+      posPayments: [base()], bankTxns: [bankTxn({ tid: 'T2', txnAt: null, txnDate: '2026-09-30' })], coverage: cover, knownTids: ['T1', 'T2'],
+    });
+    expect(r9(other)).toEqual([]);
+  });
+
+  it('transaksi bank yang sudah dipakai pembayaran lain di TID-nya tidak diklaim R9', () => {
+    const r = reconcile({
+      posPayments: [base({ orderId: 'o1', tid: 'T1' }), base({ orderId: 'o2', tid: 'T2' })],
+      bankTxns: [bankTxn({ tid: 'T2' })],
+      coverage: cover, knownTids: ['T1', 'T2'],
+    });
+    // o2 cocok bersih di T2; o1 punya kode approval yang sama tetapi transaksinya sudah terpakai
+    expect(r9(r)).toEqual([]);
+    expect(r.findings.map((f) => `${f.rule}:${'orderId' in f ? f.orderId : ''}`)).toEqual(['R7:o1']);
+  });
+});

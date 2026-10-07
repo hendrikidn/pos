@@ -46,6 +46,13 @@ export interface RuleConfig {
   linkPadMs: number;
   discountMaxPercent: number;
   discountMaxAmount: number;
+  /** R6: jumlah makan karyawan gratis per orang per hari lokal. Yang ke-(kuota+1) dan seterusnya ditandai. */
+  r6DailyQuota: number;
+  /** R14: selisih blind count (rupiah, mutlak) yang masih ditoleransi. */
+  r14ToleranceAmount: number;
+  /** R14: ditandai bila shift menyimpang lebih dari ini dalam `r14WindowMs`. */
+  r14MaxShifts: number;
+  r14WindowMs: number;
   weights: Record<string, number>;
 }
 
@@ -62,8 +69,12 @@ export const DEFAULT_CONFIG: RuleConfig = {
   linkPadMs: 15_000,
   discountMaxPercent: 15,
   discountMaxAmount: 50_000,
+  r6DailyQuota: 1,
+  r14ToleranceAmount: 5_000,
+  r14MaxShifts: 3,
+  r14WindowMs: 7 * 24 * 3_600_000,
   weights: {
-    R1: 15, R1_DRAWER: 30, R2: 30, R2_PROXY: 20, R3: 35, R4: 40, R5: 20, R5B: 25,
+    R1: 15, R1_DRAWER: 30, R2: 30, R2_PROXY: 20, R3: 35, R4: 40, R5: 20, R5B: 25, R6: 25, R14: 20,
     R18: 30, R18_APPROVED: 10, R21: 30, R22: 30, R23: 20, R24: 40, R25: 25, R29_TIME: 30, R29_DEBUG: 15, R29_ROOT: 40,
   },
 };
@@ -76,6 +87,8 @@ export interface RuleInput {
   terminals: string[];
   capabilities: Capabilities;
   config?: Partial<RuleConfig>;
+  /** Offset zona waktu outlet (menit) untuk batas "hari" pada kuota R6. Default WIB. */
+  utcOffsetMinutes?: number;
   /** Masalah integritas yang hanya diketahui server (mis. tanda tangan perangkat tidak sah). */
   extraIntegrity?: { deviceId: string; seq: number; kind: string; at: number; actorId?: string | null }[];
 }

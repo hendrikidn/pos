@@ -1,12 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { PosEvent } from '@pos/events';
 import {
-  buildIncidents, evaluateRules, type Capabilities, type Incident, type RuleHit,
+  buildIncidents, DEFAULT_CONFIG, evaluatePatternRules, evaluateRules, type Capabilities, type Incident, type RuleHit,
 } from '@pos/rules';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 
-/** Aturan dievaluasi atas event 72 jam terakhir. Aturan pola mingguan (Kelas 3) memakai jalur sendiri nanti. */
+/**
+ * Aturan dievaluasi atas event 72 jam terakhir. Aturan pola (Kelas 3, mis. R14) membaca riwayat lebih panjang
+ * lewat `evaluatePatternRules`, tetapi hanya melaporkan hit di jendela yang sama agar insiden tidak digandakan.
+ */
 export const LOOKBACK_MS = 72 * 3_600_000;
 
 export interface EventRow {
@@ -52,8 +55,8 @@ export class GuardService {
   async evaluate(tenantId: string, outletId: string, now = Date.now()): Promise<EvaluateResult> {
     return this.db.tenantTx(tenantId, async (q) => {
       const outlet = (
-        await q.query<{ capabilities: Capabilities; terminals: string[] }>(
-          'select capabilities, terminals from outlet where id = $1',
+        await q.query<{ capabilities: Capabilities; terminals: string[]; utc_offset_minutes: number }>(
+          'select capabilities, terminals, utc_offset_minutes from outlet where id = $1',
           [outletId],
         )
       ).rows[0];
@@ -79,8 +82,19 @@ export class GuardService {
         await q.query<{ hit: RuleHit }>('select hit from bank_finding where outlet_id = $1 and at_ms >= $2', [outletId, from])
       ).rows.map((r) => r.hit);
 
+      const cashCounts = (
+        await q.query<EventRow>(
+          `select ${EVENT_COLUMNS} from event where outlet_id = $1 and type = 'cash.counted' and device_time_ms >= $2 order by device_id, seq`,
+          [outletId, from - DEFAULT_CONFIG.r14WindowMs],
+        )
+      ).rows.map(rowToEvent);
+
       const hits = [
-        ...evaluateRules({ events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity }),
+        ...evaluateRules({
+          events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity,
+          utcOffsetMinutes: outlet.utc_offset_minutes,
+        }),
+        ...evaluatePatternRules({ events: cashCounts, emitFrom: from }),
         ...bankHits,
       ];
       const incidents = buildIncidents(hits).map((i) => ({ ...i, id: `${outletId}:${i.id}` }));

@@ -18,8 +18,12 @@ interface Link {
 const POS_ONLY: Modality[] = ['POS'];
 const PHYSICAL_POS: Modality[] = ['PHYSICAL', 'POS'];
 
+function localDate(ms: number, offsetMinutes: number): string {
+  return new Date(ms + offsetMinutes * 60_000).toISOString().slice(0, 10);
+}
+
 /**
- * Mengevaluasi aturan Kelas 1 (R1–R5, R18, R21–R25) terhadap aliran event satu outlet.
+ * Mengevaluasi aturan Kelas 1 (R1–R6, R18, R21–R25, R29) terhadap aliran event satu outlet.
  * Deterministik: input yang sama menghasilkan hit yang sama.
  */
 export function evaluateRules(input: RuleInput): RuleHit[] {
@@ -227,6 +231,28 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
         }
       }
     }
+  }
+
+  // ---- R6: order karyawan di luar kuota harian, atau dibuat oleh penerimanya sendiri ----
+  // Order yang di-void tidak dihitung ke kuota. Jendela evaluasi hanya memuat sebagian hari paling awal,
+  // jadi hitungan bisa kurang (terlewat), tidak pernah lebih (tuduhan palsu).
+  const utcOffset = input.utcOffsetMinutes ?? 420;
+  const mealsPerDay = new Map<string, number>();
+  for (const o of orders) {
+    const employeeId = o.created.payload.employeeId;
+    if (o.orderType !== 'EMPLOYEE' || o.voided || !employeeId) continue;
+    const dayKey = `${employeeId}|${localDate(o.createdAt, utcOffset)}`;
+    const nth = (mealsPerDay.get(dayKey) ?? 0) + 1;
+    mealsPerDay.set(dayKey, nth);
+    const reasons: string[] = [];
+    if (nth > cfg.r6DailyQuota) reasons.push(`makan karyawan ke-${nth} hari ini untuk ${employeeId} (kuota ${cfg.r6DailyQuota})`);
+    if (o.created.actorId === employeeId) reasons.push('dibuat oleh penerimanya sendiri');
+    if (reasons.length === 0) continue;
+    hit({
+      rule: 'R6', key: `R6:${o.id}`, weight: w('R6'), modalities: POS_ONLY, terminalId: o.terminalId, orderId: o.id,
+      actorIds: [...new Set([o.created.actorId, employeeId].filter((x): x is string => !!x))],
+      at: o.createdAt, windowStart: o.createdAt, windowEnd: o.endAt, note: reasons.join('; '),
+    });
   }
 
   // ---- R1: presence lama tanpa order ----

@@ -15,6 +15,11 @@ export interface ReconcileInput {
   /** TID → batas cakupan laporan (epoch ms). Tanpa entri berarti belum ada laporan untuk TID itu. */
   coverage: Record<string, number>;
   options?: ReconcileOptions;
+  /**
+   * TID yang terdaftar di registri EDC outlet. Bila diberikan, pembayaran dengan TID di luar daftar ini
+   * ditandai R9. Tanpa ini, pemeriksaan registri dilewati.
+   */
+  knownTids?: string[];
 }
 
 export type MatchLevel = 'APPROVAL' | 'TIME' | 'DAY';
@@ -25,11 +30,19 @@ export interface Match {
   level: MatchLevel;
 }
 
+export type R9Reason = 'TID_UNREGISTERED' | 'APPROVAL_OTHER_TID';
+
 export type Finding =
   /** R7: POS mencatat non-tunai, tidak ada di laporan bank yang sudah mencakup waktunya. */
   | { rule: 'R7'; orderId: string; tid: string; amount: number }
   /** R8: nominal di bank lebih kecil dari nominal di POS. */
   | { rule: 'R8'; orderId: string; tid: string; posAmount: number; bankAmount: number; bankIndex: number }
+  /**
+   * R9: ketidaksesuaian dengan registri EDC. `TID_UNREGISTERED`: TID yang dipilih kasir tidak ada di registri outlet.
+   * `APPROVAL_OTHER_TID`: kode approval, nominal, dan waktu cocok dengan transaksi bank di TID lain
+   * (`bankIndex`, `bankTid`). Pasangan ini dianggap cocok, jadi tidak ikut menjadi R7 dan R26.
+   */
+  | { rule: 'R9'; orderId: string; tid: string; amount: number; reasons: R9Reason[]; bankIndex?: number; bankTid?: string }
   /** Transaksi bank tanpa pembayaran POS (kandidat R26). */
   | { rule: 'R26'; bankIndex: number; tid: string; amount: number; approvalCode: string | null }
   /** Pembayaran terjadi setelah batas cakupan laporan; dievaluasi ulang saat laporan berikutnya. */
@@ -42,7 +55,7 @@ export interface DailyTotal {
   date: string;
   posGross: number;
   bankGross: number;
-  /** Bagian selisih (POS − bank) yang sudah dijelaskan oleh temuan R7, R8, dan R26. */
+  /** Bagian selisih (POS − bank) yang sudah dijelaskan oleh temuan R7, R8, R9 (lintas TID), dan R26. */
   explained: number;
   /** Selisih yang tidak dijelaskan temuan lain. */
   residual: number;
@@ -78,6 +91,7 @@ function localDate(ms: number, offsetMinutes: number): string {
  *     sehingga dua pembayaran bernominal sama yang berdekatan tidak tertukar.
  *  3. TID + nominal + tanggal, untuk bank yang laporannya tidak mencantumkan jam
  *  4. Nominal bank lebih kecil di TID dan jendela waktu yang sama → R8
+ *  5. Kode approval + nominal + waktu cocok di TID lain → R9 (dianggap cocok)
  * Sisa pembayaran POS: pending (di luar cakupan laporan) atau R7. Sisa transaksi bank: R26.
  */
 export function reconcile(input: ReconcileInput): ReconcileResult {
@@ -159,6 +173,41 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
     });
   }
 
+  // R9: TID di luar registri, dan kode approval yang cocok dengan transaksi di TID lain.
+  // Pasangan lintas TID memakai nominal dan waktu yang sama (kode approval 6 digit saja bisa kebetulan sama).
+  const r9 = new Map<number, { reasons: R9Reason[]; bankIndex?: number }>();
+  const flag = (pi: number, reason: R9Reason, bankIndex?: number) => {
+    const cur = r9.get(pi) ?? { reasons: [] };
+    cur.reasons.push(reason);
+    if (bankIndex !== undefined) cur.bankIndex = bankIndex;
+    r9.set(pi, cur);
+  };
+  if (input.knownTids) {
+    const known = new Set(input.knownTids);
+    pos.forEach((p, pi) => {
+      if (!known.has(p.tid)) flag(pi, 'TID_UNREGISTERED');
+    });
+  }
+  pos.forEach((p, pi) => {
+    if (usedPos.has(pi) || !p.approvalCode) return;
+    const day = localDate(p.paidAt, offset);
+    const bi = bank.findIndex(
+      (b, i) =>
+        eligible(i) && b.approvalCode === p.approvalCode && b.tid !== p.tid && b.amount === p.amount &&
+        (b.txnAt !== null ? Math.abs(b.txnAt - p.paidAt) <= windowMs : b.txnDate === day),
+    );
+    if (bi < 0) return;
+    take(pi, bi, 'APPROVAL');
+    flag(pi, 'APPROVAL_OTHER_TID', bi);
+  });
+  for (const [pi, v] of r9) {
+    const p = pos[pi]!;
+    findings.push({
+      rule: 'R9', orderId: p.orderId, tid: p.tid, amount: p.amount, reasons: v.reasons,
+      ...(v.bankIndex !== undefined ? { bankIndex: v.bankIndex, bankTid: bank[v.bankIndex]!.tid } : {}),
+    });
+  }
+
   // Sisa pembayaran POS
   const excluded = new Set<number>(); // tidak ikut R10 karena belum bisa dinilai
   pos.forEach((p, pi) => {
@@ -207,6 +256,12 @@ export function reconcile(input: ReconcileInput): ReconcileResult {
       if (p) bucket(p.tid, localDate(p.paidAt, offset)).explained += f.posAmount - f.bankAmount;
     } else if (f.rule === 'R26') {
       const b = bank[f.bankIndex]!;
+      bucket(b.tid, b.txnDate).explained -= b.amount;
+    } else if (f.rule === 'R9' && f.bankIndex !== undefined) {
+      // Seperti R7 di TID pilihan kasir dan R26 di TID bank: kedua selisih itu sudah dijelaskan R9.
+      const p = posByOrder.get(f.orderId);
+      const b = bank[f.bankIndex]!;
+      if (p) bucket(p.tid, localDate(p.paidAt, offset)).explained += p.amount;
       bucket(b.tid, b.txnDate).explained -= b.amount;
     }
   }

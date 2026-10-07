@@ -8,7 +8,7 @@ import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { EVENT_COLUMNS, LOOKBACK_MS, rowToEvent, type EventRow } from './guard.service';
 
-const WEIGHTS = { R7: 35, R8: 35, R26: 30, R10: 30 } as const;
+const WEIGHTS = { R7: 35, R8: 35, R9: 30, R26: 30, R10: 30 } as const;
 
 export interface ImportResult {
   reportId: number;
@@ -126,7 +126,11 @@ export class BankService {
         .rows.map((r) => [r.tid, r.coverage_end_ms]),
     );
 
-    const result = reconcile({ posPayments, bankTxns, coverage, options: { utcOffsetMinutes } });
+    const edcs = (await q.query<{ edcs: { tid: string }[] }>('select edcs from outlet where id = $1', [outletId])).rows[0]?.edcs ?? [];
+
+    const result = reconcile({
+      posPayments, bankTxns, coverage, options: { utcOffsetMinutes }, knownTids: edcs.map((e) => e.tid),
+    });
     const hits = this.toHits(outletId, result.findings, result.r10, info, bankTxns);
 
     await q.query("delete from bank_finding where outlet_id = $1 and at_ms >= $2 and source = 'TXN'", [outletId, from]);
@@ -158,6 +162,19 @@ export class BankService {
           note: f.rule === 'R7'
             ? `pembayaran ${f.amount} tercatat non-tunai di POS tetapi tidak ada di laporan bank (TID ${f.tid})`
             : `nominal POS ${f.posAmount}, nominal bank ${f.bankAmount} (selisih ${f.posAmount - f.bankAmount})`,
+        });
+      } else if (f.rule === 'R9') {
+        const p = info.get(f.orderId);
+        const at = p?.paidAt ?? 0;
+        const why = f.reasons.map((r) =>
+          r === 'TID_UNREGISTERED'
+            ? `TID ${f.tid} tidak ada di registri EDC outlet`
+            : `kode approval, nominal, dan waktu cocok dengan transaksi di TID ${f.bankTid}, bukan TID ${f.tid} yang dipilih kasir`,
+        );
+        hits.push({
+          ...base, rule: 'R9', key: `R9:${f.orderId}`, weight: WEIGHTS.R9, terminalId: p?.terminalId ?? null,
+          orderId: f.orderId, actorIds: p?.actorId ? [p.actorId] : [], at, windowStart: at, windowEnd: at,
+          note: `pembayaran ${f.amount}: ${why.join('; ')}`,
         });
       } else if (f.rule === 'R26') {
         const t = bank[f.bankIndex]!;

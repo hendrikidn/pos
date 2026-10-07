@@ -325,7 +325,38 @@ docker compose start api dashboard
 ```
 Role `app_user` harus ada sebelum pemulihan karena hak aksesnya dirujuk oleh dump.
 
-**Mulai dari kosong (hanya data uji):** `~/pos/deploy/reset-db.sh --admin ID "Nama"` mencadangkan database, menghapus **seluruh** datanya, membuat ulang tabel lewat migrasi, lalu membuat admin platform baru dan mencetak tokennya (simpan, hanya tampil sekali). Skrip meminta Anda mengetik `HAPUS`. Sensor yang sudah dipasang akan menerima 401 dan perlu direset lalu dipairing ulang. **Jangan dijalankan bila sudah ada data pelanggan nyata.** Tanpa `--admin`, buat admin sendiri sesudahnya (lihat langkah pembuatan token admin).
+### Bersihkan database (mulai dari kosong)
+
+Hanya untuk data uji. **Jangan dijalankan bila sudah ada data pelanggan nyata.** Menghapus **seluruh** data: tenant, outlet, perangkat, pengguna, pesanan, event, insiden, dan admin platform.
+
+```
+cd ~/pos && git pull
+~/pos/deploy/reset-db.sh --admin hendrik "Hendrik"
+```
+
+Skrip mencadangkan database ke `~/backups` (bila cadangan gagal, tidak ada yang dihapus), meminta Anda mengetik `HAPUS`, membuat ulang database dan tabel lewat migrasi, lalu membuat admin platform dan mencetak tokennya. **Simpan token itu; hanya tampil sekali.**
+
+| Opsi | Fungsi |
+|---|---|
+| `--admin ID "Nama"` | Buat admin platform setelah reset. Tanpa ini, tidak ada admin dan halaman admin tidak bisa dimasuki. |
+| `--no-backup` | Lewati cadangan (data benar-benar hilang). |
+| `--yes` | Lewati pertanyaan konfirmasi. |
+
+Sesudahnya: masuk ke halaman admin dengan token, buat tenant baru, lalu buat kode pairing untuk sensor. Sensor yang sudah dipasang akan menerima 401 (`DITOLAK 401`) dan perlu direset (tahan BOOT 10 detik atau cabut-colok daya 5 kali), lalu dipairing ulang.
+
+### Buat atau putar (rotate) token admin
+
+Jalankan di server dari folder `deploy/`:
+
+```
+# Admin baru
+docker compose run --rm api node_modules/.bin/tsx apps/api/src/admin-token.ts --id hendrik --name "Hendrik"
+
+# Token hilang atau perlu diganti: token lama langsung mati
+docker compose run --rm api node_modules/.bin/tsx apps/api/src/admin-token.ts --id hendrik --rotate
+```
+
+Token hanya tampil sekali. Bila muncul "admin sudah ada", ID itu sudah terdaftar: pakai `--rotate`.
 
 ## 10. Memperbarui versi (sebagai `posguard`)
 

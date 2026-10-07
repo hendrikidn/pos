@@ -52,7 +52,9 @@ fi
 
 if [ "$BACKUP" -eq 1 ]; then
   say "Cadangan"
-  ./backup.sh || die "cadangan gagal; tidak ada yang dihapus. Perbaiki atau pakai --no-backup"
+  # Folder yang sama dengan cron di README (bawaan backup.sh, /var/backups, butuh root).
+  mkdir -p "${BACKUP_DIR:-$HOME/backups}"
+  BACKUP_DIR="${BACKUP_DIR:-$HOME/backups}" ./backup.sh || die "cadangan gagal; tidak ada yang dihapus. Perbaiki atau pakai --no-backup"
 fi
 
 say "Menghentikan API"

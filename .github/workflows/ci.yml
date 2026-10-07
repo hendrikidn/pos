@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck dan tes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # sama dengan image Docker
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # Termasuk tes firmware C yang dikompilasi dengan gcc runner dan dijalankan terhadap API sungguhan (PGlite).
+      - run: npx vitest run
+
+  build:
+    name: Build dashboard, konsol admin, dan POS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @pos/dashboard
+      - run: npm run build -w @pos/admin
+      - run: npm run build -w @pos/pos-app

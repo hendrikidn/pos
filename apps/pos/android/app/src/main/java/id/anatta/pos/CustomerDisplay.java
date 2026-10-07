@@ -1,4 +1,4 @@
-package id.posguard.pos;
+package id.anatta.pos;
 
 import android.app.Activity;
 import android.app.Presentation;

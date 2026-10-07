@@ -10,7 +10,7 @@ export interface Posture {
   appVersion: string;
 }
 
-/** Antarmuka plugin native `PosHardware` (android/app/src/main/java/id/posguard/pos/PosHardwarePlugin.java). */
+/** Antarmuka plugin native `PosHardware` (android/app/src/main/java/id/anatta/pos/PosHardwarePlugin.java). */
 export interface PosHardwarePlugin {
   tcpWrite(o: { host: string; port: number; data: string; timeoutMs?: number }): Promise<void>;
   tcpQuery(o: { host: string; port: number; data: string; expect: number; timeoutMs?: number }): Promise<{ data: string }>;

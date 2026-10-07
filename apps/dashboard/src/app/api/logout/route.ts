@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { API_URL, getToken, sameOrigin, TOKEN_COOKIE } from '@/lib/api';
+import { LEGACY_TOKEN_COOKIE } from '@/lib/cookie';
 
 export async function POST(req: Request) {
   if (!sameOrigin(req)) return NextResponse.json({ message: 'asal permintaan tidak sah' }, { status: 403 });
@@ -10,5 +11,6 @@ export async function POST(req: Request) {
   }
   const out = NextResponse.json({ ok: true });
   out.cookies.delete(TOKEN_COOKIE);
+  out.cookies.delete(LEGACY_TOKEN_COOKIE);
   return out;
 }

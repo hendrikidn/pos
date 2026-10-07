@@ -45,7 +45,7 @@ Saat pertama tersambung, aplikasi membuat kunci ECDSA P-256 di Android Keystore 
 Tombol Mode kios memakai `startLockTask()` (penyematan layar). Tanpa **device owner**, sistem meminta persetujuan sekali dan pengguna masih bisa keluar dengan kombinasi tombol. Untuk kios penuh pada perangkat yang di-factory reset dan belum punya akun:
 
 ```
-adb shell dpm set-device-owner id.posguard.pos/.AdminReceiver   # belum disediakan; lihat "Belum ada"
+adb shell dpm set-device-owner id.anatta.pos/.AdminReceiver   # belum disediakan; lihat "Belum ada"
 ```
 
 ## Belum ada

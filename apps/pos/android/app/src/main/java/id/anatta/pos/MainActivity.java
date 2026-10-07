@@ -1,4 +1,4 @@
-package id.posguard.pos;
+package id.anatta.pos;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

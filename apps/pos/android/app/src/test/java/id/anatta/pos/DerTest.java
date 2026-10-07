@@ -1,4 +1,4 @@
-package id.posguard.pos;
+package id.anatta.pos;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;

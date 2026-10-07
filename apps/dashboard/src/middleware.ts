@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-
-const COOKIE = 'guard_token';
+import { TOKEN_COOKIE as COOKIE } from '@/lib/cookie';
 
 /** Halaman selain /login memerlukan cookie token; keabsahannya diperiksa API pada setiap permintaan. */
 export function middleware(req: NextRequest) {

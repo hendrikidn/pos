@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'id.posguard.pos',
+  appId: 'id.anatta.pos',
   appName: 'Anatta POS',
   webDir: 'dist',
   server: {

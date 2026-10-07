@@ -1,4 +1,4 @@
-package id.posguard.pos;
+package id.anatta.pos;
 
 import android.app.Activity;
 import android.app.ActivityManager;
@@ -55,7 +55,7 @@ import java.util.regex.Pattern;
 @CapacitorPlugin(name = "PosHardware")
 public class PosHardwarePlugin extends Plugin {
     private static final String KEY_ALIAS = "pos_guard_device_key";
-    private static final String ACTION_USB_PERMISSION = "id.posguard.pos.USB_PERMISSION";
+    private static final String ACTION_USB_PERMISSION = "id.anatta.pos.USB_PERMISSION";
     private static final Pattern HOST = Pattern.compile("^[A-Za-z0-9.-]{1,253}$");
     private static final int MAX_PAYLOAD = 64 * 1024;
 

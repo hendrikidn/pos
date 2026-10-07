@@ -2,7 +2,8 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
 export const API_URL = process.env.API_URL ?? 'http://127.0.0.1:3000';
-export const TOKEN_COOKIE = 'guard_token';
+import { TOKEN_COOKIE } from './cookie';
+export { TOKEN_COOKIE };
 
 export interface Me {
   userId: string;

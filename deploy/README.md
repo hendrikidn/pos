@@ -233,7 +233,22 @@ Buka `https://pos-admin.dolanyu.com`, masuk dengan token admin, lalu **Tenant ba
 2. Klik **Buat tenant**. Token owner muncul **sekali**; salin dan berikan ke pemilik usaha.
 3. Pemilik masuk ke `https://pos.dolanyu.com` dengan token itu, lalu menambah staf, menu, dan memasang sensor di Pengaturan.
 
-Dari halaman tenant Anda juga bisa menambah outlet, menerbitkan token owner baru (mis. token hilang), dan mencabut token. Semua tindakan tercatat di `audit_log`.
+Pembagian tugas:
+
+| Siapa | Mengelola |
+|---|---|
+| **Admin platform** (konsol `pos-admin`) | Tenant: buat, ganti nama, **tangguhkan/aktifkan**, serta token owner (terbitkan, cabut). Melihat **KPI** tiap tenant dan seluruh platform |
+| **Owner tenant** (dashboard `pos`) | **Outlet** (tambah, ubah nama dan terminal, pajak, EDC), staf, menu, perangkat |
+
+Admin tidak menambah atau mengubah outlet; itu dilakukan owner di **Pengaturan → Outlet**. Semua tindakan admin tercatat di `audit_log`.
+
+**KPI di konsol** (tiap tenant dan ringkasan platform): pesanan dan penerimaan (hari ini, 7, dan 30 hari; chart harian 14 hari), perangkat online, insiden terbuka dan kritis, staf aktif, dan aktivitas terakhir. Definisinya:
+- *Pesanan*: event `order.created`, tanpa pesanan karyawan. *Penerimaan*: pembayaran diterima dikurangi refund. Hari mengikuti zona waktu outlet.
+- *Perangkat online*: terlihat dalam 5 menit terakhir; perangkat yang dicabut tidak dihitung.
+- *Tenant tanpa aktivitas*: tenant aktif yang tidak ada perangkat terlihat dalam 7 hari terakhir.
+- Event berstempel lebih dari sehari di masa depan diabaikan.
+
+**Menangguhkan tenant** memutus semua token pengguna dan perangkatnya seketika (respons 403 "akun tenant ditangguhkan"), tanpa menghapus data. Owner melihat pesan itu saat masuk ke dashboard. Sensor yang ditangguhkan menampilkan `HTTP 403` di OLED dan menyimpan event di antrean sampai tenant diaktifkan lagi.
 
 Token admin hilang: `docker compose run --rm api node_modules/.bin/tsx apps/api/src/admin-token.ts --id hendrik --rotate` (token lama langsung mati).
 

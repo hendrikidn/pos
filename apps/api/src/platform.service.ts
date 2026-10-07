@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { newToken, sha256, type AdminAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
+import { CLOCK, type Clock } from './pipeline.service';
+import { computeKpis, dailySeries, emptyKpi, type TenantKpi } from './platform-kpi';
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{1,39}$/;
 const MAX_TERMINALS = 50;
@@ -35,7 +37,10 @@ function terminals(v: unknown): string[] {
 /** Administrasi platform: tenant, outlet, dan token owner. Berjalan sebagai pemilik skema (melewati RLS); hanya dipanggil oleh admin platform. */
 @Injectable()
 export class PlatformService {
-  constructor(@Inject(Database) private readonly db: Database) {}
+  constructor(
+    @Inject(Database) private readonly db: Database,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
 
   private audit(q: Queryable, tenantId: string, admin: AdminAuth, action: string, detail: Record<string, unknown>) {
     return q.query('insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, $3, $4::jsonb)', [
@@ -43,23 +48,45 @@ export class PlatformService {
     ]);
   }
 
+  /** Daftar tenant beserta KPI ringkas. */
   async listTenants() {
-    return (
-      await this.db.admin.query(
-        `select t.id, t.name, t.created_at,
-                (select count(*) from outlet o where o.tenant_id = t.id)::int as outlets,
-                (select count(*) from device d where d.tenant_id = t.id and d.revoked_at is null)::int as devices,
-                (select max(d.last_seen_ms) from device d where d.tenant_id = t.id) as last_seen_ms,
-                (select count(*) from api_token a where a.tenant_id = t.id and a.role = 'OWNER' and a.revoked_at is null)::int as owner_tokens
-         from tenant t order by t.created_at desc, t.id`,
-      )
-    ).rows;
+    const now = this.clock();
+    const [tenants, tokens, kpis] = await Promise.all([
+      this.db.admin.query<{ id: string; name: string; created_at: string; suspended_at: string | null; suspended_reason: string | null }>(
+        'select id, name, created_at, suspended_at, suspended_reason from tenant order by created_at desc, id',
+      ),
+      this.db.admin.query<{ tenant_id: string; n: number }>("select tenant_id, count(*)::int as n from api_token where role = 'OWNER' and revoked_at is null group by tenant_id"),
+      computeKpis(this.db, now),
+    ]);
+    const tok = new Map(tokens.rows.map((r) => [r.tenant_id, r.n]));
+    return tenants.rows.map((t) => ({ ...t, owner_tokens: tok.get(t.id) ?? 0, kpi: kpis.tenants.get(t.id) ?? emptyKpi() }));
+  }
+
+  /** Ringkasan seluruh platform untuk deretan kartu KPI di halaman utama konsol. */
+  async overview() {
+    const list = await this.listTenants();
+    const now = this.clock();
+    const sum = (f: (k: TenantKpi) => number) => list.reduce((a, t) => a + f(t.kpi), 0);
+    const active = list.filter((t) => !t.suspended_at);
+    return {
+      tenants: { total: list.length, active: active.length, suspended: list.length - active.length },
+      // Tenant aktif yang tidak ada perangkat terlihat dalam 7 hari terakhir: kandidat churn atau gangguan pemasangan.
+      inactive7d: active.filter((t) => t.kpi.lastActivityMs === null || now - t.kpi.lastActivityMs > 7 * 86_400_000).length,
+      outlets: sum((k) => k.outlets),
+      devices: { total: sum((k) => k.devicesTotal), online: sum((k) => k.devicesOnline) },
+      orders7d: sum((k) => k.orders7d),
+      revenue7d: sum((k) => k.revenue7d),
+      incidents: { open: sum((k) => k.incidentsOpen), critical: sum((k) => k.incidentsCritical) },
+    };
   }
 
   async getTenant(tenantId: string) {
-    const t = (await this.db.admin.query('select id, name, created_at from tenant where id = $1', [tenantId])).rows[0];
+    const now = this.clock();
+    const t = (
+      await this.db.admin.query('select id, name, created_at, suspended_at, suspended_reason from tenant where id = $1', [tenantId])
+    ).rows[0];
     if (!t) throw new NotFoundException('tenant tidak ditemukan');
-    const [outlets, devices, tokens] = await Promise.all([
+    const [outlets, devices, tokens, kpis, daily] = await Promise.all([
       this.db.admin.query('select id, name, terminals from outlet where tenant_id = $1 order by id', [tenantId]),
       this.db.admin.query(
         'select id, kind, outlet_id, terminal_id, last_seen_ms, revoked_at from device where tenant_id = $1 order by outlet_id, id',
@@ -70,8 +97,18 @@ export class PlatformService {
         'select id::int as id, user_id, role, label, created_at, revoked_at from api_token where tenant_id = $1 order by id desc',
         [tenantId],
       ),
+      computeKpis(this.db, now, tenantId),
+      dailySeries(this.db, now, tenantId),
     ]);
-    return { tenant: t, outlets: outlets.rows, devices: devices.rows, tokens: tokens.rows };
+    return {
+      tenant: t,
+      outlets: outlets.rows,
+      devices: devices.rows,
+      tokens: tokens.rows,
+      kpi: kpis.tenants.get(tenantId) ?? emptyKpi(),
+      outletKpis: kpis.byOutlet.get(tenantId) ?? [],
+      daily,
+    };
   }
 
   /** Tenant baru beserta outlet pertama dan token OWNER. Satu transaksi: gagal di tengah tidak meninggalkan setengah data. */
@@ -99,18 +136,30 @@ export class PlatformService {
     });
   }
 
-  async addOutlet(admin: AdminAuth, tenantId: string, input: { outletId?: unknown; outletName?: unknown; terminals?: unknown }) {
-    const outletId = id('ID outlet', input.outletId);
-    const outletName = name('Nama outlet', input.outletName);
-    const termIds = terminals(input.terminals);
-    return this.db.driver.transaction(async (q) => {
-      if (!(await q.query('select 1 from tenant where id = $1', [tenantId])).rowCount) throw new NotFoundException('tenant tidak ditemukan');
-      if ((await q.query('select 1 from outlet where id = $1', [outletId])).rowCount) throw new ConflictException(`outlet "${outletId}" sudah dipakai`);
-      await q.query('insert into outlet (id, tenant_id, name, terminals) values ($1, $2, $3, $4::jsonb)', [
-        outletId, tenantId, outletName, JSON.stringify(termIds),
+  async renameTenant(admin: AdminAuth, tenantId: string, nameInput: unknown) {
+    const newName = name('Nama tenant', nameInput);
+    await this.db.driver.transaction(async (q) => {
+      const before = (await q.query<{ name: string }>('select name from tenant where id = $1 for update', [tenantId])).rows[0];
+      if (!before) throw new NotFoundException('tenant tidak ditemukan');
+      await q.query('update tenant set name = $2 where id = $1', [tenantId, newName]);
+      await this.audit(q, tenantId, admin, 'platform.tenant.rename', { from: before.name, to: newName });
+    });
+  }
+
+  /**
+   * Menangguhkan tenant: semua token pengguna dan perangkatnya langsung ditolak (403), tanpa menghapus data atau token.
+   * Mengaktifkan kembali memulihkan semuanya apa adanya.
+   */
+  async setSuspended(admin: AdminAuth, tenantId: string, suspended: boolean, reasonInput?: unknown) {
+    const reason = typeof reasonInput === 'string' && reasonInput.trim() ? reasonInput.trim().slice(0, 200) : null;
+    await this.db.driver.transaction(async (q) => {
+      const cur = (await q.query<{ suspended_at: string | null }>('select suspended_at from tenant where id = $1 for update', [tenantId])).rows[0];
+      if (!cur) throw new NotFoundException('tenant tidak ditemukan');
+      if (suspended === (cur.suspended_at !== null)) throw new ConflictException(suspended ? 'tenant sudah ditangguhkan' : 'tenant sudah aktif');
+      await q.query('update tenant set suspended_at = case when $2::boolean then now() else null end, suspended_reason = $3 where id = $1', [
+        tenantId, suspended, suspended ? reason : null,
       ]);
-      await this.audit(q, tenantId, admin, 'platform.outlet.add', { outletId, outletName });
-      return { outletId };
+      await this.audit(q, tenantId, admin, suspended ? 'platform.tenant.suspend' : 'platform.tenant.reactivate', suspended ? { reason } : {});
     });
   }
 

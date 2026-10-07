@@ -1,8 +1,8 @@
 import { createHash, randomInt } from 'node:crypto';
 import {
-  BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Injectable, NotFoundException,
+  BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException,
 } from '@nestjs/common';
-import { newToken, sha256, type ApiAuth } from './auth';
+import { newToken, sha256, SUSPENDED_MESSAGE, type ApiAuth } from './auth';
 import { Database } from './db/database';
 import { CLOCK, type Clock } from './pipeline.service';
 
@@ -137,11 +137,11 @@ export class PairingService {
           ? (
               await q.query<{
                 tenant_id: string; outlet_id: string; device_id: string; kind: Kind; terminal_id: string | null;
-                used: boolean; expired: boolean;
+                used: boolean; expired: boolean; suspended: boolean;
               }>(
-                `select tenant_id, outlet_id, device_id, kind, terminal_id, used_at is not null as used,
-                        expires_at <= to_timestamp($2 / 1000.0) as expired
-                 from pairing_code where code_hash = $1 for update`,
+                `select p.tenant_id, p.outlet_id, p.device_id, p.kind, p.terminal_id, p.used_at is not null as used,
+                        p.expires_at <= to_timestamp($2 / 1000.0) as expired, t.suspended_at is not null as suspended
+                 from pairing_code p join tenant t on t.id = p.tenant_id where p.code_hash = $1 for update of p`,
                 [hashCode(code), now],
               )
             ).rows[0]
@@ -150,6 +150,7 @@ export class PairingService {
           this.recordFail(caller, now);
           throw new BadRequestException('kode pairing tidak valid atau sudah kedaluwarsa');
         }
+        if (row.suspended) throw new ForbiddenException(SUSPENDED_MESSAGE);
         const token = newToken('dev');
         await q.query(
           'insert into device (id, tenant_id, outlet_id, kind, token_hash, terminal_id) values ($1, $2, $3, $4, $5, $6)',

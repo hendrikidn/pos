@@ -36,7 +36,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
 
   return (
     <form className="panel" onSubmit={save}>
-      <h2>{s.name}</h2>
+      <h2>Pajak, kebijakan, dan EDC · {s.name}</h2>
       <div className="form-grid">
         <label>Nama merchant (tampil di layar customer)<input value={merchant} onChange={(e) => setMerchant(e.target.value)} maxLength={80} required /></label>
         <label>PBJT / pajak (%)<input inputMode="numeric" value={tax} onChange={(e) => setTax(e.target.value.replace(/\D/g, ''))} required /></label>

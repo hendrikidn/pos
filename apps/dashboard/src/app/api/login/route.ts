@@ -9,6 +9,10 @@ export async function POST(req: Request) {
   }
   const res = await fetch(`${API_URL}/v1/me`, { headers: { authorization: `Bearer ${token}` }, cache: 'no-store' }).catch(() => null);
   if (!res) return NextResponse.json({ message: 'API tidak dapat dihubungi.' }, { status: 502 });
+  if (res.status === 403) {
+    const m = ((await res.json().catch(() => ({}))) as { message?: string }).message;
+    return NextResponse.json({ message: m ?? 'Akses ditolak.' }, { status: 403 });
+  }
   if (!res.ok) return NextResponse.json({ message: 'Token tidak dikenal.' }, { status: 401 });
 
   const out = NextResponse.json({ ok: true });

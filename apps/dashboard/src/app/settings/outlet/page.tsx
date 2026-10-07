@@ -1,3 +1,4 @@
+import { NewOutletForm, OutletDetailsForm } from '@/components/OutletManager';
 import { OutletSettingsForm } from '@/components/OutletSettingsForm';
 import { SettingsNav } from '@/components/SettingsNav';
 import { Shell } from '@/components/Shell';
@@ -14,7 +15,13 @@ export default async function OutletPage() {
     <Shell me={me}>
       <h1>Pengaturan</h1>
       <SettingsNav active="outlet" role={me.role} />
-      {settings.map((s) => <OutletSettingsForm key={s.id} s={s} />)}
+      <NewOutletForm />
+      {settings.map((s) => (
+        <div key={s.id}>
+          <OutletDetailsForm s={s} />
+          <OutletSettingsForm s={s} />
+        </div>
+      ))}
     </Shell>
   );
 }

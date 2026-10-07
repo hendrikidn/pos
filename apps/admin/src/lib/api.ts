@@ -9,14 +9,62 @@ export interface AdminMe {
   adminId: string;
 }
 
+export interface TenantKpi {
+  outlets: number;
+  staffActive: number;
+  ordersToday: number;
+  orders7d: number;
+  orders30d: number;
+  revenueToday: number;
+  revenue7d: number;
+  revenue30d: number;
+  devicesTotal: number;
+  devicesOnline: number;
+  sensorsTotal: number;
+  sensorsOnline: number;
+  incidentsOpen: number;
+  incidentsCritical: number;
+  confirmedFraud30d: number;
+  lastActivityMs: number | null;
+}
+
+export interface OutletKpi {
+  outletId: string;
+  outletName: string;
+  orders7d: number;
+  revenue7d: number;
+  ordersToday: number;
+  devicesTotal: number;
+  devicesOnline: number;
+  incidentsOpen: number;
+  incidentsCritical: number;
+  lastSeenMs: number | null;
+}
+
+export interface DailyPoint {
+  date: string;
+  orders: number;
+  revenue: number;
+}
+
 export interface TenantRow {
   id: string;
   name: string;
   created_at: string;
-  outlets: number;
-  devices: number;
-  last_seen_ms: number | null;
+  suspended_at: string | null;
+  suspended_reason: string | null;
   owner_tokens: number;
+  kpi: TenantKpi;
+}
+
+export interface Overview {
+  tenants: { total: number; active: number; suspended: number };
+  inactive7d: number;
+  outlets: number;
+  devices: { total: number; online: number };
+  orders7d: number;
+  revenue7d: number;
+  incidents: { open: number; critical: number };
 }
 
 export interface OutletRow {
@@ -44,10 +92,13 @@ export interface TokenRow {
 }
 
 export interface TenantDetail {
-  tenant: { id: string; name: string; created_at: string };
+  tenant: { id: string; name: string; created_at: string; suspended_at: string | null; suspended_reason: string | null };
   outlets: OutletRow[];
   devices: DeviceRow[];
   tokens: TokenRow[];
+  kpi: TenantKpi;
+  outletKpis: OutletKpi[];
+  daily: DailyPoint[];
 }
 
 export class ApiError extends Error {

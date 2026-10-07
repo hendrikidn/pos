@@ -1,13 +1,15 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function LoginPage() {
   const router = useRouter();
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suspended, setSuspended] = useState(false);
+  useEffect(() => setSuspended(new URLSearchParams(window.location.search).get('s') === '1'), []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +31,7 @@ export default function LoginPage() {
     <main className="login">
       <h1>POS Guard</h1>
       <p className="sub">Masuk dengan token pengguna dari administrator.</p>
+      {suspended && <p className="notice" role="alert">Akun tenant ini sedang ditangguhkan. Hubungi administrator.</p>}
       <form className="panel" onSubmit={submit}>
         <label htmlFor="token" className="sub" style={{ display: 'block', margin: '0 0 6px' }}>Token pengguna</label>
         <input id="token" type="password" autoComplete="off" placeholder="api_…" value={token} onChange={(e) => setToken(e.target.value)} />

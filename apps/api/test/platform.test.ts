@@ -80,7 +80,8 @@ describe('konsol admin platform', () => {
     it('daftar tenant memuat ringkasan, detail memuat outlet, perangkat, dan token tanpa rahasia', async () => {
       const list = (await a('GET', '/tenants')).body;
       const row = list.find((t: { id: string }) => t.id === 'kopi-a');
-      expect(row).toMatchObject({ name: 'Kopi A', outlets: 1, devices: 0, owner_tokens: 1 });
+      expect(row).toMatchObject({ name: 'Kopi A', owner_tokens: 1, suspended_at: null });
+      expect(row.kpi).toMatchObject({ outlets: 1, devicesTotal: 0, orders7d: 0, revenue7d: 0, lastActivityMs: null });
 
       const d = (await a('GET', '/tenants/kopi-a')).body;
       expect(d.tenant.name).toBe('Kopi A');
@@ -90,12 +91,8 @@ describe('konsol admin platform', () => {
       expect(JSON.stringify(d)).not.toMatch(/api_[A-Za-z0-9_-]{20,}|token_hash/);
     });
 
-    it('menambah outlet; ID outlet bersifat global sehingga tidak boleh sama dengan tenant lain', async () => {
-      const ok = await a('POST', '/tenants/kopi-a/outlets', { outletId: 'kopi-a-cabang', outletName: 'Cabang', terminals: ['pos-1'] });
-      expect(ok.status).toBe(201);
-      expect((await a('POST', '/tenants/kopi-a/outlets', { outletId: 'kopi-a-cabang', outletName: 'Lagi' })).status).toBe(409);
-      expect((await a('POST', '/tenants/kopi-a/outlets', { outletId: 'o0', outletName: 'Milik t0' })).status).toBe(409);
-      expect((await a('POST', '/tenants/tidak-ada/outlets', { outletId: 'baru-o', outletName: 'X' })).status).toBe(404);
+    it('admin tidak lagi mengelola outlet: itu tugas owner tenant', async () => {
+      expect((await a('POST', '/tenants/kopi-a/outlets', { outletId: 'kopi-a-cabang', outletName: 'Cabang' })).status).toBe(404);
     });
 
     it('menerbitkan token owner tambahan, dan mencabutnya: token langsung tidak berlaku, yang lain tetap', async () => {
@@ -128,7 +125,7 @@ describe('konsol admin platform', () => {
   it('semua tindakan admin tercatat di audit_log, tanpa token', async () => {
     const r = await h.db.admin.query<{ action: string; actor: string }>("select action, actor from audit_log where action like 'platform.%'");
     expect(new Set(r.rows.map((x) => x.action))).toEqual(
-      new Set(['platform.tenant.create', 'platform.outlet.add', 'platform.owner_token.issue', 'platform.token.revoke']),
+      new Set(['platform.tenant.create', 'platform.owner_token.issue', 'platform.token.revoke']),
     );
     expect(r.rows.every((x) => x.actor === 'admin:hendrik')).toBe(true);
     const dump = JSON.stringify((await h.db.admin.query("select detail from audit_log where action like 'platform.%'")).rows);

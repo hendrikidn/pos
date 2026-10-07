@@ -95,6 +95,8 @@ export async function authed<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) redirect('/login');
+    // 403 dari guard berarti tenant ditangguhkan admin platform (peran yang kurang ditangani tiap halaman sendiri).
+    if (e instanceof ApiError && e.status === 403 && /ditangguhkan/.test(e.message)) redirect('/login?s=1');
     throw e;
   }
 }
@@ -131,6 +133,7 @@ export interface MenuRow {
 export interface OutletSettings {
   id: string;
   name: string;
+  terminals: string[];
   merchant_name: string | null;
   tax_percent: number;
   edcs: { tid: string; bank: string; label: string }[];

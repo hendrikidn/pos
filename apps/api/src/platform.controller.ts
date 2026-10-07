@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Put, Req } from '@nestjs/common';
 import { requireAdmin, type AuthedRequest } from './auth';
 import { PlatformService, type NewTenantInput } from './platform.service';
 
@@ -10,6 +10,12 @@ export class PlatformController {
   @Get('me')
   me(@Req() req: AuthedRequest) {
     return { adminId: requireAdmin(req).adminId };
+  }
+
+  @Get('overview')
+  overview(@Req() req: AuthedRequest) {
+    requireAdmin(req);
+    return this.platform.overview();
   }
 
   @Get('tenants')
@@ -29,9 +35,22 @@ export class PlatformController {
     return this.platform.getTenant(tenantId);
   }
 
-  @Post('tenants/:tenantId/outlets')
-  addOutlet(@Req() req: AuthedRequest, @Param('tenantId') tenantId: string, @Body() body: { outletId?: unknown; outletName?: unknown; terminals?: unknown }) {
-    return this.platform.addOutlet(requireAdmin(req), tenantId, body ?? {});
+  @Put('tenants/:tenantId')
+  async rename(@Req() req: AuthedRequest, @Param('tenantId') tenantId: string, @Body() body: { name?: unknown }) {
+    await this.platform.renameTenant(requireAdmin(req), tenantId, body?.name);
+    return { ok: true };
+  }
+
+  @Post('tenants/:tenantId/suspend')
+  async suspend(@Req() req: AuthedRequest, @Param('tenantId') tenantId: string, @Body() body: { reason?: unknown }) {
+    await this.platform.setSuspended(requireAdmin(req), tenantId, true, body?.reason);
+    return { ok: true };
+  }
+
+  @Post('tenants/:tenantId/reactivate')
+  async reactivate(@Req() req: AuthedRequest, @Param('tenantId') tenantId: string) {
+    await this.platform.setSuspended(requireAdmin(req), tenantId, false);
+    return { ok: true };
   }
 
   @Post('tenants/:tenantId/owner-tokens')

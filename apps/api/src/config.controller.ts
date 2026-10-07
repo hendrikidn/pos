@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { requireApi, requireDevice, type AuthedRequest } from './auth';
-import { ConfigService, type MenuInput, type SettingsInput, type StaffInput } from './config.service';
+import { ConfigService, type MenuInput, type OutletInput, type SettingsInput, type StaffInput } from './config.service';
 
 @Controller('v1')
 export class ConfigController {
@@ -52,6 +52,21 @@ export class ConfigController {
   @Put('menu/:id')
   async updateMenu(@Req() req: AuthedRequest, @Param('id') id: string, @Body() body: MenuInput) {
     await this.config.updateMenu(requireApi(req, ['OWNER', 'OPS']), id, body ?? {});
+    return { ok: true };
+  }
+
+  // ----- manajemen outlet (OWNER) -----
+
+  @Post('outlets')
+  createOutlet(@Req() req: AuthedRequest, @Body() body: OutletInput) {
+    if (!body || typeof body !== 'object') throw new BadRequestException('isi permintaan kosong');
+    return this.config.createOutlet(requireApi(req, ['OWNER']), body);
+  }
+
+  @Put('outlets/:outletId')
+  async updateOutlet(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Body() body: OutletInput) {
+    if (!body || typeof body !== 'object') throw new BadRequestException('isi permintaan kosong');
+    await this.config.updateOutlet(requireApi(req, ['OWNER']), outletId, body);
     return { ok: true };
   }
 

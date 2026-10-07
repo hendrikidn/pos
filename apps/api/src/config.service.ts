@@ -1,6 +1,6 @@
 import { pbkdf2, randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import type { ApiAuth, DeviceAuth } from './auth';
 import { Database } from './db/database';
@@ -58,6 +58,31 @@ export interface SettingsInput {
   } | null;
   cctvRetentionDays?: number;
   cctvClockOffsetSec?: number;
+}
+
+export interface OutletInput {
+  name?: string;
+  terminals?: string[];
+}
+
+const MAX_OUTLETS_PER_TENANT = 100;
+const TERMINAL_RE = /^[a-z0-9][a-z0-9_-]{1,39}$/;
+
+function outletName(v: unknown): string {
+  const n = typeof v === 'string' ? v.trim() : '';
+  need(n.length >= 1 && n.length <= 80, 'nama outlet wajib diisi (maks. 80 karakter)');
+  return n;
+}
+
+function terminalList(v: unknown): string[] {
+  if (v === undefined || v === null) return [];
+  need(Array.isArray(v) && v.length <= 50, 'terminals harus berupa daftar (maks. 50)');
+  const out = (v as unknown[]).map((t) => {
+    need(typeof t === 'string' && TERMINAL_RE.test(t), 'ID terminal hanya huruf kecil, angka, - atau _ (2–40 karakter)');
+    return t as string;
+  });
+  need(new Set(out).size === out.length, 'ID terminal tidak boleh kembar');
+  return out;
 }
 
 export interface DeviceConfig {
@@ -189,7 +214,7 @@ export class ConfigService {
 
   async getSettings(auth: ApiAuth, outletId: string) {
     const row = await this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query('select id, name, merchant_name, tax_percent, edcs, policy, cctv_retention_days, cctv_clock_offset_sec from outlet where id = $1', [outletId])).rows[0],
+      (await q.query('select id, name, terminals, merchant_name, tax_percent, edcs, policy, cctv_retention_days, cctv_clock_offset_sec from outlet where id = $1', [outletId])).rows[0],
     );
     if (!row) throw new NotFoundException('outlet tidak ditemukan');
     return row;
@@ -223,6 +248,56 @@ export class ConfigService {
       );
       if (r.rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
       await this.audit(q, auth, 'outlet.settings', { outletId, fields: Object.keys(s) });
+    });
+  }
+
+  // ---------- manajemen outlet oleh owner ----------
+
+  /**
+   * Owner membuat outlet baru. ID dibuat server dari ID tenant + nama (unik di seluruh platform; dipakai di event dan alamat),
+   * sehingga owner tidak perlu memikirkannya dan tidak bisa menabrak tenant lain.
+   */
+  async createOutlet(auth: ApiAuth, input: OutletInput): Promise<{ id: string; name: string; terminals: string[] }> {
+    const name = outletName(input.name);
+    const terminals = terminalList(input.terminals);
+    const count = (await this.db.tenantTx(auth.tenantId, async (q) => (await q.query<{ n: number }>('select count(*)::int as n from outlet')).rows[0]!.n));
+    need(count < MAX_OUTLETS_PER_TENANT, `jumlah outlet maksimal ${MAX_OUTLETS_PER_TENANT}`);
+
+    const slug = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'outlet';
+    // Awalan tenant menjaga ID unik; bila nama sudah diawali ID tenant ("Palmerah Barat" di tenant "palmerah"), tidak diulang.
+    const base = (slug === auth.tenantId || slug.startsWith(`${auth.tenantId}-`) ? slug : `${auth.tenantId}-${slug}`).slice(0, 36).replace(/-+$/, '');
+    const candidates = [base, ...Array.from({ length: 20 }, (_, i) => `${base}-${i + 2}`)];
+    // ID outlet unik global: periksa sebagai pemilik skema, karena RLS hanya memperlihatkan outlet tenant ini.
+    const taken = new Set((await this.db.admin.query<{ id: string }>('select id from outlet where id = any($1::text[])', [candidates])).rows.map((r) => r.id));
+    const id = candidates.find((c) => !taken.has(c));
+    if (!id) throw new ConflictException('tidak bisa membuat ID outlet unik; ubah nama outlet');
+
+    try {
+      await this.db.tenantTx(auth.tenantId, async (q) => {
+        await q.query('insert into outlet (id, tenant_id, name, terminals) values ($1, $2, $3, $4::jsonb)', [id, auth.tenantId, name, JSON.stringify(terminals)]);
+        await this.audit(q, auth, 'outlet.create', { outletId: id, name, terminals });
+      });
+    } catch (e) {
+      if ((e as { code?: string }).code === '23505') throw new ConflictException('ID outlet bentrok; coba lagi');
+      throw e;
+    }
+    return { id, name, terminals };
+  }
+
+  /**
+   * Mengubah nama dan/atau daftar terminal. Terminal yang terdaftar tetapi tidak pernah mengirim data membuat mesin aturan menunggu
+   * (jendela evaluasi menunggu semua terminal), jadi daftarnya harus sesuai dengan terminal yang benar-benar dipakai.
+   */
+  async updateOutlet(auth: ApiAuth, outletId: string, input: OutletInput): Promise<void> {
+    need(input.name !== undefined || input.terminals !== undefined, 'tidak ada yang diubah');
+    const name = input.name === undefined ? null : outletName(input.name);
+    const terminals = input.terminals === undefined ? null : terminalList(input.terminals);
+    await this.db.tenantTx(auth.tenantId, async (q) => {
+      const r = await q.query('update outlet set name = coalesce($2, name), terminals = coalesce($3::jsonb, terminals) where id = $1', [
+        outletId, name, terminals ? JSON.stringify(terminals) : null,
+      ]);
+      if (r.rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
+      await this.audit(q, auth, 'outlet.update', { outletId, ...(name ? { name } : {}), ...(terminals ? { terminals } : {}) });
     });
   }
 

@@ -37,6 +37,9 @@ export function newToken(prefix: 'dev' | 'api' | 'adm'): string {
   return `${prefix}_${randomBytes(24).toString('base64url')}`;
 }
 
+/** Tenant yang ditangguhkan admin: semua token pengguna dan perangkatnya ditolak dengan pesan ini (403). */
+export const SUSPENDED_MESSAGE = 'akun tenant ditangguhkan; hubungi administrator';
+
 export const PUBLIC = 'public';
 export const Public = () => SetMetadata(PUBLIC, true);
 
@@ -63,22 +66,26 @@ export class AuthGuard implements CanActivate {
     const hash = sha256(token);
 
     if (token.startsWith('dev_')) {
-      const r = await this.db.admin.query<{ id: string; tenant_id: string; outlet_id: string; kind: DeviceAuth['deviceKind'] }>(
-        'select id, tenant_id, outlet_id, kind from device where token_hash = $1 and revoked_at is null',
+      const r = await this.db.admin.query<{ id: string; tenant_id: string; outlet_id: string; kind: DeviceAuth['deviceKind']; suspended: boolean }>(
+        `select d.id, d.tenant_id, d.outlet_id, d.kind, t.suspended_at is not null as suspended
+         from device d join tenant t on t.id = d.tenant_id where d.token_hash = $1 and d.revoked_at is null`,
         [hash],
       );
       const d = r.rows[0];
       if (!d) throw new UnauthorizedException('token tidak dikenal');
+      if (d.suspended) throw new ForbiddenException(SUSPENDED_MESSAGE);
       req.auth = { kind: 'device', tenantId: d.tenant_id, outletId: d.outlet_id, deviceId: d.id, deviceKind: d.kind };
       return true;
     }
     if (token.startsWith('api_')) {
-      const r = await this.db.admin.query<{ tenant_id: string; user_id: string; role: ApiRole }>(
-        'select tenant_id, user_id, role from api_token where token_hash = $1 and revoked_at is null',
+      const r = await this.db.admin.query<{ tenant_id: string; user_id: string; role: ApiRole; suspended: boolean }>(
+        `select a.tenant_id, a.user_id, a.role, t.suspended_at is not null as suspended
+         from api_token a join tenant t on t.id = a.tenant_id where a.token_hash = $1 and a.revoked_at is null`,
         [hash],
       );
       const a = r.rows[0];
       if (!a) throw new UnauthorizedException('token tidak dikenal');
+      if (a.suspended) throw new ForbiddenException(SUSPENDED_MESSAGE);
       req.auth = { kind: 'api', tenantId: a.tenant_id, userId: a.user_id, role: a.role };
       return true;
     }

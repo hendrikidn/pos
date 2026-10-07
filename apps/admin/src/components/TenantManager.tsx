@@ -16,7 +16,6 @@ export function TenantManager({ d, now }: { d: TenantDetail; now: number }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [secret, setSecret] = useState<{ title: string; token: string } | null>(null);
-  const [outlet, setOutlet] = useState({ outletId: '', outletName: '', terminals: '' });
   const [tok, setTok] = useState({ ownerId: 'owner', label: '' });
 
   async function run<T>(path: string, body: unknown, ok: string) {
@@ -44,6 +43,7 @@ export function TenantManager({ d, now }: { d: TenantDetail; now: number }) {
 
       <section className="panel">
         <h2>Token owner</h2>
+        <div style={{ overflowX: 'auto' }}>
         <table className="table">
           <thead><tr><th>ID</th><th>Pemilik</th><th>Keterangan</th><th>Dibuat</th><th>Status</th><th /></tr></thead>
           <tbody>
@@ -75,6 +75,7 @@ export function TenantManager({ d, now }: { d: TenantDetail; now: number }) {
             {d.tokens.length === 0 && <tr><td colSpan={6} className="muted">Belum ada token.</td></tr>}
           </tbody>
         </table>
+        </div>
         <h2 style={{ marginTop: 18 }}>Terbitkan token owner baru</h2>
         <form
           className="form-grid"
@@ -92,34 +93,8 @@ export function TenantManager({ d, now }: { d: TenantDetail; now: number }) {
       </section>
 
       <section className="panel">
-        <h2>Outlet</h2>
-        <table className="table">
-          <thead><tr><th>ID</th><th>Nama</th><th>Terminal</th></tr></thead>
-          <tbody>
-            {d.outlets.map((o) => (
-              <tr key={o.id}><td className="mono">{o.id}</td><td>{o.name}</td><td className="mono">{o.terminals.join(', ') || '–'}</td></tr>
-            ))}
-          </tbody>
-        </table>
-        <h2 style={{ marginTop: 18 }}>Tambah outlet</h2>
-        <form
-          className="form-grid"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            const terminals = outlet.terminals.split(',').map((t) => t.trim()).filter(Boolean);
-            const r = await run(`/v1/admin/tenants/${tid}/outlets`, { ...outlet, terminals }, `Outlet ${outlet.outletName} ditambahkan.`);
-            if (r) setOutlet({ outletId: '', outletName: '', terminals: '' });
-          }}
-        >
-          <label>Nama outlet<input value={outlet.outletName} onChange={(e) => setOutlet({ ...outlet, outletName: e.target.value })} maxLength={80} required /></label>
-          <label>ID outlet (unik di seluruh platform)<input value={outlet.outletId} onChange={(e) => setOutlet({ ...outlet, outletId: e.target.value.toLowerCase() })} maxLength={40} required placeholder={`${tid}-cabang`} /></label>
-          <label>Terminal (pisahkan koma)<input value={outlet.terminals} onChange={(e) => setOutlet({ ...outlet, terminals: e.target.value.toLowerCase() })} placeholder="pos-1, pos-2" /></label>
-          <div className="form-actions"><button type="submit" disabled={busy}>Tambah</button></div>
-        </form>
-      </section>
-
-      <section className="panel">
         <h2>Perangkat</h2>
+        <div style={{ overflowX: 'auto' }}>
         <table className="table">
           <thead><tr><th>ID</th><th>Jenis</th><th>Outlet</th><th>Terminal</th><th>Terakhir terlihat</th></tr></thead>
           <tbody>
@@ -135,6 +110,7 @@ export function TenantManager({ d, now }: { d: TenantDetail; now: number }) {
             {d.devices.length === 0 && <tr><td colSpan={5} className="muted">Belum ada perangkat. Owner memasangnya sendiri di Pengaturan → Perangkat.</td></tr>}
           </tbody>
         </table>
+        </div>
       </section>
     </>
   );

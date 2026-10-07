@@ -102,3 +102,62 @@ export const CHANNEL_LABEL: Record<string, string> = {
 
 /** Batch EDC yang belum ditutup lebih dari ini dianggap terlambat (kasir seharusnya menutup tiap hari). */
 export const BATCH_OVERDUE_MS = 30 * 3_600_000;
+
+// ---------- laporan penjualan ----------
+
+/** "Rp 1.234.567"; negatif ditulis "−Rp 5.000". */
+export function rp(n: number): string {
+  const s = Math.abs(Math.round(n)).toLocaleString('id-ID');
+  return `${n < 0 ? '−' : ''}Rp ${s}`;
+}
+
+/** Ringkas untuk sumbu dan ubin: "Rp 850 rb", "Rp 1,2 jt", "Rp 3 M". */
+export function rpCompact(n: number): string {
+  const sign = n < 0 ? '−' : '';
+  const a = Math.abs(n);
+  const fmt = (v: number) => (Math.round(v * 10) / 10).toLocaleString('id-ID', { maximumFractionDigits: 1 });
+  if (a >= 1e9) return `${sign}Rp ${fmt(a / 1e9)} M`;
+  if (a >= 1e6) return `${sign}Rp ${fmt(a / 1e6)} jt`;
+  if (a >= 1e3) return `${sign}Rp ${fmt(a / 1e3)} rb`;
+  return `${sign}Rp ${Math.round(a)}`;
+}
+
+/** Batas atas sumbu yang "bulat" (1, 2, 2,5, 5 × 10^k) dan selalu ≥ nilai maksimum. Nol atau negatif menghasilkan 1. */
+export function niceMax(v: number): number {
+  if (!(v > 0)) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const base = 10 ** exp;
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * base >= v) return m * base;
+  return 10 * base;
+}
+
+const DAYS_ID = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+/** Tanggal kalender "YYYY-MM-DD" (tanpa zona waktu). */
+function ymd(date: string) {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  return { y, m, d, dow: new Date(Date.UTC(y, m - 1, d)).getUTCDay() };
+}
+
+/** "1 Okt" */
+export const shortDate = (date: string): string => { const p = ymd(date); return `${p.d} ${MONTHS[p.m - 1]}`; };
+/** "Sen, 1 Okt" */
+export const weekdayDate = (date: string): string => { const p = ymd(date); return `${DAYS_ID[p.dow]}, ${p.d} ${MONTHS[p.m - 1]}`; };
+
+/** "1 Okt 2026", "1–7 Okt 2026", atau "28 Sep – 4 Okt 2026". */
+export function rangeText(from: string, to: string): string {
+  const a = ymd(from);
+  const b = ymd(to);
+  if (from === to) return `${a.d} ${MONTHS[a.m - 1]} ${a.y}`;
+  if (a.y === b.y && a.m === b.m) return `${a.d}–${b.d} ${MONTHS[b.m - 1]} ${b.y}`;
+  return `${a.d} ${MONTHS[a.m - 1]}${a.y === b.y ? '' : ` ${a.y}`} – ${b.d} ${MONTHS[b.m - 1]} ${b.y}`;
+}
+
+export const RANGE_OPTIONS = [
+  { value: 'today', label: 'Hari ini' },
+  { value: 'yesterday', label: 'Kemarin' },
+  { value: '7d', label: '7 hari' },
+  { value: '30d', label: '30 hari' },
+  { value: 'month', label: 'Bulan ini' },
+] as const;
+export type RangeValue = (typeof RANGE_OPTIONS)[number]['value'];

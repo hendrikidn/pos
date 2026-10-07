@@ -2,13 +2,17 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { IconAlert, IconCard, IconSliders } from './Icons';
+import { IconAlert, IconCard, IconChart, IconSliders } from './Icons';
 
 /** Menu utama. Bar bawah di ponsel, rel ikon di tablet portrait, sidebar penuh di layar lebar (diatur CSS). */
 export function NavLinks({ role }: { role: string }) {
   const path = usePathname();
   const items = [
     { href: '/', label: 'Insiden', icon: <IconAlert />, on: path === '/' || path.startsWith('/incidents'), show: true },
+    {
+      href: '/reports', label: 'Laporan', icon: <IconChart />, on: path.startsWith('/reports'),
+      show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
+    },
     {
       href: '/settlements', label: 'Settlement', icon: <IconCard />, on: path.startsWith('/settlements'),
       show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',

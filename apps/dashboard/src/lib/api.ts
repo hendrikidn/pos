@@ -192,3 +192,40 @@ export interface PendingPairing {
   terminal_id: string | null;
   expires_at: string;
 }
+
+export interface CashierRow {
+  userId: string;
+  orders: number;
+  sales: number;
+  voids: number;
+  voidAmount: number;
+  voidsAfterPayment: number;
+  refunds: number;
+  refundAmount: number;
+  discounts: number;
+  discountAmount: number;
+}
+
+/** Bentuk respons GET /v1/outlets/:id/reports/sales (lihat apps/api/src/sales-report.ts). */
+export interface SalesReport {
+  range: { from: string; to: string; days: number; utcOffsetMinutes: number; generatedAt: number };
+  totals: {
+    gross: number;
+    refunds: number;
+    net: number;
+    orders: number;
+    avgOrder: number;
+    discount: { count: number; amount: number };
+    voids: { count: number; amount: number; afterPayment: { count: number; amount: number } };
+    employeeMeals: number;
+  };
+  byDay: { date: string; orders: number; net: number }[];
+  byHour: { hour: number; orders: number; net: number }[];
+  byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT'; payments: number; amount: number }[];
+  byCashier: CashierRow[];
+  cashCounts: {
+    toleranceAmount: number;
+    shifts: { shiftId: string; userId: string | null; terminalId: string; at: number; counted: number; expected: number; diff: number }[];
+  };
+  notes: string[];
+}

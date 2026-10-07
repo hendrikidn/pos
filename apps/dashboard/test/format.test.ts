@@ -76,3 +76,45 @@ describe('cctvInfo', () => {
     expect(cctvInfo(start, end, 14, 0, WIB('2026-10-02T09:00:00')).daysLeft).toBe(13);
   });
 });
+
+describe('format laporan penjualan', () => {
+  it('rp: pemisah ribuan titik, negatif memakai tanda minus', async () => {
+    const { rp } = await import('../src/lib/format');
+    expect(rp(0)).toBe('Rp 0');
+    expect(rp(1_234_567)).toBe('Rp 1.234.567');
+    expect(rp(-5_000)).toBe('−Rp 5.000');
+  });
+
+  it('rpCompact: rb, jt, M, dan pembulatan satu desimal', async () => {
+    const { rpCompact } = await import('../src/lib/format');
+    expect(rpCompact(500)).toBe('Rp 500');
+    expect(rpCompact(850_000)).toBe('Rp 850 rb');
+    expect(rpCompact(1_250_000)).toBe('Rp 1,3 jt');
+    expect(rpCompact(2_000_000)).toBe('Rp 2 jt');
+    expect(rpCompact(3_000_000_000)).toBe('Rp 3 M');
+    expect(rpCompact(-120_000)).toBe('−Rp 120 rb');
+  });
+
+  it('niceMax: bulat, tidak pernah lebih kecil dari nilai, dan aman untuk nol', async () => {
+    const { niceMax } = await import('../src/lib/format');
+    expect(niceMax(0)).toBe(1);
+    expect(niceMax(-3)).toBe(1);
+    expect(niceMax(90_000)).toBe(100_000);
+    expect(niceMax(100_000)).toBe(100_000);
+    expect(niceMax(100_001)).toBe(200_000);
+    expect(niceMax(230_000)).toBe(250_000);
+    expect(niceMax(260_000)).toBe(500_000);
+    expect(niceMax(7)).toBe(10);
+    for (const v of [1, 3, 99, 1_001, 49_999, 2_500_001]) expect(niceMax(v)).toBeGreaterThanOrEqual(v);
+  });
+
+  it('tanggal dan rentang', async () => {
+    const { shortDate, weekdayDate, rangeText } = await import('../src/lib/format');
+    expect(shortDate('2026-10-01')).toBe('1 Okt');
+    expect(weekdayDate('2026-10-01')).toBe('Kam, 1 Okt'); // 1 Okt 2026 hari Kamis
+    expect(rangeText('2026-10-01', '2026-10-01')).toBe('1 Okt 2026');
+    expect(rangeText('2026-10-01', '2026-10-07')).toBe('1–7 Okt 2026');
+    expect(rangeText('2026-09-28', '2026-10-04')).toBe('28 Sep – 4 Okt 2026');
+    expect(rangeText('2025-12-30', '2026-01-02')).toBe('30 Des 2025 – 2 Jan 2026');
+  });
+});

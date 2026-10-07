@@ -6,6 +6,7 @@ import { IncidentService } from './incident.service';
 import { IngestService } from './ingest.service';
 import { NotificationService } from './notification.service';
 import { CLOCK, PipelineService, type Clock } from './pipeline.service';
+import { ReportService } from './report.service';
 import { SettlementService, type SlipInput } from './settlement.service';
 
 @Controller()
@@ -17,6 +18,7 @@ export class ApiController {
     @Inject(PipelineService) private readonly pipeline: PipelineService,
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Inject(SettlementService) private readonly settlements: SettlementService,
+    @Inject(ReportService) private readonly reports: ReportService,
     @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -68,6 +70,20 @@ export class ApiController {
     const auth = requireApi(req, ['OWNER', 'OPS', 'MANAGER']);
     await this.assertOutlet(auth.tenantId, outletId);
     return this.settlements.list(auth, outletId);
+  }
+
+  /** Laporan penjualan outlet. `from`/`to` = tanggal lokal outlet (YYYY-MM-DD, inklusif, maks. 31 hari), atau `range` = today|yesterday|7d|30d|month. */
+  @Get('v1/outlets/:outletId/reports/sales')
+  async salesReport(
+    @Req() req: AuthedRequest,
+    @Param('outletId') outletId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('range') range?: string,
+  ) {
+    const auth = requireApi(req, ['OWNER', 'OPS', 'MANAGER']);
+    await this.assertOutlet(auth.tenantId, outletId);
+    return this.reports.sales(auth, outletId, { from, to, range }, this.clock());
   }
 
   @Post('v1/outlets/:outletId/evaluate')

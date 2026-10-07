@@ -71,6 +71,7 @@ Tanpa `DATABASE_URL`, API memakai PostgreSQL in-memory (PGlite) sehingga bisa di
 | `POST /v1/device/enroll` | perangkat baru (tanpa token) | Menukar kode pairing dengan `{deviceId, token, outletId, terminalId}`. Token dibuat server. Salah kode dibatasi 10 kali per 15 menit per alamat |
 | `GET /v1/devices`, `POST /v1/devices/:id/revoke` | OWNER, OPS (cabut: OWNER) | Daftar perangkat dan status; mencabut token (event lama tetap tersimpan). Halaman dashboard: **Pengaturan → Perangkat** |
 | `GET/POST/PUT /v1/staff` | OWNER | Staf dan PIN. PIN 4–6 digit, ditolak bila sama semua atau berurutan, disimpan sebagai hash PBKDF2 berasin |
+| `GET /v1/outlets/:id/reports/sales` | OWNER, OPS, MANAGER | Laporan penjualan: `?range=today\|yesterday\|7d\|30d\|month` atau `?from=&to=` (tanggal lokal outlet, maks. 31 hari). Penjualan bersih, per hari/jam/metode/kasir, void, diskon, refund, selisih kas shift |
 | `GET/POST/PUT /v1/menu` | OWNER, OPS | Menu. Perubahan harga dicatat di audit_log beserta harga lama dan baru |
 | `GET/PUT /v1/outlets/:id/settings` | OWNER | Nama merchant, pajak, EDC terdaftar, ambang persetujuan, retensi CCTV |
 | `POST/GET /v1/outlets/:id/settlements` | OWNER, OPS (baca: + MANAGER) | Slip settlement EDC: `{text}` (isi slip) atau `{slip}` (isian terstruktur). Dicocokkan per batch dengan POS (R27, R28); TID harus terdaftar |

@@ -21,6 +21,9 @@ export const IconCard = () => (
 export const IconSliders = () => (
   <Svg><path d="M4 6h8" /><path d="M18 6h2" /><circle cx="15" cy="6" r="2.2" /><path d="M4 12h2" /><path d="M12 12h8" /><circle cx="9" cy="12" r="2.2" /><path d="M4 18h9" /><path d="M19 18h1" /><circle cx="16" cy="18" r="2.2" /></Svg>
 );
+export const IconChart = () => (
+  <Svg><path d="M5 20V11" /><path d="M12 20V4" /><path d="M19 20v-6" /></Svg>
+);
 export const IconLogout = () => (
   <Svg><path d="M15 17l5-5-5-5" /><path d="M20 12H9" /><path d="M12 4H6a2 2 0 00-2 2v12a2 2 0 002 2h6" /></Svg>
 );

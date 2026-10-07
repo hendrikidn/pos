@@ -19,10 +19,10 @@ const HEIGHT = 180;
  * atau difokus, nilai tertinggi diberi label, dan tabel alternatif untuk pembaca layar. Nilai negatif digambar
  * sebagai nol (tooltip dan tabel tetap menampilkan angka sebenarnya).
  */
-export function BarChart({ title, data, unit, empty }: { title: string; data: Bar[]; unit: 'rp' | 'n'; empty: string }) {
+export function BarChart({ title, data, unit, empty, unitLabel = 'order' }: { title: string; data: Bar[]; unit: 'rp' | 'n'; empty: string; unitLabel?: string }) {
   const [hover, setHover] = useState<number | null>(null);
   const id = useId();
-  const fmt = (v: number) => (unit === 'rp' ? rp(v) : `${v.toLocaleString('id-ID')} order`);
+  const fmt = (v: number) => (unit === 'rp' ? rp(v) : `${v.toLocaleString('id-ID')} ${unitLabel}`);
   const fmtAxis = (v: number) => (unit === 'rp' ? (v === 0 ? '0' : rpCompact(v).replace('Rp ', '')) : String(v));
   const max = Math.max(0, ...data.map((d) => d.value));
   if (max === 0) return <div className="empty">{empty}</div>;

@@ -72,6 +72,20 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
         <span>Insiden adalah <b>indikasi</b>, bukan bukti. Pastikan dengan rekaman CCTV sebelum menyimpulkan atau mengambil tindakan terhadap karyawan.</span>
       </div>
 
+      {outlet.shadow?.active && (
+        <div className="notice shadow-notice" role="status">
+          <IconInfo />
+          <span>
+            <b>Mode shadow</b>{outlet.shadow.pending ? ': menunggu aktivitas pertama.' : `: hari ke-${outlet.shadow.day} dari ${outlet.shadow.days}.`}{' '}
+            Insiden dicatat tetapi belum dikirim dan belum tampil di daftar ini. {outlet.shadow.incidents} insiden tercatat.{' '}
+            <Link href={`/shadow?outlet=${encodeURIComponent(outlet.id)}`}>Lihat ringkasan →</Link>
+          </span>
+        </div>
+      )}
+      {outlet.shadow && !outlet.shadow.active && outlet.shadow.incidents > 0 && (
+        <p className="small"><Link href={`/shadow?outlet=${encodeURIComponent(outlet.id)}`}>Hasil periode shadow ({outlet.shadow.incidents} insiden) →</Link></p>
+      )}
+
       {tab === 'open' && (
         <div className="stats">
           <div className="stat stat-CRITICAL"><b>{counts.CRITICAL}</b><span>Kritis</span></div>

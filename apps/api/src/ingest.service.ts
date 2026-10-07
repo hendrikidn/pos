@@ -3,6 +3,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { GENESIS_HASH, hashEvent, isEventType, type EventType, type PosEvent } from '@pos/events';
 import type { DeviceAuth } from './auth';
 import { Database } from './db/database';
+import { clampShadowStart, GO_LIVE_TYPES } from './shadow';
 
 export const MAX_BATCH = 500;
 
@@ -125,7 +126,7 @@ export class IngestService {
    * Event yang tidak lolos pemeriksaan hash/rantai tetap disimpan (sebagai bukti) dan ditandai,
    * lalu dilaporkan di `issues` dan dinilai oleh aturan R24.
    */
-  async ingest(auth: DeviceAuth, rawEvents: unknown): Promise<IngestResult> {
+  async ingest(auth: DeviceAuth, rawEvents: unknown, now = Date.now()): Promise<IngestResult> {
     if (!Array.isArray(rawEvents)) throw new BadRequestException('events harus array');
     if (rawEvents.length > MAX_BATCH) throw new BadRequestException(`maksimal ${MAX_BATCH} event per batch`);
 
@@ -161,6 +162,12 @@ export class IngestService {
       let lastSeq = dev.last_seq;
       let lastHash = dev.last_hash === '' ? GENESIS_HASH : dev.last_hash;
       let accepted = 0;
+      /** Waktu terkoreksi event bermakna yang diterima, untuk menandai awal mode shadow. */
+      const goLive: number[] = [];
+      const accept = (e: PosEvent) => {
+        accepted++;
+        if ((GO_LIVE_TYPES as readonly string[]).includes(e.type)) goLive.push(e.deviceTime - e.clockOffsetMs);
+      };
       let duplicates = 0;
       const issues: IngestIssue[] = [];
       const note = async (issue: IngestIssue) => {
@@ -203,7 +210,7 @@ export class IngestService {
           }
           late ??= await checkSig(e);
           await insert(late);
-          accepted++;
+          accept(e);
           continue;
         }
 
@@ -225,7 +232,14 @@ export class IngestService {
         await insert(integrity);
         lastSeq = e.seq;
         lastHash = e.hash;
-        accepted++;
+        accept(e);
+      }
+
+      // Mode shadow mulai berhitung dari aktivitas pertama yang bermakna, bukan dari saat outlet dibuat atau alat dinyalakan.
+      if (goLive.length > 0) {
+        await q.query('update outlet set shadow_started_ms = $2 where id = $1 and shadow_days > 0 and shadow_started_ms is null', [
+          auth.outletId, clampShadowStart(Math.min(...goLive), now),
+        ]);
       }
 
       const serverTime = Date.now();

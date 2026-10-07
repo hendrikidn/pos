@@ -4,6 +4,7 @@ import {
   buildIncidents, DEFAULT_CONFIG, evaluatePatternRules, evaluateRules, type Capabilities, type Incident, type RuleHit,
 } from '@pos/rules';
 import { Database } from './db/database';
+import { shadowState } from './shadow';
 import type { Queryable } from './db/driver';
 
 /**
@@ -55,8 +56,8 @@ export class GuardService {
   async evaluate(tenantId: string, outletId: string, now = Date.now()): Promise<EvaluateResult> {
     return this.db.tenantTx(tenantId, async (q) => {
       const outlet = (
-        await q.query<{ capabilities: Capabilities; terminals: string[]; utc_offset_minutes: number; policy: { employeeMealQuota?: number } | null }>(
-          'select capabilities, terminals, utc_offset_minutes, policy from outlet where id = $1',
+        await q.query<{ capabilities: Capabilities; terminals: string[]; utc_offset_minutes: number; policy: { employeeMealQuota?: number } | null; shadow_days: number; shadow_started_ms: number | null }>(
+          'select capabilities, terminals, utc_offset_minutes, policy, shadow_days, shadow_started_ms from outlet where id = $1',
           [outletId],
         )
       ).rows[0];
@@ -100,21 +101,23 @@ export class GuardService {
         ...bankHits,
       ];
       const incidents = buildIncidents(hits).map((i) => ({ ...i, id: `${outletId}:${i.id}` }));
-      const newCritical = await this.persist(q, tenantId, outletId, incidents, from);
+      // Selama mode shadow insiden tetap dihitung dan disimpan, tetapi ditandai dan tidak memicu notifikasi.
+      const shadow = shadowState(outlet.shadow_days, outlet.shadow_started_ms, now).active;
+      const newCritical = await this.persist(q, tenantId, outletId, incidents, from, shadow);
       return { incidents, newCritical };
     });
   }
 
   private async persist(
-    q: Queryable, tenantId: string, outletId: string, incidents: Incident[], windowStart: number,
+    q: Queryable, tenantId: string, outletId: string, incidents: Incident[], windowStart: number, shadow: boolean,
   ): Promise<Incident[]> {
     const existing = new Map(
       (
-        await q.query<{ id: string; status: string; level: string }>(
-          'select id, status, level from incident where outlet_id = $1 and start_ms >= $2',
+        await q.query<{ id: string; status: string; level: string; shadow: boolean }>(
+          'select id, status, level, shadow from incident where outlet_id = $1 and start_ms >= $2',
           [outletId, windowStart],
         )
-      ).rows.map((r) => [r.id, { status: r.status, level: r.level }]),
+      ).rows.map((r) => [r.id, { status: r.status, level: r.level, shadow: r.shadow }]),
     );
     const newCritical: Incident[] = [];
 
@@ -122,14 +125,14 @@ export class GuardService {
       const prev = existing.get(i.id);
       const status = prev?.status;
       if (prev === undefined) {
-        if (i.level === 'CRITICAL') newCritical.push(i);
+        if (i.level === 'CRITICAL' && !shadow) newCritical.push(i);
         await q.query(
           `insert into incident (id, tenant_id, outlet_id, terminal_id, start_ms, end_ms, score, level, multiplier,
-                                 order_ids, actor_ids, hits)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb)`,
+                                 order_ids, actor_ids, hits, shadow)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13)`,
           [
             i.id, tenantId, outletId, i.terminalId, i.startAt, i.endAt, i.score, i.level, i.multiplier,
-            JSON.stringify(i.orderIds), JSON.stringify(i.actorIds), JSON.stringify(i.hits),
+            JSON.stringify(i.orderIds), JSON.stringify(i.actorIds), JSON.stringify(i.hits), shadow,
           ],
         );
       } else {
@@ -137,7 +140,7 @@ export class GuardService {
         const reopen = status === 'RETRACTED' ? ", status = 'OPEN'" : '';
         if (status === 'OPEN' || status === 'RETRACTED') {
           // Insiden yang naik menjadi kritis karena bukti tambahan juga perlu notifikasi.
-          if (i.level === 'CRITICAL' && prev.level !== 'CRITICAL') newCritical.push(i);
+          if (i.level === 'CRITICAL' && prev.level !== 'CRITICAL' && !prev.shadow) newCritical.push(i);
           await q.query(
             `update incident set terminal_id = $2, start_ms = $3, end_ms = $4, score = $5, level = $6, multiplier = $7,
                     order_ids = $8::jsonb, actor_ids = $9::jsonb, hits = $10::jsonb, updated_at = now()${reopen}

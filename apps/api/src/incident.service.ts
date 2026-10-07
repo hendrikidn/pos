@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { ApiAuth } from './auth';
 import { Database } from './db/database';
+import { shadowState, type ShadowState } from './shadow';
 
 export const REVIEW_LABELS = ['CONFIRMED_FRAUD', 'LEGIT', 'FALSE_ALARM', 'INCONCLUSIVE'] as const;
 export type ReviewLabel = (typeof REVIEW_LABELS)[number];
@@ -13,9 +14,11 @@ export interface OutletRow {
 }
 
 export interface OutletSummary extends OutletRow {
-  /** Insiden terbuka yang boleh dilihat pengguna ini (tanpa yang melibatkan dirinya) */
+  /** Insiden terbuka yang boleh dilihat pengguna ini (tanpa yang melibatkan dirinya dan tanpa insiden shadow) */
   open_incidents: number;
   open_critical: number;
+  /** Status mode shadow, dan jumlah insiden yang tercatat selama shadow (tidak masuk antrean review). */
+  shadow: ShadowState & { incidents: number };
 }
 
 export interface ReviewRow {
@@ -38,9 +41,11 @@ export interface IncidentRow {
   actor_ids: string[];
   hits: unknown[];
   status: string;
+  /** Tercatat selama mode shadow: tidak dikirim sebagai notifikasi dan tidak masuk antrean review. */
+  shadow: boolean;
 }
 
-const COLUMNS = 'id, outlet_id, terminal_id, start_ms, end_ms, score, level, multiplier, order_ids, actor_ids, hits, status';
+const COLUMNS = 'id, outlet_id, terminal_id, start_ms, end_ms, score, level, multiplier, order_ids, actor_ids, hits, status, shadow';
 
 @Injectable()
 export class IncidentService {
@@ -56,7 +61,7 @@ export class IncidentService {
       (
         await q.query<IncidentRow>(
           `select ${COLUMNS} from incident
-           where outlet_id = $1 and status = $2 and level = any($3::text[]) and not jsonb_exists(actor_ids, $4)
+           where outlet_id = $1 and status = $2 and level = any($3::text[]) and not shadow and not jsonb_exists(actor_ids, $4)
            order by start_ms desc limit 200`,
           [outletId, opts.status ?? 'OPEN', levels, auth.userId],
         )
@@ -64,19 +69,24 @@ export class IncidentService {
     );
   }
 
-  listOutlets(auth: ApiAuth): Promise<OutletSummary[]> {
+  listOutlets(auth: ApiAuth, now = Date.now()): Promise<OutletSummary[]> {
     return this.db.tenantTx(auth.tenantId, async (q) =>
       (
-        await q.query<OutletSummary>(
-          `select o.id, o.name, o.cctv_retention_days, o.cctv_clock_offset_sec,
+        await q.query<Omit<OutletSummary, 'shadow'> & { shadow_days: number; shadow_started_ms: number | null; shadow_incidents: number }>(
+          `select o.id, o.name, o.cctv_retention_days, o.cctv_clock_offset_sec, o.shadow_days, o.shadow_started_ms,
                   (select count(*)::int from incident i
-                    where i.outlet_id = o.id and i.status = 'OPEN' and not jsonb_exists(i.actor_ids, $1)) as open_incidents,
+                    where i.outlet_id = o.id and i.status = 'OPEN' and not i.shadow and not jsonb_exists(i.actor_ids, $1)) as open_incidents,
                   (select count(*)::int from incident i
-                    where i.outlet_id = o.id and i.status = 'OPEN' and i.level = 'CRITICAL' and not jsonb_exists(i.actor_ids, $1)) as open_critical
+                    where i.outlet_id = o.id and i.status = 'OPEN' and i.level = 'CRITICAL' and not i.shadow and not jsonb_exists(i.actor_ids, $1)) as open_critical,
+                  (select count(*)::int from incident i
+                    where i.outlet_id = o.id and i.shadow and i.status <> 'RETRACTED' and not jsonb_exists(i.actor_ids, $1)) as shadow_incidents
            from outlet o order by o.name`,
           [auth.userId],
         )
-      ).rows,
+      ).rows.map(({ shadow_days, shadow_started_ms, shadow_incidents, ...o }) => ({
+        ...o,
+        shadow: { ...shadowState(shadow_days, shadow_started_ms, now), incidents: shadow_incidents },
+      })),
     );
   }
 

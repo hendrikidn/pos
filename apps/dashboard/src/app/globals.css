@@ -386,6 +386,8 @@ ul.plain { margin: 0 0 8px; padding-left: 18px; }
 .hb-val { grid-column: 2; color: var(--muted); font-size: 14.5px; }
 .hb-val b { color: var(--text); }
 
+.hbars-wide li { grid-template-columns: minmax(150px, 300px) 1fr; }
+
 /* Grafik kolom: batang tipis (maks. 24px), ujung atas membulat 4px, dasar rata, jarak 2px antar-batang. */
 .chart { margin: 0; }
 .chart-body { display: grid; grid-template-columns: 44px 1fr; gap: 8px; }
@@ -416,8 +418,15 @@ ul.plain { margin: 0 0 8px; padding-left: 18px; }
 
 @media (max-width: 560px) {
   .hero-value { font-size: 40px; }
-  .hbars li { grid-template-columns: 1fr; }
+  .hbars li, .hbars-wide li { grid-template-columns: 1fr; }
   .hb-val { grid-column: 1; }
   .chart-body { grid-template-columns: 44px 1fr; gap: 6px; }
   .chart-x { margin-left: 50px; }
 }
+
+/* ---------- Mode shadow ---------- */
+.shadow-notice { background: var(--med-bg); color: var(--med-fg); }
+.shadow-notice svg { color: var(--med-fg); }
+.shadow-notice a { color: inherit; font-weight: 700; text-decoration: underline; }
+.progress { height: 12px; border-radius: 6px; background: var(--surface-2); overflow: hidden; margin: 10px 0 12px; }
+.progress > span { display: block; height: 100%; border-radius: 6px; background: var(--primary); min-width: 4px; }

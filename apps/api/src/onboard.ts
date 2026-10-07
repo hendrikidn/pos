@@ -1,4 +1,5 @@
 import { AdminService } from './admin.service';
+import { DEFAULT_SHADOW_DAYS } from './shadow';
 import { newToken, sha256 } from './auth';
 import type { Database } from './db/database';
 
@@ -39,7 +40,7 @@ export async function onboard(db: Database, opts: OnboardOptions): Promise<Onboa
     throw new Error(`outlet "${opts.outletId}" sudah dipakai tenant lain`);
   }
   const outletCreated = !existing.rowCount;
-  if (outletCreated) await admin.createOutlet(opts.tenantId, opts.outletId, opts.outletName, { terminals: opts.terminals });
+  if (outletCreated) await admin.createOutlet(opts.tenantId, opts.outletId, opts.outletName, { terminals: opts.terminals, shadowDays: DEFAULT_SHADOW_DAYS });
 
   const ownerToken = await admin.createApiToken(opts.tenantId, opts.ownerId, 'OWNER', 'setup');
   return { tenantCreated, outletCreated, ownerToken };

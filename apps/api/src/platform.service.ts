@@ -5,6 +5,7 @@ import type { Queryable } from './db/driver';
 import { EMAIL_RE, normalizeEmail } from './login.service';
 import { CLOCK, type Clock } from './pipeline.service';
 import { computeKpis, dailySeries, emptyKpi, type TenantKpi } from './platform-kpi';
+import { DEFAULT_SHADOW_DAYS } from './shadow';
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{1,39}$/;
 const MAX_TERMINALS = 50;
@@ -149,8 +150,8 @@ export class PlatformService {
       if (ownerEmail && (await q.query('select 1 from dashboard_user where lower(email) = $1', [ownerEmail])).rowCount) throw new ConflictException('email sudah dipakai pengguna lain');
       if ((await q.query('select 1 from outlet where id = $1', [outletId])).rowCount) throw new ConflictException(`outlet "${outletId}" sudah dipakai`);
       await q.query('insert into tenant (id, name) values ($1, $2)', [tenantId, tenantName]);
-      await q.query('insert into outlet (id, tenant_id, name, terminals) values ($1, $2, $3, $4::jsonb)', [
-        outletId, tenantId, outletName, JSON.stringify(termIds),
+      await q.query('insert into outlet (id, tenant_id, name, terminals, shadow_days) values ($1, $2, $3, $4::jsonb, $5)', [
+        outletId, tenantId, outletName, JSON.stringify(termIds), DEFAULT_SHADOW_DAYS,
       ]);
       let ownerToken: string | undefined;
       if (issueToken) {

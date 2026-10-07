@@ -8,6 +8,7 @@ import { NotificationService } from './notification.service';
 import { CLOCK, PipelineService, type Clock } from './pipeline.service';
 import { ReportService } from './report.service';
 import { SettlementService, type SlipInput } from './settlement.service';
+import { ShadowService } from './shadow.service';
 
 @Controller()
 export class ApiController {
@@ -19,6 +20,7 @@ export class ApiController {
     @Inject(NotificationService) private readonly notifications: NotificationService,
     @Inject(SettlementService) private readonly settlements: SettlementService,
     @Inject(ReportService) private readonly reports: ReportService,
+    @Inject(ShadowService) private readonly shadow: ShadowService,
     @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
@@ -33,7 +35,7 @@ export class ApiController {
   @Post('v1/events')
   async postEvents(@Req() req: AuthedRequest, @Body() body: { events?: unknown }) {
     const device = requireDevice(req);
-    const result = await this.ingest.ingest(device, body?.events);
+    const result = await this.ingest.ingest(device, body?.events, this.clock());
     if (result.accepted > 0) await this.pipeline.run(device.tenantId, device.outletId, this.clock());
     return result;
   }
@@ -103,7 +105,7 @@ export class ApiController {
 
   @Get('v1/outlets')
   outlets(@Req() req: AuthedRequest) {
-    return this.incidents.listOutlets(requireApi(req));
+    return this.incidents.listOutlets(requireApi(req), this.clock());
   }
 
   @Get('v1/outlets/:outletId/incidents')
@@ -116,6 +118,14 @@ export class ApiController {
     const auth = requireApi(req);
     if (minLevel && !['LOW', 'MEDIUM', 'CRITICAL'].includes(minLevel)) throw new BadRequestException('minLevel tidak valid');
     return this.incidents.list(auth, outletId, { status, minLevel: minLevel as 'LOW' | 'MEDIUM' | 'CRITICAL' | undefined });
+  }
+
+  /** Ringkasan mode shadow: insiden yang tercatat tanpa notifikasi, "apa yang akan terdeteksi". */
+  @Get('v1/outlets/:outletId/shadow')
+  async shadowReport(@Req() req: AuthedRequest, @Param('outletId') outletId: string) {
+    const auth = requireApi(req, ['OWNER', 'OPS', 'MANAGER']);
+    await this.assertOutlet(auth.tenantId, outletId);
+    return this.shadow.report(auth, outletId, this.clock());
   }
 
   @Get('v1/incidents/:id')

@@ -264,7 +264,11 @@ describe('dari event sampai insiden', () => {
     expect((await h.http('GET', '/v1/me')).status).toBe(401);
     // insiden sudah direview, jadi tidak ada yang terbuka; pengguna yang terlibat tidak ikut menghitung
     expect((await h.http('GET', '/v1/outlets', owner)).body).toEqual([
-      { id: 'o1', name: 'Outlet o1', cctv_retention_days: 7, cctv_clock_offset_sec: 0, open_incidents: 0, open_critical: 0 },
+      {
+        id: 'o1', name: 'Outlet o1', cctv_retention_days: 7, cctv_clock_offset_sec: 0, open_incidents: 0, open_critical: 0,
+        // outlet uji dibuat tanpa mode shadow (bawaan AdminService)
+        shadow: { days: 0, enabled: false, active: false, pending: false, startedMs: null, untilMs: null, day: 0, incidents: 0 },
+      },
     ]);
   });
 

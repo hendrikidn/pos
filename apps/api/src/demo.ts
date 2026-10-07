@@ -27,10 +27,12 @@ async function main() {
   await admin.createTenant('demo', 'Demo F&B');
   const caps = { sensor: true, kds: false, printerReportsStatus: true };
   await admin.createOutlet('demo', 'senopati', 'Kopi Senopati', { terminals: ['term-sen', 'pos-1'], capabilities: caps, cctvRetentionDays: 7 });
-  await admin.createOutlet('demo', 'kemang', 'Kopi Kemang', { terminals: ['term-kem'], capabilities: caps, cctvRetentionDays: 14 });
+  // Kemang = outlet baru yang masih dalam mode shadow (insiden dicatat tetapi tidak dikirim); Senopati sudah aktif penuh.
+  await admin.createOutlet('demo', 'kemang', 'Kopi Kemang', { terminals: ['term-kem'], capabilities: caps, cctvRetentionDays: 14, shadowDays: 14 });
   const term = await admin.createDevice('demo', 'senopati', 'term-sen', 'terminal');
   const sensor = await admin.createDevice('demo', 'senopati', 'sensor-sen', 'sensor');
-  await admin.createDevice('demo', 'kemang', 'term-kem', 'terminal');
+  const termKem = await admin.createDevice('demo', 'kemang', 'term-kem', 'terminal');
+  const sensorKem = await admin.createDevice('demo', 'kemang', 'sensor-kem', 'sensor');
   const posToken = await admin.createDevice('demo', 'senopati', 'pos-1', 'terminal'); // terminal POS yang bisa Anda pakai langsung
   const liveSensorToken = await admin.createDevice('demo', 'senopati', 'sensor-pos1', 'sensor'); // sensor ESP32 sungguhan untuk terminal pos-1
   const owner = await admin.createApiToken('demo', 'owner-demo', 'OWNER', 'demo owner');
@@ -121,6 +123,35 @@ async function main() {
   };
   await send('sensor-sen', sensor);
   await send('term-sen', term);
+
+  // Kopi Kemang (shadow): beberapa kasus dalam tiga hari terakhir, tidak ada notifikasi dan tidak masuk antrean review.
+  const k = new Sim('kemang', '2026-01-01', 'term-kem', 'sensor-kem');
+  k.heartbeats('sensor', at(71 * 60), at(0), 5 * MIN);
+  // hari ini (kritis): void setelah customer pergi, kasir dewi
+  k.presence(at(5 * 60 + 2), at(5 * 60 - 1));
+  k.cashOrder('K-101', at(5 * 60), at(5 * 60 - 1), 95_000, 'dewi');
+  k.pos({ type: 'kitchen.status_changed', payload: { orderId: 'K-101', status: 'COOKING' } }, at(5 * 60 - 3), 'dapur');
+  k.pos({ type: 'void.approved', payload: { orderId: 'K-101', reasonCode: 'CUSTOMER_CANCEL', approverIds: ['hendra'], amount: 95_000 } }, at(5 * 60 - 8), 'dewi');
+  // kemarin (sedang): refund tanpa customer; (rendah): customer lama tanpa order
+  k.cashOrder('K-088', at(28 * 60), at(28 * 60 - 1), 54_000, 'dewi');
+  k.pos({ type: 'refund.created', payload: { refundId: 'KR-2', originalOrderId: 'K-088', amount: 54_000, method: 'CASH', approverId: 'hendra' } }, at(27 * 60), 'dewi');
+  k.presence(at(30 * 60 + 1), at(30 * 60 - 1));
+  // dua hari lalu (kritis): void setelah customer pergi, kasir andi
+  k.presence(at(52 * 60 + 2), at(52 * 60 - 1));
+  k.cashOrder('K-051', at(52 * 60), at(52 * 60 - 1), 210_000, 'andi');
+  k.pos({ type: 'kitchen.status_changed', payload: { orderId: 'K-051', status: 'SERVED' } }, at(52 * 60 - 3), 'dapur');
+  k.pos({ type: 'void.approved', payload: { orderId: 'K-051', reasonCode: 'WRONG_ORDER', approverIds: ['hendra'], amount: 210_000 } }, at(52 * 60 - 8), 'andi');
+  // lalu lintas normal
+  for (let i = 0; i < 8; i++) {
+    const t0 = at(70 * 60 - i * 70); // setiap 70 menit
+    k.presence(t0 - 20_000, t0 + 25_000);
+    k.cashOrder(`KN-${i}`, t0, t0 + 20_000, 30_000 + i * 4_000, 'dewi');
+  }
+  k.heartbeat('terminal', at(2));
+  for (const [dev, tk] of [['sensor-kem', sensorKem], ['term-kem', termKem]] as const) {
+    const ev = k.events.filter((e) => e.deviceId === dev).sort((a, b) => a.seq - b.seq);
+    for (let i = 0; i < ev.length; i += 500) await call('/v1/events', tk, { events: ev.slice(i, i + 500) });
+  }
 
   // Slip settlement: batch sebelumnya (kosong) menentukan batas awal, batch ini mencatat 5 QRIS Rp 134.000 sedangkan POS mencatat 6.
   const iso = (ms: number) => new Date(ms).toISOString().replace('Z', '+00:00');

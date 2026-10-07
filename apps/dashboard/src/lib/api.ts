@@ -11,6 +11,18 @@ export interface Me {
   tenantId: string;
 }
 
+/** Status mode shadow outlet (lihat apps/api/src/shadow.ts). */
+export interface ShadowStatus {
+  days: number;
+  enabled: boolean;
+  active: boolean;
+  /** Belum ada aktivitas pertama, jadi hitungan hari belum mulai. */
+  pending: boolean;
+  startedMs: number | null;
+  untilMs: number | null;
+  day: number;
+}
+
 export interface Outlet {
   id: string;
   name: string;
@@ -19,6 +31,7 @@ export interface Outlet {
   /** Hanya ada pada daftar outlet (/v1/outlets). */
   open_incidents?: number;
   open_critical?: number;
+  shadow?: ShadowStatus & { incidents: number };
 }
 
 export interface Hit {
@@ -51,6 +64,8 @@ export interface Incident {
   actor_ids: string[];
   hits: Hit[];
   status: string;
+  /** Tercatat selama mode shadow: tidak dikirim dan tidak masuk antrean review. */
+  shadow?: boolean;
 }
 
 export interface IncidentDetail extends Incident {
@@ -153,6 +168,8 @@ export interface OutletSettings {
   policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number } | null;
   cctv_retention_days: number;
   cctv_clock_offset_sec: number;
+  shadow_days: number;
+  shadow: ShadowStatus;
 }
 
 export interface SettlementLine {
@@ -229,4 +246,22 @@ export interface SalesReport {
     shifts: { shiftId: string; userId: string | null; terminalId: string; at: number; counted: number; expected: number; diff: number }[];
   };
   notes: string[];
+}
+
+/** Respons GET /v1/outlets/:id/shadow. */
+export interface ShadowReport {
+  state: ShadowStatus;
+  summary: {
+    total: number;
+    byLevel: { CRITICAL: number; MEDIUM: number; LOW: number };
+    byRule: { rule: string; label: string; incidents: number }[];
+    byDay: { date: string; total: number; critical: number }[];
+    criticalPerWeek: number | null;
+    reviewed: { total: number; confirmed: number; legit: number; falseAlarm: number; inconclusive: number };
+    criticalPrecision: number | null;
+  };
+  incidents: {
+    id: string; start_ms: number; end_ms: number; score: number; level: 'LOW' | 'MEDIUM' | 'CRITICAL';
+    status: string; order_ids: string[]; actor_ids: string[]; rules: string[];
+  }[];
 }

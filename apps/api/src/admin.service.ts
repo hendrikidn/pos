@@ -16,14 +16,14 @@ export class AdminService {
     tenantId: string,
     id: string,
     name: string,
-    opts: { capabilities?: Capabilities; terminals?: string[]; utcOffsetMinutes?: number; cctvRetentionDays?: number; cctvClockOffsetSec?: number } = {},
+    opts: { capabilities?: Capabilities; terminals?: string[]; utcOffsetMinutes?: number; cctvRetentionDays?: number; cctvClockOffsetSec?: number; shadowDays?: number } = {},
   ): Promise<void> {
     await this.db.admin.query(
-      `insert into outlet (id, tenant_id, name, capabilities, terminals, utc_offset_minutes, cctv_retention_days, cctv_clock_offset_sec)
-       values ($1, $2, $3, coalesce($4::jsonb, '{"sensor":true,"kds":false,"printerReportsStatus":true}'::jsonb), $5::jsonb, $6, $7, $8)`,
+      `insert into outlet (id, tenant_id, name, capabilities, terminals, utc_offset_minutes, cctv_retention_days, cctv_clock_offset_sec, shadow_days)
+       values ($1, $2, $3, coalesce($4::jsonb, '{"sensor":true,"kds":false,"printerReportsStatus":true}'::jsonb), $5::jsonb, $6, $7, $8, $9)`,
       [
         id, tenantId, name, opts.capabilities ? JSON.stringify(opts.capabilities) : null, JSON.stringify(opts.terminals ?? []),
-        opts.utcOffsetMinutes ?? 420, opts.cctvRetentionDays ?? 7, opts.cctvClockOffsetSec ?? 0,
+        opts.utcOffsetMinutes ?? 420, opts.cctvRetentionDays ?? 7, opts.cctvClockOffsetSec ?? 0, opts.shadowDays ?? 0,
       ],
     );
   }

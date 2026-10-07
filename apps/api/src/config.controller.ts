@@ -1,10 +1,14 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { requireApi, requireDevice, type AuthedRequest } from './auth';
+import { CLOCK, type Clock } from './pipeline.service';
 import { ConfigService, type MenuInput, type OutletInput, type SettingsInput, type StaffInput } from './config.service';
 
 @Controller('v1')
 export class ConfigController {
-  constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
+  constructor(
+    @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(CLOCK) private readonly clock: Clock,
+  ) {}
 
   // ----- terminal POS -----
 
@@ -74,13 +78,13 @@ export class ConfigController {
 
   @Get('outlets/:outletId/settings')
   getSettings(@Req() req: AuthedRequest, @Param('outletId') outletId: string) {
-    return this.config.getSettings(requireApi(req, ['OWNER', 'OPS']), outletId);
+    return this.config.getSettings(requireApi(req, ['OWNER', 'OPS']), outletId, this.clock());
   }
 
   @Put('outlets/:outletId/settings')
   async updateSettings(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Body() body: SettingsInput) {
     if (!body || typeof body !== 'object') throw new BadRequestException('isi permintaan kosong');
-    await this.config.updateSettings(requireApi(req, ['OWNER']), outletId, body);
+    await this.config.updateSettings(requireApi(req, ['OWNER']), outletId, body, this.clock());
     return { ok: true };
   }
 }

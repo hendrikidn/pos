@@ -1,6 +1,7 @@
 import { NewOutletForm, OutletDetailsForm } from '@/components/OutletManager';
 import { OutletSettingsForm } from '@/components/OutletSettingsForm';
 import { SettingsNav } from '@/components/SettingsNav';
+import { ShadowControl } from '@/components/ShadowControl';
 import { Shell } from '@/components/Shell';
 import { api, authed, type Me, type Outlet, type OutletSettings } from '@/lib/api';
 
@@ -20,6 +21,7 @@ export default async function OutletPage() {
         <div key={s.id}>
           <OutletDetailsForm s={s} />
           <OutletSettingsForm s={s} />
+          <ShadowControl s={s} />
         </div>
       ))}
     </Shell>

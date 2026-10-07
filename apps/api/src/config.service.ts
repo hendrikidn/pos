@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import type { ApiAuth, DeviceAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
+import { DEFAULT_SHADOW_DAYS, shadowState } from './shadow';
 
 const pbkdf2Async = promisify(pbkdf2);
 
@@ -59,6 +60,10 @@ export interface SettingsInput {
   } | null;
   cctvRetentionDays?: number;
   cctvClockOffsetSec?: number;
+  /** Lama mode shadow (hari, 0 = nonaktif). Mengubah hanya lama; mulai ulang dari sekarang dengan `shadowRestart`. */
+  shadowDays?: number;
+  /** Memulai hitungan shadow dari sekarang (untuk mengaktifkan kembali). Perlu `shadowDays` > 0. */
+  shadowRestart?: boolean;
 }
 
 export interface OutletInput {
@@ -213,15 +218,16 @@ export class ConfigService {
 
   // ---------- pengaturan outlet ----------
 
-  async getSettings(auth: ApiAuth, outletId: string) {
+  async getSettings(auth: ApiAuth, outletId: string, now = Date.now()) {
     const row = await this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query('select id, name, terminals, merchant_name, tax_percent, edcs, policy, cctv_retention_days, cctv_clock_offset_sec from outlet where id = $1', [outletId])).rows[0],
+      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, edcs, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
     );
     if (!row) throw new NotFoundException('outlet tidak ditemukan');
-    return row;
+    const { shadow_started_ms, ...rest } = row;
+    return { ...rest, shadow: shadowState(row.shadow_days, shadow_started_ms, now) };
   }
 
-  async updateSettings(auth: ApiAuth, outletId: string, s: SettingsInput): Promise<void> {
+  async updateSettings(auth: ApiAuth, outletId: string, s: SettingsInput, now = Date.now()): Promise<void> {
     if (s.merchantName !== undefined) need(s.merchantName.trim().length > 0 && s.merchantName.length <= 80, 'nama merchant wajib (maks. 80)');
     if (s.taxPercent !== undefined) need(Number.isInteger(s.taxPercent) && s.taxPercent >= 0 && s.taxPercent <= 100, 'taxPercent 0–100');
     if (s.edcs !== undefined) {
@@ -237,19 +243,28 @@ export class ConfigService {
       }
     }
     if (s.cctvRetentionDays !== undefined) need(Number.isInteger(s.cctvRetentionDays) && s.cctvRetentionDays >= 1 && s.cctvRetentionDays <= 365, 'cctvRetentionDays 1–365');
+    if (s.shadowDays !== undefined) need(Number.isInteger(s.shadowDays) && s.shadowDays >= 0 && s.shadowDays <= 60, 'shadowDays 0–60 (0 = nonaktif)');
+    if (s.shadowRestart !== undefined) need(typeof s.shadowRestart === 'boolean', 'shadowRestart harus true atau false');
+    if (s.shadowRestart) need(s.shadowDays !== undefined && s.shadowDays > 0, 'shadowRestart memerlukan shadowDays lebih dari 0');
     await this.db.tenantTx(auth.tenantId, async (q) => {
       const r = await q.query(
         `update outlet set merchant_name = coalesce($2, merchant_name), tax_percent = coalesce($3, tax_percent),
                 edcs = coalesce($4::jsonb, edcs), policy = case when $5::boolean then $6::jsonb else policy end,
-                cctv_retention_days = coalesce($7, cctv_retention_days), cctv_clock_offset_sec = coalesce($8, cctv_clock_offset_sec)
+                cctv_retention_days = coalesce($7, cctv_retention_days), cctv_clock_offset_sec = coalesce($8, cctv_clock_offset_sec),
+                shadow_days = coalesce($9, shadow_days),
+                shadow_started_ms = case when $10::boolean then $11::float8 else shadow_started_ms end
          where id = $1`,
         [
           outletId, s.merchantName?.trim() ?? null, s.taxPercent ?? null, s.edcs ? JSON.stringify(s.edcs) : null,
           s.policy !== undefined, s.policy ? JSON.stringify(s.policy) : null, s.cctvRetentionDays ?? null, s.cctvClockOffsetSec ?? null,
+          s.shadowDays ?? null, s.shadowRestart === true, now,
         ],
       );
       if (r.rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
-      await this.audit(q, auth, 'outlet.settings', { outletId, fields: Object.keys(s) });
+      await this.audit(q, auth, 'outlet.settings', {
+        outletId, fields: Object.keys(s),
+        ...(s.shadowDays !== undefined ? { shadowDays: s.shadowDays, shadowRestart: s.shadowRestart === true } : {}),
+      });
     });
   }
 
@@ -276,7 +291,7 @@ export class ConfigService {
 
     try {
       await this.db.tenantTx(auth.tenantId, async (q) => {
-        await q.query('insert into outlet (id, tenant_id, name, terminals) values ($1, $2, $3, $4::jsonb)', [id, auth.tenantId, name, JSON.stringify(terminals)]);
+        await q.query('insert into outlet (id, tenant_id, name, terminals, shadow_days) values ($1, $2, $3, $4::jsonb, $5)', [id, auth.tenantId, name, JSON.stringify(terminals), DEFAULT_SHADOW_DAYS]);
         await this.audit(q, auth, 'outlet.create', { outletId: id, name, terminals });
       });
     } catch (e) {

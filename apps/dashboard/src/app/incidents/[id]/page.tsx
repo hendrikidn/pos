@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { ruleLabel } from '@pos/rules/src/labels';
 import { LevelBadge, StatusBadge } from '@/components/Badges';
 import { CopyButton } from '@/components/CopyButton';
-import { IconBack } from '@/components/Icons';
+import { IconBack, IconInfo } from '@/components/Icons';
 import { ReviewForm } from '@/components/ReviewForm';
 import { Shell } from '@/components/Shell';
 import { api, ApiError, authed, type IncidentDetail, type Me } from '@/lib/api';
@@ -35,6 +35,13 @@ export default async function IncidentPage({ params }: { params: Promise<{ id: s
   return (
     <Shell me={me}>
       <Link className="back" href={`/?outlet=${encodeURIComponent(inc.outlet_id)}`}><IconBack /> {inc.outlet.name}</Link>
+
+      {inc.shadow && (
+        <div className="notice shadow-notice" role="status">
+          <IconInfo />
+          <span>Insiden ini tercatat saat <b>mode shadow</b>: tidak dikirim sebagai notifikasi dan tidak masuk antrean review. Anda tetap bisa mereviewnya untuk menilai presisi. <Link href={`/shadow?outlet=${encodeURIComponent(inc.outlet_id)}`}>Ringkasan shadow →</Link></span>
+        </div>
+      )}
 
       <div className="page-head">
         <h1>Skor <span className="score">{inc.score}</span></h1>

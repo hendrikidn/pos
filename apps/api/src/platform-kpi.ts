@@ -102,9 +102,9 @@ export async function computeKpis(db: Database, now: number, tenantId?: string) 
     ),
     db.admin.query<Record<string, unknown>>(
       `select tenant_id, outlet_id,
-              count(*) filter (where status = 'OPEN')::int as open,
-              count(*) filter (where status = 'OPEN' and level = 'CRITICAL')::int as critical,
-              count(*) filter (where status = 'CONFIRMED_FRAUD' and start_ms >= $1::float8)::int as confirmed
+              count(*) filter (where status = 'OPEN' and not shadow)::int as open,
+              count(*) filter (where status = 'OPEN' and level = 'CRITICAL' and not shadow)::int as critical,
+              count(*) filter (where status = 'CONFIRMED_FRAUD' and not shadow and start_ms >= $1::float8)::int as confirmed
        from incident where ($2::text is null or tenant_id = $2) group by tenant_id, outlet_id`,
       [now - 30 * DAY_MS, t],
     ),

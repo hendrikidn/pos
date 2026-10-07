@@ -255,7 +255,7 @@ Zona dan ambang bergantung pada tempat. **Jangan memakai nilai bawaan di outlet 
 | `Radar: no_radar` | TX/RX tidak disilang, tanpa 5 V, atau pin salah | TX sensor ke GPIO4, RX sensor ke GPIO3, sensor ke 5V |
 | Portal `POSGUARD-xxxx` tidak muncul | Sensor sudah terpasang | Reset pabrik (BOOT 10 detik) |
 | "Gagal tersambung ke WiFi" di portal | WiFi 5 GHz, atau sandi salah | Pakai WiFi 2,4 GHz, periksa sandi |
-| "Koneksi aman (HTTPS) ... gagal" | Jam belum sinkron, domain salah, atau sertifikat server tidak sah (mis. Caddy belum mendapat sertifikat) | Pastikan `https://pos.dolanyu.com/healthz` terbuka di browser; WiFi sensor harus punya internet (NTP) |
+| "Koneksi aman (HTTPS) ... gagal" | Jam belum sinkron, domain salah, atau sertifikat server tidak sah (mis. sertifikat belum terbit di web server) | Pastikan `https://pos.dolanyu.com/healthz` terbuka di browser; WiFi sensor harus punya internet (NTP) |
 | "Jam tidak bisa disinkronkan" | WiFi tanpa akses internet (NTP diblokir) | Pakai WiFi yang punya internet; sertifikat HTTPS tidak bisa divalidasi tanpa jam |
 | "Tidak bisa menghubungi server" | `SERVER_URL` salah, API mati, atau beda jaringan | Cek IP Mac (`ipconfig getifaddr en0`), pastikan `npm run demo` jalan, satu WiFi |
 | "kode pairing tidak valid" | Kode salah, kedaluwarsa, atau sudah dipakai | Buat kode baru di dashboard |

@@ -1,4 +1,6 @@
-# POS Guard di satu VPS: PostgreSQL + API + dashboard di belakang Caddy (HTTPS otomatis).
+# POS Guard di VPS yang sudah punya situs lain: PostgreSQL + API + dashboard.
+# TIDAK memakai port 80/443 dan tidak menjalankan web server sendiri. API dan dashboard hanya dibuka di 127.0.0.1 pada port
+# yang jarang dipakai; web server yang sudah ada (nginx/Caddy/...) meneruskan pos.dolanyu.com ke sana dan mengurus HTTPS.
 # Jalankan dari folder deploy/:  docker compose up -d --build
 name: posguard
 
@@ -31,7 +33,7 @@ services:
     environment:
       DATABASE_URL: postgres://posguard:${POSTGRES_PASSWORD}@db:5432/posguard
       PORT: "3000"
-      # Satu proxy tepercaya (Caddy): alamat pemanggil diambil dari X-Forwarded-For.
+      # Satu proxy tepercaya (web server di host): alamat pemanggil diambil dari X-Forwarded-For.
       TRUST_PROXY: "1"
       DASHBOARD_URL: https://${DOMAIN:?isi DOMAIN di deploy/.env}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
@@ -39,6 +41,9 @@ services:
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WHATSAPP_TEMPLATE: ${WHATSAPP_TEMPLATE:-}
       WHATSAPP_LANGUAGE: ${WHATSAPP_LANGUAGE:-}
+    ports:
+      # Hanya localhost: tidak terjangkau dari internet; web server di host yang meneruskannya.
+      - "127.0.0.1:${API_PORT:-18081}:3000"
 
   dashboard:
     build:
@@ -50,25 +55,8 @@ services:
       - api
     environment:
       API_URL: http://api:3000
-
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    depends_on:
-      - api
-      - dashboard
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      DOMAIN: ${DOMAIN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      - "127.0.0.1:${DASHBOARD_PORT:-18082}:3001"
 
 volumes:
   pgdata:
-  caddy_data:
-  caddy_config:

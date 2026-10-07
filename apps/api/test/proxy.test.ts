@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHarness, type Harness } from './harness';
 
-/** Di belakang Caddy, pembatas kode pairing harus membedakan pemanggil lewat X-Forwarded-For, bukan memakai IP proxy. */
+/** Di belakang reverse proxy (nginx/Caddy), pembatas kode pairing harus membedakan pemanggil lewat X-Forwarded-For, bukan memakai IP proxy. */
 describe('pembatas percobaan di belakang reverse proxy', () => {
   let h: Harness;
   let port: number;

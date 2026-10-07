@@ -1,106 +1,195 @@
-# Deploy POS Guard di VPS (Ubuntu 24.04)
+# Deploy POS Guard di VPS yang sudah punya situs lain (Ubuntu 24.04)
 
-PostgreSQL, API, dan dashboard berjalan di satu VPS dengan Docker Compose. Caddy menjadi pintu masuk dan mengurus sertifikat HTTPS otomatis.
+PostgreSQL, API, dan dashboard berjalan dengan Docker Compose, terpisah dari situs yang sudah ada. POS **tidak memakai port 80/443** dan tidak menjalankan web server sendiri: web server yang sudah ada di VPS (nginx atau Caddy) meneruskan `pos.dolanyu.com` ke POS dan mengurus HTTPS-nya.
 
 ```
-Sensor / terminal POS ──HTTPS──► Caddy :443 ──► /v1/*, /healthz ──► API :3000 ──► PostgreSQL (internal)
-Browser owner ─────────HTTPS──►        └────── lainnya ───────────► Dashboard :3001
+Internet ──HTTPS──► web server yang SUDAH ada (80/443)
+                      ├─ dolanyu.com                 → proyek lama (tidak diubah)
+                      ├─ goldenlamian.dolanyu.com    → proyek lama (tidak diubah)
+                      └─ pos.dolanyu.com
+                           ├─ /v1/*, /healthz ─► 127.0.0.1:18081 ─► API ──┐
+                           └─ lainnya ─────────► 127.0.0.1:18082 ─► Dashboard
+                                                                   PostgreSQL (internal Docker, tanpa port)
 ```
 
-Domain: `pos.dolanyu.com`. Hanya port 22, 80, dan 443 yang terbuka. Database tidak punya port yang dipublikasikan.
+> **Status:** konfigurasi ini **belum dijalankan di VPS sungguhan** dan Docker tidak tersedia di mesin pengembangan. Yang sudah diuji: instalasi dependensi yang difilter, API start dari hasil instalasi itu (migrasi otomatis, `/healthz`), build dan start dashboard produksi, serta alur API terhadap PostgreSQL 18 asli. **Belum terbukti:** build image, Compose, konfigurasi nginx/Caddy di bawah, `backup.sh`, dan prosedur pemulihan. Bila ada langkah yang gagal, salin pesan errornya.
 
-> **Status:** konfigurasi ini **belum dijalankan di VPS sungguhan** dan Docker tidak tersedia di mesin pengembangan. Yang sudah diuji: instalasi dependensi yang difilter, API start dari hasil instalasi itu (migrasi otomatis, `/healthz`), build dan start dashboard produksi, serta alur API terhadap PostgreSQL 18 asli. **Belum terbukti:** build image, Compose, sertifikat Caddy, `backup.sh`, dan prosedur pemulihan. Bila ada langkah yang gagal, salin pesan errornya.
+## Apa yang bisa bentrok, dan apa yang tidak
 
-## Prasyarat
+| Sumber bentrok | Bentrok? | Alasan |
+|---|---|---|
+| Port 80/443 | **Tidak** | POS tidak membukanya; web server lama yang memakai |
+| Port 3000/3001 (Node) | **Tidak** | Hanya ada di dalam jaringan Docker POS, tidak dipublikasikan ke host |
+| Port 5432 (PostgreSQL) | **Tidak** | Database POS tidak punya port yang dipublikasikan; PostgreSQL proyek lain di host tidak tersentuh |
+| Port 18081, 18082 | Jarang | Satu-satunya port POS di host, hanya di `127.0.0.1`. Cek dulu (langkah 0); ubah di `.env` bila terpakai |
+| Nama container/volume/jaringan | **Tidak** | Semua berawalan `posguard_` / `posguard-` (`name: posguard`) |
+| Docker | Perhatikan | Bila Docker belum terpasang, memasangnya mengubah aturan `iptables`. Biasanya aman, tapi lakukan di jam sepi |
+| RAM/CPU | Mungkin | Build image dashboard butuh RAM besar sesaat; lihat bagian Troubleshooting |
 
-- VPS Contabo dengan Ubuntu 24.04, akses SSH, dan minimal 2 GB RAM (build dashboard memakai memori cukup besar; bila build gagal karena memori, tambahkan swap).
-- Subdomain `pos.dolanyu.com` yang bisa Anda atur DNS-nya.
-- Kode project sudah ada di repositori GitHub yang bisa diakses dari VPS.
+## 0. Periksa kondisi VPS (hanya membaca)
+
+```
+sudo ss -tlnp | grep -E ':(80|443|3000|3001|5432|18081|18082)\b'    # siapa memakai port
+sudo systemctl is-active nginx caddy apache2                          # web server mana yang aktif
+docker --version 2>&1; docker ps 2>&1 | head                          # Docker sudah ada? proyek lama pakai Docker?
+free -h; df -h /                                                      # RAM dan disk
+```
+Dari sini Anda tahu web server mana yang dipakai (nginx atau Caddy; bila Apache atau Traefik, beri tahu saya dan konfigurasinya saya sesuaikan) dan apakah port 18081/18082 kosong.
 
 ## 1. Arahkan DNS
 
-Di pengelola DNS `dolanyu.com`, buat record:
+Di pengelola DNS `dolanyu.com`, tambahkan record (record situs lama jangan diubah):
 
 | Jenis | Nama | Nilai |
 |---|---|---|
-| A | `pos` | IP publik VPS |
-| AAAA | `pos` | IPv6 VPS (opsional; hanya bila VPS benar-benar menjangkau lewat IPv6) |
+| A | `pos` | IP publik VPS (sama dengan situs lain) |
 
-Tunggu beberapa menit, lalu dari komputer Anda:
-```
-dig +short pos.dolanyu.com
-```
-Hasilnya harus IP VPS. **Jangan lanjut sebelum benar**: Caddy butuh DNS yang tepat untuk mendapat sertifikat.
+Cek dari komputer Anda: `dig +short pos.dolanyu.com` harus IP VPS.
 
-## 2. Siapkan server
+> **Bila DNS dikelola Cloudflare:** set record `pos` ke **DNS only** (awan abu-abu), bukan Proxied. Dengan proxy Cloudflare, sertifikat yang dilihat sensor berasal dari Cloudflare dan rantainya bisa tidak cocok dengan bundel CA firmware.
 
-Masuk lewat SSH (`ssh root@IP-VPS`), lalu buat pengguna biasa dan amankan akses:
+## 2. Buat pengguna dan direktori khusus POS
+
+Dari akun admin Anda (yang punya `sudo`):
 
 ```
-adduser deploy
-usermod -aG sudo deploy
-rsync --archive --chown=deploy:deploy ~/.ssh /home/deploy      # salin kunci SSH bila login dengan kunci
+sudo adduser --disabled-password --gecos "" posguard
+sudo usermod -aG docker posguard        # setelah Docker terpasang (langkah 3)
+sudo -iu posguard                       # masuk sebagai posguard (tanpa login SSH langsung)
 ```
-Buka sesi baru sebagai `deploy` (`ssh deploy@IP-VPS`) dan pastikan bisa login, baru lanjut. Setelah itu sebaiknya nonaktifkan login root dengan sandi.
 
-Firewall:
-```
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y ufw git curl ca-certificates
-sudo ufw allow OpenSSH
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 443/udp
-sudo ufw enable
-```
-Bila di panel Contabo ada fitur firewall, izinkan juga port yang sama di sana.
+Semua file POS berada di `/home/posguard/` dan tidak menyentuh direktori proyek lama:
 
-## 3. Install Docker
-
-Cara resmi untuk Ubuntu:
 ```
+/home/posguard/pos/        ← kode (git clone)
+/home/posguard/backups/    ← cadangan database
+```
+Data database ada di volume Docker `posguard_pgdata` (di `/var/lib/docker/volumes/`), terpisah dari proyek lain.
+
+**Catatan keamanan:** anggota grup `docker` setara dengan akses root atas mesin. Pengguna `posguard` memisahkan berkas dan kebiasaan kerja, tetapi **bukan** batas keamanan yang kuat bila `posguard` diretas. Bila Anda ingin isolasi sungguhan, pakai *rootless Docker* untuk `posguard` (`dockerd-rootless-setuptool.sh install`); beri tahu saya bila Anda mau langkah rincinya. Jangan beri `posguard` hak `sudo`.
+
+## 3. Install Docker (lewati bila `docker --version` sudah menjawab)
+
+Sebagai admin (bukan `posguard`):
+```
+sudo apt update && sudo apt install -y git curl ca-certificates
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update
 sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker $USER
+sudo usermod -aG docker posguard
 ```
-Keluar dan masuk SSH lagi (agar grup `docker` berlaku), lalu uji: `docker run --rm hello-world`.
+Firewall (`ufw`): tidak perlu membuka port baru. POS hanya memakai port yang sudah dibuka untuk situs lama.
 
-## 4. Ambil kode dan isi pengaturan
+## 4. Ambil kode dan isi pengaturan (sebagai `posguard`)
 
 ```
+sudo -iu posguard
 git clone https://github.com/hendrikidn/pos.git
 cd pos/deploy
 cp .env.example .env
 nano .env
 ```
-Isi di `.env`:
+Di `.env`:
 - `DOMAIN=pos.dolanyu.com`
 - `POSTGRES_PASSWORD=` isi dengan hasil `openssl rand -hex 24`
+- `API_PORT` dan `DASHBOARD_PORT`: biarkan 18081/18082 kecuali bentrok.
 - Opsional: `CORS_ORIGINS` dan `WHATSAPP_*`.
 
-Simpan sandi database itu di pengelola sandi Anda. Repositori privat: gunakan deploy key atau token GitHub saat `git clone`.
+Simpan sandi database di pengelola sandi Anda.
 
-## 5. Jalankan
+## 5. Jalankan (sebagai `posguard`)
 
-Dari folder `pos/deploy`:
 ```
+cd ~/pos/deploy
 docker compose up -d --build
 ```
-Build pertama memakan 5–10 menit. Lalu periksa:
+Build pertama 5–10 menit. Lalu:
 ```
-docker compose ps                       # semua service "running"/"healthy"
-docker compose logs -f caddy            # cari: "certificate obtained successfully"
-curl https://pos.dolanyu.com/healthz    # {"ok":true}
+docker compose ps                         # db, api, dashboard: running/healthy
+curl http://127.0.0.1:18081/healthz       # {"ok":true}
+curl -I http://127.0.0.1:18082/login      # HTTP 200
 ```
-Migrasi database berjalan otomatis saat API start.
+Migrasi database berjalan otomatis saat API start. Pada tahap ini POS sudah hidup di VPS, tetapi baru bisa diakses dari VPS itu sendiri. Langkah 6 membukanya lewat domain.
 
-## 6. Buat tenant, outlet, dan token owner (sekali)
+## 6. Hubungkan web server yang sudah ada (sebagai admin)
+
+Pilih sesuai langkah 0. **Jangan mengubah blok situs lama**; tambahkan blok baru untuk `pos.dolanyu.com` saja.
+
+### nginx
+
+Buat `/etc/nginx/sites-available/pos.dolanyu.com`:
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name pos.dolanyu.com;
+
+    client_max_body_size 12m;     # laporan bank diunggah sampai 10 MB
+
+    # API untuk sensor, terminal POS, dan dashboard
+    location ~ ^/(v1/|healthz$) {
+        proxy_pass http://127.0.0.1:18081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Dashboard owner
+    location / {
+        proxy_pass http://127.0.0.1:18082;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+Aktifkan, uji, lalu minta sertifikat Let's Encrypt:
+```
+sudo ln -s /etc/nginx/sites-available/pos.dolanyu.com /etc/nginx/sites-enabled/
+sudo nginx -t                          # harus "syntax is ok"; bila gagal, JANGAN reload
+sudo systemctl reload nginx
+sudo apt install -y certbot python3-certbot-nginx     # bila belum ada
+sudo certbot --nginx -d pos.dolanyu.com
+```
+`certbot --nginx` menambahkan bagian HTTPS dan pengalihan otomatis. `nginx -t` dan `reload` tidak memutus situs lama.
+
+### Caddy (bila situs lama memakai Caddy)
+
+Tambahkan blok ini ke Caddyfile yang ada, lalu `sudo systemctl reload caddy`:
+```
+pos.dolanyu.com {
+	tls {
+		# Hanya Let's Encrypt: firmware sensor memverifikasi rantai Let's Encrypt (ISRG Root X1);
+		# fallback ke penerbit lain bisa menghasilkan rantai yang ditolak sensor.
+		ca https://acme-v02.api.letsencrypt.org/directory
+	}
+	@api path /v1/* /healthz
+	handle @api {
+		reverse_proxy 127.0.0.1:18081
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18082
+	}
+}
+```
+
+### Verifikasi
+
+Dari komputer Anda:
+```
+curl https://pos.dolanyu.com/healthz        # {"ok":true}
+```
+Buka `https://pos.dolanyu.com/login` di browser; harus tanpa peringatan sertifikat. Situs lama harus tetap normal.
+
+## 7. Buat tenant, outlet, dan token owner (sekali, sebagai `posguard`)
 
 ```
+cd ~/pos/deploy
 docker compose run --rm api node_modules/.bin/tsx apps/api/src/setup.ts \
   --tenant usahaku --tenant-name "Usahaku" \
   --outlet senopati --outlet-name "Kopi Senopati" \
@@ -110,25 +199,24 @@ Token OWNER dicetak **sekali**; simpan di pengelola sandi. Menjalankan perintah 
 
 Buka `https://pos.dolanyu.com`, tempel token OWNER, lalu pasang sensor di **Pengaturan → Perangkat**.
 
-## 7. Menghubungkan sensor dan terminal
+## 8. Menghubungkan sensor dan terminal
 
-- Firmware sensor: isi `SERVER_URL` di `secrets.h` dengan `https://pos.dolanyu.com` (butuh firmware dengan dukungan HTTPS), lalu lakukan pairing seperti di panduan sensor.
+- Firmware sensor: `SERVER_URL "https://pos.dolanyu.com"` di `secrets.h`, lalu pairing seperti di panduan sensor. Sensor butuh WiFi yang punya internet (NTP dan HTTPS).
 - Terminal POS: alamat API `https://pos.dolanyu.com`.
 
-## 8. Cadangan database
+## 9. Cadangan database (sebagai `posguard`)
 
-Cadangan dibuat dengan `pg_dump` oleh [backup.sh](backup.sh) dan disimpan 14 hari.
-
+[backup.sh](backup.sh) membuat `pg_dump` dan menyimpan 14 hari.
 ```
 chmod +x ~/pos/deploy/backup.sh
 mkdir -p ~/backups
 crontab -e
 ```
-Tambahkan baris (jalan tiap hari 03:00):
+Tambahkan (jalan tiap hari 03:00):
 ```
 0 3 * * * BACKUP_DIR=$HOME/backups $HOME/pos/deploy/backup.sh >> $HOME/backups/backup.log 2>&1
 ```
-Cadangan di VPS yang sama **tidak cukup**: bila server hilang, cadangannya ikut hilang. Salin juga ke tempat lain secara berkala, misalnya `rsync -a deploy@IP-VPS:backups/ ~/cadangan-posguard/` dari komputer Anda, atau ke penyimpanan objek.
+Cadangan di VPS yang sama **tidak cukup**: bila server hilang, cadangannya ikut hilang. Salin juga ke tempat lain, misalnya dari komputer Anda: `rsync -a posguard@IP-VPS:backups/ ~/cadangan-posguard/` (butuh akses SSH untuk `posguard`) atau dari akun admin menyalin `/home/posguard/backups`.
 
 **Pulihkan** ke database kosong (**prosedur ini belum pernah dijalankan**; uji di VPS sebelum Anda membutuhkannya):
 ```
@@ -139,48 +227,47 @@ docker compose exec -T db psql -U posguard -d posguard -c "create role app_user 
 docker compose exec -T db pg_restore -U posguard -d posguard --no-owner < ~/backups/posguard-TANGGAL.dump
 docker compose start api dashboard
 ```
-Role `app_user` harus ada sebelum pemulihan karena hak aksesnya dirujuk oleh dump. **Uji pemulihan sekali sebelum Anda membutuhkannya.**
+Role `app_user` harus ada sebelum pemulihan karena hak aksesnya dirujuk oleh dump.
 
-## 9. Memperbarui versi
+## 10. Memperbarui versi (sebagai `posguard`)
 
 ```
-cd ~/pos
-git pull
-cd deploy
-docker compose up -d --build
+cd ~/pos && git pull
+cd deploy && docker compose up -d --build
 ```
-Migrasi baru diterapkan otomatis. Data di volume `pgdata` tidak tersentuh.
+Migrasi baru diterapkan otomatis. Data di volume tidak tersentuh. Web server lama tidak perlu diubah.
 
-## 10. Perintah sehari-hari
+## 11. Perintah sehari-hari (sebagai `posguard`, dari `~/pos/deploy`)
 
-| Perlu | Perintah (dari `~/pos/deploy`) |
+| Perlu | Perintah |
 |---|---|
-| Lihat status | `docker compose ps` |
-| Log API | `docker compose logs -f api` |
-| Log dashboard / Caddy | `docker compose logs -f dashboard` / `caddy` |
+| Status | `docker compose ps` |
+| Log API / dashboard | `docker compose logs -f api` / `dashboard` |
 | Restart satu service | `docker compose restart api` |
-| Matikan semua (data tetap) | `docker compose down` |
+| Matikan POS (data tetap; situs lain tidak terpengaruh) | `docker compose down` |
 | **Jangan** | `docker compose down -v`: menghapus volume dan seluruh database |
 
 ## Keamanan
 
-- Database tidak dipublikasikan ke host; hanya API yang menjangkaunya. Docker melewati aturan `ufw` untuk port yang dipublikasikan, jadi jangan menambahkan `ports:` pada service `db`.
+- Database tidak dipublikasikan; API dan dashboard hanya di `127.0.0.1`. Docker melewati aturan `ufw` untuk port yang dipublikasikan ke semua antarmuka, jadi **jangan** mengubah `127.0.0.1:` pada `ports:` menjadi tanpa alamat.
 - HTTPS wajib: token perangkat dan token owner tidak boleh lewat HTTP polos di internet.
-- API terhubung sebagai pemilik database, lalu `SET ROLE app_user` untuk isolasi per tenant (RLS). Itu sudah dirancang demikian; jangan memberi pengguna aplikasi lain akses ke database.
-- Aktifkan pembaruan keamanan otomatis: `sudo apt install unattended-upgrades`.
-- Pertimbangkan `fail2ban` untuk SSH dan login SSH hanya dengan kunci.
-- Token OWNER setara kunci utama sistem. Simpan di pengelola sandi dan terbitkan ulang bila bocor (jalankan lagi langkah 6).
-- Pembatas percobaan kode pairing berjalan per alamat pemanggil (lewat `X-Forwarded-For` dari Caddy) dan disimpan di memori API, jadi reset saat API restart.
+- Nginx/Caddy harus meneruskan `X-Forwarded-For` (sudah di contoh di atas). API memakai `TRUST_PROXY=1` (satu proxy tepercaya) untuk membedakan pemanggil pada pembatas percobaan kode pairing. Bila ada proxy lain di depan (mis. Cloudflare Proxied), jumlahnya perlu disesuaikan.
+- API terhubung sebagai pemilik database, lalu `SET ROLE app_user` untuk isolasi per tenant (RLS). Itu rancangan yang disengaja.
+- Token OWNER setara kunci utama sistem. Simpan di pengelola sandi dan terbitkan ulang bila bocor (ulangi langkah 7).
+- Pembatas percobaan kode pairing disimpan di memori API, jadi reset saat API restart.
 
 ## Troubleshooting
 
 | Gejala | Kemungkinan penyebab | Solusi |
 |---|---|---|
-| Caddy gagal mendapat sertifikat | DNS belum mengarah ke VPS, atau port 80/443 diblokir | `dig +short pos.dolanyu.com`; buka port di `ufw` dan panel Contabo; lihat `docker compose logs caddy` |
-| Browser "tidak aman" / sertifikat salah | Domain di `.env` beda dengan DNS | Perbaiki `DOMAIN`, `docker compose up -d` |
-| `502 Bad Gateway` | API/dashboard belum siap atau crash | `docker compose ps` dan `logs api` |
-| API restart terus | Sandi database di `.env` berubah setelah volume dibuat | Kembalikan sandi lama (sandi hanya dipakai saat volume pertama dibuat), atau hapus volume bila datanya belum penting |
-| Build gagal/kena kill | Memori kurang | Tambah swap 2 GB atau naikkan RAM VPS |
-| Login dashboard: "Token tidak dikenal" | Token dari lingkungan lain (demo/Mac) | Pakai token dari langkah 6 |
+| `docker compose up` gagal: "port is already allocated" | 18081/18082 dipakai proses lain | Ganti `API_PORT`/`DASHBOARD_PORT` di `.env` dan di konfigurasi nginx/Caddy |
+| `nginx -t` gagal | Salah ketik di blok baru | Perbaiki; **jangan** `reload` sebelum "syntax is ok" |
+| `certbot` gagal | DNS belum mengarah ke VPS, atau port 80 tidak mencapai nginx | `dig +short pos.dolanyu.com`; periksa `ufw` dan firewall panel Contabo |
+| `502 Bad Gateway` | API/dashboard belum siap atau crash | `docker compose ps` dan `logs api`; coba `curl http://127.0.0.1:18081/healthz` |
+| Login dashboard: "asal permintaan tidak sah" | `Host` tidak diteruskan ke dashboard | Pastikan `proxy_set_header Host $host;` ada pada kedua `location` |
+| Login dashboard: "Token tidak dikenal" | Token dari lingkungan lain (demo/Mac) | Pakai token dari langkah 7 |
+| API restart terus | Sandi database di `.env` berubah setelah volume dibuat | Kembalikan sandi lama (sandi hanya dipakai saat volume pertama dibuat) |
+| Build gagal / "Killed" | Memori kurang saat build dashboard | Tambah swap 2 GB (`fallocate -l 2G /swapfile`, `mkswap`, `swapon`) atau build saat situs lain sepi |
+| Sensor: koneksi aman (HTTPS) gagal | Sertifikat belum terbit, domain salah, atau proxy Cloudflare aktif | Pastikan `https://pos.dolanyu.com/healthz` terbuka di browser; set DNS `pos` ke DNS only |
 | Sensor: "kode pairing tidak valid" | Kode kedaluwarsa (15 menit) atau sudah dipakai | Buat kode baru di dashboard |
-| Banyak 429 pada pairing | Percobaan kode salah > 10 dari satu alamat | Tunggu 15 menit atau restart API |
+| Banyak 429 pada pairing | Percobaan kode salah > 10 dari satu alamat | Tunggu 15 menit atau `docker compose restart api` |

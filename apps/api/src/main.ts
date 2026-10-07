@@ -10,7 +10,7 @@ async function main() {
   if (applied.length > 0) console.log(`migrasi diterapkan: ${applied.join(', ')}`);
 
   const corsOrigins = process.env['CORS_ORIGINS']?.split(',').map((o) => o.trim()).filter(Boolean);
-  // Jumlah proxy tepercaya di depan API (mis. TRUST_PROXY=1 untuk Caddy). Kosong = tidak ada proxy.
+  // Jumlah proxy tepercaya di depan API (mis. TRUST_PROXY=1 untuk nginx/Caddy). Kosong = tidak ada proxy.
   const tp = process.env['TRUST_PROXY'];
   const trustProxy = tp === undefined || tp === '' ? undefined : /^\d+$/.test(tp) ? Number(tp) : tp;
   const app = await createApp(db, { corsOrigins, trustProxy });

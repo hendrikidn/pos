@@ -11,7 +11,7 @@ export async function createApp(
   const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(db, opts), { logger: ['error', 'warn'], abortOnError: false });
   // Laporan bank diunggah sebagai teks dalam JSON.
   app.useBodyParser('json', { limit: '10mb' });
-  // Di belakang reverse proxy (Caddy), alamat pemanggil sebenarnya ada di X-Forwarded-For. Tanpa ini semua pemanggil terlihat
+  // Di belakang reverse proxy (nginx/Caddy), alamat pemanggil sebenarnya ada di X-Forwarded-For. Tanpa ini semua pemanggil terlihat
   // berasal dari proxy, dan pembatas percobaan kode pairing menghukum semua orang sekaligus.
   if (opts.trustProxy !== undefined) app.set('trust proxy', opts.trustProxy);
   // POS berbasis web memanggil API langsung dari browser; asal yang diizinkan harus disebut eksplisit.

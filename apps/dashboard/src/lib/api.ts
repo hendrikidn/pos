@@ -149,7 +149,7 @@ export interface OutletSettings {
   merchant_name: string | null;
   tax_percent: number;
   edcs: { tid: string; bank: string; label: string }[];
-  policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number } | null;
+  policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number } | null;
   cctv_retention_days: number;
   cctv_clock_offset_sec: number;
 }

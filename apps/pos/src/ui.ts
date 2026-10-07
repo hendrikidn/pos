@@ -19,7 +19,8 @@ export interface Ctx {
   bump(): void;
   toast(message: string, kind?: 'error' | 'info'): void;
   /** Meminta PIN persetujuan dari orang lain. Mengembalikan null bila dibatalkan. */
-  approve(need: number, message: string): Promise<{ userId: string; pin: string }[] | null>;
+  /** `exclude`: orang yang tidak boleh menjadi approver (mis. penerima makan karyawan). */
+  approve(need: number, message: string, exclude?: string[]): Promise<{ userId: string; pin: string }[] | null>;
   selectOrder(id: string | null): void;
 }
 
@@ -35,7 +36,7 @@ export const isPaid = (o: OrderRecord) => o.state.status === 'PAID';
 export const isActive = (o: OrderRecord) => ['DRAFT', 'SENT', 'BILLED'].includes(o.state.status);
 
 /** Kode penolakan yang berarti "perlu persetujuan", bukan kesalahan. */
-export const NEEDS_APPROVAL = new Set(['APPROVAL_REQUIRED', 'NOT_ENOUGH_APPROVERS', 'OWNER_REQUIRED']);
+export const NEEDS_APPROVAL = new Set(['APPROVAL_REQUIRED', 'NOT_ENOUGH_APPROVERS', 'OWNER_REQUIRED', 'MEAL_APPROVAL_REQUIRED']);
 
 /** Penjelasan ramah mengapa persetujuan diperlukan, berdasarkan kode penolakan dari engine. */
 export function approvalHint(code: string): string {
@@ -47,4 +48,10 @@ export function approvalHint(code: string): string {
     default:
       return 'Diskon ini memerlukan persetujuan supervisor.';
   }
+}
+
+/** Teks jenis order: "Dine-in · Meja 5", atau "Karyawan · Sari" untuk makan karyawan. */
+export function orderLabel(o: OrderRecord, staff: { id: string; name: string }[]): string {
+  const who = o.employeeId ? ` · ${staff.find((s) => s.id === o.employeeId)?.name ?? o.employeeId}` : '';
+  return `${TYPE_LABEL[o.type]}${who}${o.tableNo ? ` · Meja ${o.tableNo}` : ''}`;
 }

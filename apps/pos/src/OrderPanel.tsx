@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { OrderRecord } from '@pos/pos-core';
 import { VOID_REASONS } from '@pos/pos-core';
 import { Modal, PayDialog, PinPad } from './dialogs';
-import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, rp, run, STATUS_LABEL, TYPE_LABEL, type Ctx } from './ui';
+import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, type Ctx } from './ui';
 
 type Dialog = 'pay' | 'discount' | 'void' | 'decline' | 'refund' | null;
 
@@ -74,7 +74,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
       <aside className="cart-pane">
         <header className="order-head">
           <div>
-            <h2>#{order.number} · {TYPE_LABEL[order.type]}{order.tableNo ? ` · Meja ${order.tableNo}` : ''}</h2>
+            <h2>#{order.number} · {orderLabel(order, engine.staff())}</h2>
             <span className={`pill s-${order.state.status}`}>{STATUS_LABEL[order.state.status]}</span>
             {order.kitchen && <span className="pill">Dapur: {order.kitchen === 'COOKING' ? 'dimasak' : order.kitchen === 'READY' ? 'siap' : 'disajikan'}</span>}
           </div>

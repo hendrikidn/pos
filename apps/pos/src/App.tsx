@@ -6,7 +6,7 @@ import { Logo } from './Logo';
 import { OrderPanel } from './OrderPanel';
 import { hardware, isNative, kioskWanted, loadPrinterSetting, savePrinterSetting, setKioskWanted, type PrinterKind } from './native';
 import { createRuntime, saveSettings, setDemo, type Boot, type Runtime } from './runtime';
-import { isActive, METHOD_LABEL, rp, run, STATUS_LABEL, TYPE_LABEL, type Ctx } from './ui';
+import { isActive, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, TYPE_LABEL, type Ctx } from './ui';
 
 type Tab = 'order' | 'dapur' | 'shift' | 'pengaturan';
 
@@ -22,7 +22,7 @@ function Pos() {
   const [tab, setTab] = useState<Tab>('order');
   const [selected, setSelected] = useState<string | null>(null);
   const [toasts, setToasts] = useState<{ id: number; message: string; kind: 'error' | 'info' }[]>([]);
-  const [approval, setApproval] = useState<{ need: number; message: string; resolve: (v: { userId: string; pin: string }[] | null) => void } | null>(null);
+  const [approval, setApproval] = useState<{ need: number; message: string; exclude: string[]; resolve: (v: { userId: string; pin: string }[] | null) => void } | null>(null);
   const bump = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
@@ -45,7 +45,7 @@ function Pos() {
     () =>
       rt && {
         rt, bump, toast, selectOrder: setSelected,
-        approve: (need, message) => new Promise((resolve) => setApproval({ need, message, resolve })),
+        approve: (need, message, exclude = []) => new Promise((resolve) => setApproval({ need, message, exclude, resolve })),
       },
     [rt, bump, toast],
   );
@@ -91,7 +91,7 @@ function Pos() {
       )}
       {approval && user && (
         <ApprovalDialog
-          need={approval.need} message={approval.message} staff={engine.staff()} currentUser={user.id}
+          need={approval.need} message={approval.message} staff={engine.staff()} currentUser={user.id} exclude={approval.exclude}
           onDone={(v) => { approval.resolve(v); setApproval(null); }}
         />
       )}
@@ -175,7 +175,16 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   const current = selected ? engine.getOrder(selected) : undefined;
 
   const create = async (type: 'DINE_IN' | 'TAKE_AWAY' | 'EMPLOYEE', opts: { tableNo?: string; employeeId?: string } = {}) => {
-    const r = await run(ctx, () => engine.createOrder(type, opts));
+    let r = await engine.createOrder(type, opts);
+    // Makan karyawan di luar kuota (atau untuk diri sendiri) perlu supervisor yang bukan pembuat dan bukan penerima.
+    if (!r.ok && NEEDS_APPROVAL.has(r.code)) {
+      setAsking(null);
+      const approvers = await ctx.approve(1, r.message, opts.employeeId ? [opts.employeeId] : []);
+      if (!approvers) return ctx.bump();
+      r = await engine.createOrder(type, { ...opts, approver: approvers[0] });
+    }
+    if (!r.ok) ctx.toast(r.message, 'error');
+    ctx.bump();
     if (r.ok) ctx.selectOrder(r.value.id);
     setAsking(null);
     setTable('');
@@ -195,7 +204,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           {orders.map((o) => (
             <li key={o.id}>
               <button className={`order-card ${selected === o.id ? 'on' : ''}`} onClick={() => ctx.selectOrder(o.id)}>
-                <span><b>#{o.number}</b> {TYPE_LABEL[o.type]}{o.tableNo ? ` · Meja ${o.tableNo}` : ''}</span>
+                <span><b>#{o.number}</b> {orderLabel(o, engine.staff())}</span>
                 <span className={`pill s-${o.state.status}`}>{STATUS_LABEL[o.state.status]}</span>
                 <span className="amt">{rp(engine.totals(o).total)}</span>
               </button>
@@ -220,7 +229,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
       )}
       {asking === 'employee' && (
         <Modal title="Order karyawan" onClose={() => setAsking(null)}>
-          <p className="muted">Pilih karyawan penerima. Order karyawan dipantau.</p>
+          <p className="muted">Pilih karyawan penerima. Order karyawan dipantau: makan kedua hari ini, atau untuk diri sendiri, memerlukan persetujuan supervisor.</p>
           <div className="reasons">
             {engine.staff().map((s) => (
               <button key={s.id} className="secondary" onClick={() => void create('EMPLOYEE', { employeeId: s.id })}>{s.name}</button>

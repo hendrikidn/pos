@@ -37,15 +37,16 @@ export function PinPad({ value, onChange, max = 6 }: { value: string; onChange: 
 
 /** Persetujuan dari satu atau dua orang lain (supervisor ke atas). */
 export function ApprovalDialog({
-  need, message, staff, currentUser, onDone,
+  need, message, staff, currentUser, exclude = [], onDone,
 }: {
   need: number;
   message: string;
   staff: StaffPublic[];
   currentUser: string;
+  exclude?: string[];
   onDone: (v: { userId: string; pin: string }[] | null) => void;
 }) {
-  const eligible = staff.filter((s) => s.id !== currentUser && s.role !== 'CASHIER');
+  const eligible = staff.filter((s) => s.id !== currentUser && s.role !== 'CASHIER' && !exclude.includes(s.id));
   const [rows, setRows] = useState(() => Array.from({ length: need }, (_, i) => ({ userId: eligible[i]?.id ?? '', pin: '' })));
   const [focus, setFocus] = useState(0);
   const set = (i: number, patch: Partial<{ userId: string; pin: string }>) =>

@@ -501,3 +501,69 @@ describe('R6 lewat API', () => {
     expect(retracted.filter((i) => i.hits.some((x) => x.rule === 'R6')).map((i) => i.status)).toEqual(['RETRACTED']);
   });
 });
+
+describe('makan karyawan: persetujuan dan kuota per outlet lewat API', () => {
+  let h: Harness;
+  let term: string;
+  let owner: string;
+  const incidents = async (status = 'OPEN') =>
+    ((await h.http('GET', `/v1/outlets/o1/incidents?status=${status}`, owner)).body as {
+      score: number; order_ids: string[]; status: string; hits: { rule: string; weight: number; note: string }[];
+    }[]).filter((i) => i.hits.some((x) => x.rule === 'R6'));
+
+  beforeAll(async () => {
+    h = await createHarness(WIB('2026-10-08T22:00:00'));
+    await seedTenant(h, 't1', 'o1', ['term-1']);
+    term = await h.admin.createDevice('t1', 'o1', 'term-1', 'terminal');
+    owner = await h.admin.createApiToken('t1', 'owner-1', 'OWNER');
+
+    const s = new Sim('o1', '2026-10-08', 'term-1', 'sensor-1');
+    const meal = (id: string, at: string, approverId?: string) =>
+      s.pos({ type: 'order.created', payload: { orderId: id, orderType: 'EMPLOYEE', employeeId: 'andi', ...(approverId ? { approverId } : {}) } }, at, 'budi');
+    meal('m1', '09:00:00');
+    meal('m2', '13:00:00', 'hendra'); // ke-2, disetujui supervisor independen
+    meal('m3', '17:00:00'); // ke-3, tanpa persetujuan
+    expect((await h.postEvents(term, s.events)).status).toBe(201);
+  });
+  afterAll(() => h.close());
+
+  it('yang disetujui masuk sebagai insiden berbobot 10, yang tanpa persetujuan berbobot 25', async () => {
+    const list = await incidents();
+    const byOrder = Object.fromEntries(list.map((i) => [i.order_ids[0], i]));
+    expect(Object.keys(byOrder).sort()).toEqual(['m2', 'm3']);
+    expect(byOrder['m2']).toMatchObject({ score: 10 });
+    expect(byOrder['m2']!.hits[0]!.note).toMatch(/disetujui hendra/);
+    expect(byOrder['m3']).toMatchObject({ score: 25 });
+  });
+
+  it('approverId pada order bukan karyawan ditolak oleh ingest', async () => {
+    const s = new Sim('o1', '2026-10-08', 'term-1', 'sensor-1');
+    s.pos({ type: 'order.created', payload: { orderId: 'x', orderType: 'TAKE_AWAY', approverId: 'hendra' } } as never, '18:00:00', 'budi');
+    const r = await h.postEvents(term, s.events);
+    expect(r.status).toBe(400);
+  });
+
+  it('owner menaikkan kuota ke 3 lewat Pengaturan: kedua insiden ditarik kembali karena makan ke-2 dan ke-3 kini dalam kuota', async () => {
+    const put = await h.http('PUT', '/v1/outlets/o1/settings', owner, { policy: { employeeMealQuota: 3 } });
+    expect(put.status).toBe(200);
+    expect((await h.http('GET', '/v1/outlets/o1/settings', owner)).body.policy).toEqual({ employeeMealQuota: 3 });
+    await h.http('POST', '/v1/outlets/o1/evaluate', owner);
+    expect(await incidents()).toEqual([]);
+    expect((await incidents('RETRACTED')).map((i) => i.order_ids[0]).sort()).toEqual(['m2', 'm3']);
+  });
+
+  it('kuota 0 diterima (semua makan perlu persetujuan), di atas 10 atau negatif ditolak', async () => {
+    expect((await h.http('PUT', '/v1/outlets/o1/settings', owner, { policy: { employeeMealQuota: 0 } })).status).toBe(200);
+    for (const bad of [11, -1, 1.5]) {
+      const r = await h.http('PUT', '/v1/outlets/o1/settings', owner, { policy: { employeeMealQuota: bad } });
+      expect(r.status, String(bad)).toBe(400);
+      expect(r.body.message).toMatch(/employeeMealQuota/);
+    }
+  });
+
+  it('dengan kuota 0 setiap makan karyawan tanpa approver ditandai; yang disetujui berbobot rendah', async () => {
+    await h.http('POST', '/v1/outlets/o1/evaluate', owner);
+    const byOrder = Object.fromEntries((await incidents()).map((i) => [i.order_ids[0]!, i.score]));
+    expect(byOrder).toEqual({ m1: 25, m2: 10, m3: 25 });
+  });
+});

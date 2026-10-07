@@ -34,7 +34,12 @@ const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const;
  * bisa membuat mesin aturan gagal untuk seluruh outlet.
  */
 const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
-  'order.created': (p) => (str(p, 'orderId') && oneOf(p, 'orderType', ['DINE_IN', 'TAKE_AWAY', 'EMPLOYEE']) ? null : 'orderId/orderType tidak valid'),
+  'order.created': (p) => {
+    if (!str(p, 'orderId') || !oneOf(p, 'orderType', ['DINE_IN', 'TAKE_AWAY', 'EMPLOYEE'])) return 'orderId/orderType tidak valid';
+    if (p['employeeId'] !== undefined && !str(p, 'employeeId')) return 'employeeId tidak valid';
+    if (p['approverId'] !== undefined && (!str(p, 'approverId') || p['orderType'] !== 'EMPLOYEE')) return 'approverId hanya untuk order karyawan';
+    return null;
+  },
   'order.sent_to_kitchen': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
   'kitchen.status_changed': (p) => (str(p, 'orderId') && oneOf(p, 'status', ['COOKING', 'READY', 'SERVED']) ? null : 'orderId/status tidak valid'),
   'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? null : 'orderId/total tidak valid'),

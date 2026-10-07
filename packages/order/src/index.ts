@@ -70,6 +70,8 @@ export interface Policy {
   secondApprovalAbove: number;
   manualDiscountMaxPercent: number;
   manualDiscountMaxAmount: number;
+  /** Makan karyawan gratis per orang per hari. Yang berikutnya memerlukan persetujuan supervisor. */
+  employeeMealQuota: number;
 }
 
 export const DEFAULT_POLICY: Policy = {
@@ -77,6 +79,7 @@ export const DEFAULT_POLICY: Policy = {
   secondApprovalAbove: 50_000,
   manualDiscountMaxPercent: 15,
   manualDiscountMaxAmount: 50_000,
+  employeeMealQuota: 1,
 };
 
 export interface Ctx {
@@ -207,4 +210,39 @@ export function decideRefund(order: OrderState, cmd: RefundCommand, ctx: Ctx): D
       payload: { refundId: cmd.refundId, originalOrderId: order.orderId, amount: cmd.amount, method: cmd.method, approverId: cmd.approverId },
     },
   };
+}
+
+export interface EmployeeMealCommand {
+  /** Kasir yang membuat order. */
+  actorId: string;
+  /** Karyawan penerima makan. */
+  employeeId: string;
+  /** Makan karyawan penerima yang sudah tercatat hari ini (tidak termasuk yang di-void). */
+  mealsToday: number;
+  approverId?: string;
+}
+
+export type EmployeeMealDecision =
+  | { ok: true; /** Hanya terisi bila persetujuan memang diperlukan. */ approverId?: string }
+  | { ok: false; code: string; message: string };
+
+/**
+ * Kunci makan karyawan (SPEC 5.3: kuota per orang per hari). Persetujuan supervisor ke atas diperlukan bila makan ini
+ * melewati kuota, atau dibuat oleh penerimanya sendiri. Approver harus orang ketiga: bukan pembuat order dan bukan
+ * penerima. Terminal hanya mengetahui order di perangkatnya sendiri, jadi penentu akhirnya tetap aturan R6 di server.
+ */
+export function decideEmployeeMeal(cmd: EmployeeMealCommand, ctx: Ctx): EmployeeMealDecision {
+  const policy = ctx.policy ?? DEFAULT_POLICY;
+  const reasons: string[] = [];
+  if (cmd.mealsToday >= policy.employeeMealQuota) {
+    reasons.push(`makan ke-${cmd.mealsToday + 1} hari ini untuk ${cmd.employeeId} (kuota ${policy.employeeMealQuota})`);
+  }
+  if (cmd.actorId === cmd.employeeId) reasons.push('dibuat oleh penerimanya sendiri');
+  if (reasons.length === 0) return { ok: true };
+
+  if (!cmd.approverId) return { ok: false, code: 'MEAL_APPROVAL_REQUIRED', message: `Makan karyawan ini perlu persetujuan: ${reasons.join('; ')}.` };
+  if (cmd.approverId === cmd.actorId) return { ok: false, code: 'SELF_APPROVAL', message: 'Pembuat order tidak boleh menyetujui sendiri.' };
+  if (cmd.approverId === cmd.employeeId) return { ok: false, code: 'RECIPIENT_APPROVAL', message: 'Penerima makan tidak boleh menjadi approver.' };
+  if (rank(ctx, cmd.approverId) < RANK.SUPERVISOR) return { ok: false, code: 'APPROVER_ROLE_TOO_LOW', message: 'Approver minimal supervisor.' };
+  return { ok: true, approverId: cmd.approverId };
 }

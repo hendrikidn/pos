@@ -430,3 +430,44 @@ describe('R6: makan karyawan di luar kuota atau untuk diri sendiri', () => {
     expect(inc).toMatchObject({ score: 25, level: 'LOW', orderIds: ['m1'] });
   });
 });
+
+describe('R6 dengan persetujuan', () => {
+  const meal = (s: Sim, id: string, at: string, employee: string, actor: string, approverId?: string) =>
+    s.pos({ type: 'order.created', payload: { orderId: id, orderType: 'EMPLOYEE', employeeId: employee, ...(approverId ? { approverId } : {}) } }, at, actor);
+  const r6 = (hits: RuleHit[]) => hits.filter((h) => h.rule === 'R6');
+
+  it('di luar kuota tetapi disetujui supervisor independen: tetap tercatat, bobot rendah (10), approver ikut tercatat', () => {
+    const s = new Sim();
+    meal(s, 'm1', '11:00:00', 'andi', 'budi');
+    meal(s, 'm2', '15:00:00', 'andi', 'budi', 'hendra');
+    const [h] = r6(run(s, '16:00:00'));
+    expect(h).toMatchObject({ orderId: 'm2', weight: 10 });
+    expect(h!.note).toMatch(/ke-2 hari ini.*; disetujui hendra/);
+    expect(h!.actorIds).toEqual(expect.arrayContaining(['budi', 'andi', 'hendra']));
+    expect(buildIncidents([h!])[0]).toMatchObject({ score: 10, level: 'LOW' });
+  });
+
+  it('untuk diri sendiri tetapi disetujui orang ketiga: bobot rendah; tanpa persetujuan: bobot penuh (25)', () => {
+    const s = new Sim();
+    meal(s, 'a', '11:00:00', 'budi', 'budi', 'hendra');
+    meal(s, 'b', '15:00:00', 'sari', 'sari');
+    const hits = r6(run(s, '16:00:00'));
+    expect(hits.map((h) => [h.orderId, h.weight])).toEqual([['a', 10], ['b', 25]]);
+  });
+
+  it('approver yang adalah pembuat atau penerima tidak dianggap independen (bobot penuh, ada catatan)', () => {
+    const s = new Sim();
+    meal(s, 'a', '11:00:00', 'budi', 'budi', 'budi'); // pembuat menyetujui sendiri
+    meal(s, 'b', '15:00:00', 'budi', 'sari', 'budi'); // penerima menjadi approver, dan ini makan ke-2 budi
+    const hits = r6(run(s, '16:00:00'));
+    expect(hits.map((h) => [h.orderId, h.weight])).toEqual([['a', 25], ['b', 25]]);
+    expect(hits[0]!.note).toContain('approver budi tidak independen');
+    expect(hits[1]!.note).toContain('approver budi tidak independen');
+  });
+
+  it('approver yang tidak diperlukan (dalam kuota, bukan untuk diri sendiri) tidak memicu apa pun', () => {
+    const s = new Sim();
+    meal(s, 'a', '11:00:00', 'andi', 'budi', 'hendra');
+    expect(r6(run(s, '12:00:00'))).toEqual([]);
+  });
+});

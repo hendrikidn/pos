@@ -9,7 +9,11 @@ export type PrinterState =
 
 /** Isi event menurut tipe. Menambah tipe event = menambah satu baris di sini. */
 export type EventBody =
-  | { type: 'order.created'; payload: { orderId: string; orderType: OrderType; employeeId?: string } }
+  | {
+      type: 'order.created';
+      /** `approverId`: supervisor ke atas yang menyetujui makan karyawan di luar kuota atau untuk diri sendiri (hanya order EMPLOYEE). */
+      payload: { orderId: string; orderType: OrderType; employeeId?: string; approverId?: string };
+    }
   | { type: 'order.sent_to_kitchen'; payload: { orderId: string } }
   | { type: 'kitchen.status_changed'; payload: { orderId: string; status: KitchenStatus } }
   | { type: 'bill.printed'; payload: { orderId: string; total: number } }

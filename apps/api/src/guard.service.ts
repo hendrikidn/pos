@@ -55,8 +55,8 @@ export class GuardService {
   async evaluate(tenantId: string, outletId: string, now = Date.now()): Promise<EvaluateResult> {
     return this.db.tenantTx(tenantId, async (q) => {
       const outlet = (
-        await q.query<{ capabilities: Capabilities; terminals: string[]; utc_offset_minutes: number }>(
-          'select capabilities, terminals, utc_offset_minutes from outlet where id = $1',
+        await q.query<{ capabilities: Capabilities; terminals: string[]; utc_offset_minutes: number; policy: { employeeMealQuota?: number } | null }>(
+          'select capabilities, terminals, utc_offset_minutes, policy from outlet where id = $1',
           [outletId],
         )
       ).rows[0];
@@ -93,6 +93,8 @@ export class GuardService {
         ...evaluateRules({
           events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity,
           utcOffsetMinutes: outlet.utc_offset_minutes,
+          // Kuota makan karyawan diatur owner per outlet, dan sama dengan yang dipakai terminal.
+          config: { r6DailyQuota: outlet.policy?.employeeMealQuota ?? DEFAULT_CONFIG.r6DailyQuota },
         }),
         ...evaluatePatternRules({ events: cashCounts, emitFrom: from }),
         ...bankHits,

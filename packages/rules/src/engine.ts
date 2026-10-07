@@ -248,9 +248,15 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
     if (nth > cfg.r6DailyQuota) reasons.push(`makan karyawan ke-${nth} hari ini untuk ${employeeId} (kuota ${cfg.r6DailyQuota})`);
     if (o.created.actorId === employeeId) reasons.push('dibuat oleh penerimanya sendiri');
     if (reasons.length === 0) continue;
+    // Disetujui secara independen = approver bukan pembuat dan bukan penerima. Tetap dicatat (bobot rendah) agar owner bisa
+    // melihat pola, tetapi tidak sama beratnya dengan makan yang lolos tanpa persetujuan.
+    const approver = o.created.payload.approverId;
+    const independent = !!approver && approver !== o.created.actorId && approver !== employeeId;
+    if (independent) reasons.push(`disetujui ${approver}`);
+    else if (approver) reasons.push(`approver ${approver} tidak independen`);
     hit({
-      rule: 'R6', key: `R6:${o.id}`, weight: w('R6'), modalities: POS_ONLY, terminalId: o.terminalId, orderId: o.id,
-      actorIds: [...new Set([o.created.actorId, employeeId].filter((x): x is string => !!x))],
+      rule: 'R6', key: `R6:${o.id}`, weight: w(independent ? 'R6_APPROVED' : 'R6'), modalities: POS_ONLY, terminalId: o.terminalId, orderId: o.id,
+      actorIds: [...new Set([o.created.actorId, employeeId, ...(independent ? [approver] : [])].filter((x): x is string => !!x))],
       at: o.createdAt, windowStart: o.createdAt, windowEnd: o.endAt, note: reasons.join('; '),
     });
   }

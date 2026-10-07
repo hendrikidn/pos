@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EventChain, type NewEvent } from '@pos/events';
-import { decideDiscount, decideRefund, decideVoid, replayOrder, type Ctx, type OrderState, type Role } from '../src';
+import { DEFAULT_POLICY, decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, replayOrder, type Ctx, type OrderState, type Role } from '../src';
 
 const T0 = Date.parse('2026-10-01T10:00:00+07:00');
 const ROLES: Record<string, Role> = {
@@ -128,5 +128,52 @@ describe('decideRefund', () => {
   it('nominal di atas ambang memerlukan owner', () => {
     expect(decideRefund(paidOrder(), cmd({ amount: 80_000 }), ctx)).toMatchObject({ code: 'OWNER_REQUIRED' });
     expect(decideRefund(paidOrder(), cmd({ amount: 80_000, approverId: 'owner' }), ctx).ok).toBe(true);
+  });
+});
+
+describe('decideEmployeeMeal', () => {
+  const meal = (over: Partial<Parameters<typeof decideEmployeeMeal>[0]> = {}) =>
+    decideEmployeeMeal({ actorId: 'budi', employeeId: 'sari', mealsToday: 0, ...over }, ctx);
+
+  it('makan pertama hari ini untuk orang lain: tanpa persetujuan', () => {
+    expect(meal()).toEqual({ ok: true });
+  });
+
+  it('makan kedua (melewati kuota bawaan 1) memerlukan persetujuan, dengan alasan yang jelas', () => {
+    const r = meal({ mealsToday: 1 });
+    expect(r).toMatchObject({ ok: false, code: 'MEAL_APPROVAL_REQUIRED' });
+    expect(r.ok === false && r.message).toMatch(/ke-2 hari ini untuk sari \(kuota 1\)/);
+  });
+
+  it('untuk diri sendiri memerlukan persetujuan walau masih dalam kuota', () => {
+    const r = meal({ actorId: 'budi', employeeId: 'budi' });
+    expect(r).toMatchObject({ ok: false, code: 'MEAL_APPROVAL_REQUIRED' });
+    expect(r.ok === false && r.message).toMatch(/penerimanya sendiri/);
+  });
+
+  it('supervisor ke atas yang bukan pembuat dan bukan penerima boleh menyetujui; approverId dicatat', () => {
+    expect(meal({ mealsToday: 1, approverId: 'hendra' })).toEqual({ ok: true, approverId: 'hendra' });
+    expect(meal({ mealsToday: 3, approverId: 'rina' })).toEqual({ ok: true, approverId: 'rina' });
+    expect(meal({ actorId: 'budi', employeeId: 'budi', approverId: 'owner' })).toEqual({ ok: true, approverId: 'owner' });
+  });
+
+  it('pembuat tidak boleh menyetujui sendiri, penerima tidak boleh menjadi approver, kasir tidak boleh approver', () => {
+    expect(meal({ mealsToday: 1, approverId: 'budi' })).toMatchObject({ ok: false, code: 'SELF_APPROVAL' });
+    expect(meal({ mealsToday: 1, employeeId: 'hendra', approverId: 'hendra' })).toMatchObject({ ok: false, code: 'RECIPIENT_APPROVAL' });
+    expect(meal({ mealsToday: 1, approverId: 'sari' })).toMatchObject({ ok: false, code: 'RECIPIENT_APPROVAL' }); // sari penerima sekaligus kasir
+    expect(meal({ mealsToday: 1, employeeId: 'rina', approverId: 'sari' })).toMatchObject({ ok: false, code: 'APPROVER_ROLE_TOO_LOW' });
+  });
+
+  it('approver yang tidak diperlukan tidak dicatat', () => {
+    expect(meal({ mealsToday: 0, approverId: 'hendra' })).toEqual({ ok: true });
+  });
+
+  it('kuota mengikuti kebijakan outlet, termasuk 0 (semua makan perlu persetujuan)', () => {
+    const policy = { ...DEFAULT_POLICY, employeeMealQuota: 2 };
+    const at = (mealsToday: number) => decideEmployeeMeal({ actorId: 'budi', employeeId: 'sari', mealsToday }, { ...ctx, policy });
+    expect(at(1)).toEqual({ ok: true });
+    expect(at(2)).toMatchObject({ ok: false, code: 'MEAL_APPROVAL_REQUIRED' });
+    const zero = decideEmployeeMeal({ actorId: 'budi', employeeId: 'sari', mealsToday: 0 }, { ...ctx, policy: { ...DEFAULT_POLICY, employeeMealQuota: 0 } });
+    expect(zero).toMatchObject({ ok: false, code: 'MEAL_APPROVAL_REQUIRED' });
   });
 });

@@ -1,5 +1,5 @@
 import type { KitchenStatus, OrderType, PaymentMethod, PosEvent, PrinterState } from '@pos/events';
-import { decideDiscount, decideRefund, decideVoid, reduceOrder, type Ctx } from '@pos/order';
+import { decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, reduceOrder, type Ctx } from '@pos/order';
 import { Directory } from './directory';
 import type { Printer } from './printer';
 import type { Recorder } from './recorder';
@@ -201,17 +201,57 @@ export class PosEngine {
     return Math.max(0, this.totals(o).total - paidTotal(o));
   }
 
-  async createOrder(type: OrderType, opts: { tableNo?: string; employeeId?: string } = {}): Promise<Result<OrderRecord>> {
+  /** Makan karyawan penerima yang sudah dibuat di terminal ini hari ini (hari menurut jam perangkat), tidak termasuk yang di-void. */
+  private mealsToday(employeeId: string): number {
+    const day = (ms: number) => {
+      const d = new Date(ms);
+      return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    };
+    const today = day(this.d.now());
+    return this.listOrders().filter(
+      (o) => o.type === 'EMPLOYEE' && o.employeeId === employeeId && o.state.status !== 'VOIDED' && day(o.createdAt) === today,
+    ).length;
+  }
+
+  /**
+   * Membuat order. Order karyawan di luar kuota harian, atau untuk diri sendiri, memerlukan `approver` (supervisor ke atas
+   * yang bukan pembuat dan bukan penerima); tanpa itu hasilnya `MEAL_APPROVAL_REQUIRED` dan tidak ada yang dicatat.
+   */
+  async createOrder(
+    type: OrderType,
+    opts: { tableNo?: string; employeeId?: string; approver?: ApproverInput } = {},
+  ): Promise<Result<OrderRecord>> {
     const w = this.who();
     if (!w.ok) return w;
     if (!this.shift) return fail('NO_SHIFT', 'Buka shift terlebih dahulu.');
     if (type === 'EMPLOYEE' && !opts.employeeId) return fail('EMPLOYEE_REQUIRED', 'Pilih karyawan penerima.');
+
+    let approverId: string | undefined;
+    if (type === 'EMPLOYEE') {
+      let supplied: string | undefined;
+      if (opts.approver) {
+        const a = await this.checkApprovers([opts.approver]);
+        if (!a.ok) return a;
+        supplied = a.value[0];
+      }
+      const decision = decideEmployeeMeal(
+        { actorId: w.value, employeeId: opts.employeeId!, mealsToday: this.mealsToday(opts.employeeId!), approverId: supplied },
+        this.ctx(),
+      );
+      if (!decision.ok) return fail(decision.code, decision.message);
+      approverId = decision.approverId;
+    }
+
     this.counter += 1;
     await this.d.store.write({ counter: this.counter });
     const id = `${this.cfg.deviceId}-${this.counter}`;
     const e = await this.emit({
       type: 'order.created',
-      payload: { orderId: id, orderType: type, ...(opts.employeeId ? { employeeId: opts.employeeId } : {}) },
+      payload: {
+        orderId: id, orderType: type,
+        ...(opts.employeeId ? { employeeId: opts.employeeId } : {}),
+        ...(approverId ? { approverId } : {}),
+      },
     });
     const o: OrderRecord = {
       id, number: this.counter, type, tableNo: opts.tableNo, employeeId: opts.employeeId, creatorId: w.value,

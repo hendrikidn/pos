@@ -55,6 +55,7 @@ export interface SettingsInput {
     secondApprovalAbove?: number;
     manualDiscountMaxPercent?: number;
     manualDiscountMaxAmount?: number;
+    employeeMealQuota?: number;
   } | null;
   cctvRetentionDays?: number;
   cctvClockOffsetSec?: number;
@@ -230,8 +231,9 @@ export class ConfigService {
     }
     if (s.policy) {
       for (const [k, v] of Object.entries(s.policy)) {
-        need(['secondApprovalAbove', 'manualDiscountMaxPercent', 'manualDiscountMaxAmount'].includes(k), `kebijakan tidak dikenal: ${k}`);
-        need(Number.isInteger(v) && (v as number) > 0, `${k} harus bilangan bulat positif`);
+        need(['secondApprovalAbove', 'manualDiscountMaxPercent', 'manualDiscountMaxAmount', 'employeeMealQuota'].includes(k), `kebijakan tidak dikenal: ${k}`);
+        if (k === 'employeeMealQuota') need(Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10, 'employeeMealQuota 0–10 (0 = setiap makan karyawan perlu persetujuan)');
+        else need(Number.isInteger(v) && (v as number) > 0, `${k} harus bilangan bulat positif`);
       }
     }
     if (s.cctvRetentionDays !== undefined) need(Number.isInteger(s.cctvRetentionDays) && s.cctvRetentionDays >= 1 && s.cctvRetentionDays <= 365, 'cctvRetentionDays 1–365');

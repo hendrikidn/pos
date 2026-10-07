@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { verifyChain, type PosEvent } from '@pos/events';
+import { DEFAULT_POLICY } from '@pos/order';
 import { demoConfig, MemoryStore, PosEngine, Recorder, SimPrinter } from '../src';
 
 const T0 = Date.parse('2026-10-01T10:00:00+07:00');
@@ -299,5 +300,91 @@ describe('ketahanan', () => {
     const events = await c.events();
     expect(events.map((e) => e.seq)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
     expect(verifyChain(events)).toEqual([]);
+  });
+});
+
+describe('makan karyawan: kuota dan persetujuan', () => {
+  let c: Ctx;
+  beforeEach(async () => {
+    c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(0));
+  });
+  const orderCount = () => c.engine.listOrders().length;
+  const createdEvents = async () => (await c.events()).filter((e) => e.type === 'order.created');
+  const approver = (id: keyof Ctx['pins'], pin?: string) => ({ userId: id, pin: pin ?? c.pins[id] });
+
+  it('makan pertama hari ini untuk orang lain lolos tanpa persetujuan, dan event tidak membawa approver', async () => {
+    const o = must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    expect(o.type).toBe('EMPLOYEE');
+    const ev = (await createdEvents())[0]!;
+    expect(ev.type === 'order.created' && ev.payload).toEqual({ orderId: o.id, orderType: 'EMPLOYEE', employeeId: 'sari' });
+  });
+
+  it('makan kedua penerima yang sama ditolak (MEAL_APPROVAL_REQUIRED) dan tidak ada yang tercatat', async () => {
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    const before = { orders: orderCount(), events: (await c.events()).length };
+    const r = await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' });
+    expect(r).toMatchObject({ ok: false, code: 'MEAL_APPROVAL_REQUIRED' });
+    expect(orderCount()).toBe(before.orders);
+    expect((await c.events()).length).toBe(before.events);
+  });
+
+  it('dengan PIN supervisor yang benar order dibuat dan approverId tercatat di event', async () => {
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    const o = must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari', approver: approver('hendra') }));
+    const ev = (await createdEvents()).find((e) => e.type === 'order.created' && e.payload.orderId === o.id)!;
+    expect(ev.type === 'order.created' && ev.payload.approverId).toBe('hendra');
+  });
+
+  it('PIN approver salah ditolak; approver yang adalah pembuat atau penerima juga ditolak', async () => {
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    const second = (a: { userId: string; pin: string }) => c.engine.createOrder('EMPLOYEE', { employeeId: 'sari', approver: a });
+    expect(await second(approver('hendra', '0000'))).toMatchObject({ ok: false, code: 'PIN_WRONG' });
+    expect(await second(approver('sari'))).toMatchObject({ ok: false, code: 'RECIPIENT_APPROVAL' }); // penerima tidak boleh menyetujui makannya sendiri
+    expect(await second(approver('budi'))).toMatchObject({ ok: false, code: 'SELF_APPROVAL' });
+    expect(orderCount()).toBe(1);
+    // penerima seorang supervisor tidak boleh menyetujui makannya sendiri
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'hendra' }));
+    expect(await c.engine.createOrder('EMPLOYEE', { employeeId: 'hendra', approver: approver('hendra') })).toMatchObject({ ok: false, code: 'RECIPIENT_APPROVAL' });
+    expect((await c.engine.createOrder('EMPLOYEE', { employeeId: 'hendra', approver: approver('rina') })).ok).toBe(true);
+  });
+
+  it('kasir yang membuat makan untuk dirinya sendiri perlu persetujuan, walau baru pertama', async () => {
+    expect(await c.engine.createOrder('EMPLOYEE', { employeeId: 'budi' })).toMatchObject({ ok: false, code: 'MEAL_APPROVAL_REQUIRED' });
+    const o = must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'budi', approver: approver('hendra') }));
+    expect(o.employeeId).toBe('budi');
+  });
+
+  it('penerima berbeda punya kuota sendiri-sendiri, dan order biasa tidak terpengaruh', async () => {
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'hendra' }));
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'rina' }));
+    must(await c.engine.createOrder('TAKE_AWAY'));
+  });
+
+  it('order karyawan yang di-void mengembalikan kuota hari itu', async () => {
+    const first = must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    expect(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' })).toMatchObject({ ok: false });
+    must(await c.engine.voidOrder(first.id, 'WRONG_ORDER', [])); // masih draft: tanpa persetujuan
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+  });
+
+  it('besok kuota kembali', async () => {
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    c.tick(30 * 3_600_000);
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+  });
+
+  it('kuota mengikuti kebijakan outlet', async () => {
+    const config = await demoConfig();
+    c.engine.setConfig({ ...config, policy: { ...DEFAULT_POLICY, employeeMealQuota: 2 } });
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+    expect(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' })).toMatchObject({ ok: false, code: 'MEAL_APPROVAL_REQUIRED' });
+  });
+
+  it('tetap mewajibkan memilih karyawan penerima', async () => {
+    expect(await c.engine.createOrder('EMPLOYEE')).toMatchObject({ ok: false, code: 'EMPLOYEE_REQUIRED' });
   });
 });

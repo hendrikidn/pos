@@ -42,10 +42,10 @@ export function UserManager({ users }: { users: DashboardUser[] }) {
     <>
       <section className="panel">
         <h2>Pengguna dashboard</h2>
-        <p className="muted small">Pengguna masuk dengan kode 6 digit yang dikirim ke emailnya. Satu email hanya untuk satu pengguna.</p>
+        <p className="muted small">Pengguna masuk dengan email dan password. Pengguna baru mengatur password pertama kali lewat "Lupa password / atur password" di halaman masuk (kode dikirim ke emailnya). Satu email hanya untuk satu pengguna.</p>
         <div style={{ overflowX: 'auto' }}>
           <table className="table">
-            <thead><tr><th>Email</th><th>ID</th><th>Peran</th><th>Terakhir masuk</th><th className="num">Sesi aktif</th><th>Status</th><th /></tr></thead>
+            <thead><tr><th>Email</th><th>ID</th><th>Peran</th><th>Terakhir masuk</th><th>Password</th><th className="num">Sesi aktif</th><th>Status</th><th /></tr></thead>
             <tbody>
               {users.map((u) => {
                 const owner = u.role === 'OWNER';
@@ -70,6 +70,7 @@ export function UserManager({ users }: { users: DashboardUser[] }) {
                       )}
                     </td>
                     <td>{u.last_login_at ? wibDateTime(Date.parse(u.last_login_at)) : <span className="muted">belum pernah</span>}</td>
+                    <td>{u.has_password ? 'Sudah diatur' : <span className="muted">belum</span>}</td>
                     <td className="num">{u.active_sessions}</td>
                     <td>{u.active ? 'Aktif' : 'Nonaktif'}</td>
                     <td className="row-actions">
@@ -81,7 +82,7 @@ export function UserManager({ users }: { users: DashboardUser[] }) {
                             className="secondary"
                             disabled={busy}
                             onClick={() => {
-                              const next = window.prompt(`Email baru untuk ${u.user_id}:\n\nSesinya diputus dan kode yang sudah terkirim ke email lama tidak berlaku lagi.`, u.email);
+                              const next = window.prompt(`Email baru untuk ${u.user_id}:\n\nSesinya diputus, kode yang sudah terkirim ke email lama tidak berlaku lagi, dan password lama dihapus (pemilik email baru mengaturnya sendiri).`, u.email);
                               if (next && next.trim() && next.trim().toLowerCase() !== u.email.toLowerCase()) {
                                 void run('PUT', `/v1/users/${u.id}`, { email: next.trim() }, `Email ${u.user_id} diganti.`);
                               }
@@ -106,7 +107,7 @@ export function UserManager({ users }: { users: DashboardUser[] }) {
                   </tr>
                 );
               })}
-              {users.length === 0 && <tr><td colSpan={7} className="muted">Belum ada pengguna.</td></tr>}
+              {users.length === 0 && <tr><td colSpan={8} className="muted">Belum ada pengguna.</td></tr>}
             </tbody>
           </table>
         </div>

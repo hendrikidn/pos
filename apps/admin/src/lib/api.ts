@@ -100,6 +100,7 @@ export interface UserRow {
   created_at: string;
   last_login_at: string | null;
   active_sessions: number;
+  has_password: boolean;
 }
 
 export interface TenantDetail {

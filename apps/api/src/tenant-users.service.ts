@@ -60,7 +60,11 @@ export class TenantUsersService {
       [auth.tenantId],
     );
     const n = new Map(sessions.rows.map((r) => [r.user_id, r.n]));
-    return users.map((u) => ({ ...u, active_sessions: n.get(u.user_id) ?? 0 }));
+    // Hash tidak terbaca dari jalur tenant (hak per kolom); hanya status "sudah diatur" yang diambil lewat koneksi pemilik skema.
+    const pw = new Map(
+      (await this.db.admin.query<{ id: number; has: boolean }>('select id::int as id, password_hash is not null as has from dashboard_user where tenant_id = $1', [auth.tenantId])).rows.map((r) => [r.id, r.has]),
+    );
+    return users.map((u) => ({ ...u, active_sessions: n.get(u.user_id) ?? 0, has_password: pw.get(u.id) ?? false }));
   }
 
   async invite(auth: ApiAuth, input: InviteInput) {
@@ -124,6 +128,9 @@ export class TenantUsersService {
       ]);
       return { userId: u.user_id, revoke: newEmail !== null || newRole !== null || !active };
     });
+    if (newEmail !== null) {
+      await this.db.admin.query('update dashboard_user set password_hash = null, password_set_at = null, failed_logins = 0, locked_until = null where id = $1 and tenant_id = $2', [userRef, auth.tenantId]);
+    }
     if (target.revoke) {
       await this.db.admin.query('update api_token set revoked_at = now() where tenant_id = $1 and user_id = $2 and session and revoked_at is null', [auth.tenantId, target.userId]);
       await this.db.admin.query('update login_code set used_at = now() where used_at is null and user_ref = $1', [userRef]);

@@ -113,7 +113,7 @@ export class PlatformService {
       dailySeries(this.db, now, tenantId),
       // Sesi login email yang masih berlaku dihitung per pengguna; isinya (token) tidak pernah dikembalikan.
       this.db.admin.query(
-        `select u.id::int as id, u.user_id, u.email, u.role, u.active, u.created_at, u.last_login_at,
+        `select u.id::int as id, u.user_id, u.email, u.role, u.active, u.created_at, u.last_login_at, (u.password_hash is not null) as has_password,
                 (select count(*)::int from api_token s where s.tenant_id = u.tenant_id and s.user_id = u.user_id and s.session
                    and s.revoked_at is null and s.expires_at > now()) as active_sessions
          from dashboard_user u where u.tenant_id = $1 order by u.id`,
@@ -224,6 +224,8 @@ export class PlatformService {
       }
       const active = typeof input.active === 'boolean' ? input.active : u.active;
       await q.query('update dashboard_user set email = coalesce($2, email), active = $3 where id = $1', [userRef, newEmail, active]);
+      // Pemilik email baru tidak boleh mewarisi password lama: ia mengatur sendiri lewat "Lupa password".
+      if (newEmail !== null && newEmail !== u.email.toLowerCase()) await q.query('update dashboard_user set password_hash = null, password_set_at = null, failed_logins = 0, locked_until = null where id = $1', [userRef]);
       if (newEmail !== null || !active) {
         await q.query('update api_token set revoked_at = now() where tenant_id = $1 and user_id = $2 and session and revoked_at is null', [tenantId, u.user_id]);
         // Kode yang sudah terkirim ke email lama tidak boleh bisa dipakai lagi.

@@ -35,11 +35,11 @@ export function UserManager({ tenantId, users }: { tenantId: string; users: User
     <section className="panel">
       <h2>Pengguna dashboard (login email)</h2>
       <p className="muted small">
-        Pengguna masuk dengan kode 6 digit yang dikirim ke emailnya, tanpa token. Satu email hanya untuk satu pengguna di seluruh platform.
+        Pengguna masuk dengan email dan password; password diatur sendiri lewat "Lupa password / atur password" (kode dikirim ke emailnya). Mengganti email menghapus password lama. Satu email hanya untuk satu pengguna di seluruh platform.
       </p>
       <div style={{ overflowX: 'auto' }}>
         <table className="table">
-          <thead><tr><th>Email</th><th>ID</th><th>Peran</th><th>Terakhir masuk</th><th className="num">Sesi aktif</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Email</th><th>ID</th><th>Peran</th><th>Terakhir masuk</th><th>Password</th><th className="num">Sesi aktif</th><th>Status</th><th /></tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id} className={u.active ? '' : 'off'}>
@@ -47,6 +47,7 @@ export function UserManager({ tenantId, users }: { tenantId: string; users: User
                 <td className="mono">{u.user_id}</td>
                 <td>{ROLE[u.role]}</td>
                 <td>{u.last_login_at ? dateWib(u.last_login_at) : <span className="muted">belum pernah</span>}</td>
+                <td>{u.has_password ? 'Sudah diatur' : <span className="muted">belum</span>}</td>
                 <td className="num">{u.active_sessions}</td>
                 <td>{u.active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="row-actions">
@@ -54,7 +55,7 @@ export function UserManager({ tenantId, users }: { tenantId: string; users: User
                     className="secondary"
                     disabled={busy}
                     onClick={() => {
-                      const next = window.prompt(`Email baru untuk ${u.user_id}:\n\nSemua sesi pengguna ini langsung diputus, dan kode yang sudah terkirim ke email lama tidak berlaku lagi.`, u.email);
+                      const next = window.prompt(`Email baru untuk ${u.user_id}:\n\nSemua sesi pengguna ini langsung diputus, kode yang sudah terkirim ke email lama tidak berlaku lagi, dan password lama dihapus.`, u.email);
                       if (next && next.trim() && next.trim().toLowerCase() !== u.email.toLowerCase()) {
                         void run(`/v1/admin/tenants/${tenantId}/users/${u.id}`, { email: next.trim() }, `Email ${u.user_id} diganti.`, 'PUT');
                       }
@@ -76,7 +77,7 @@ export function UserManager({ tenantId, users }: { tenantId: string; users: User
                 </td>
               </tr>
             ))}
-            {users.length === 0 && <tr><td colSpan={7} className="muted">Belum ada pengguna email. Tambahkan email owner di bawah; sebelum itu owner hanya bisa masuk dengan token.</td></tr>}
+            {users.length === 0 && <tr><td colSpan={8} className="muted">Belum ada pengguna email. Tambahkan email owner di bawah; sebelum itu owner hanya bisa masuk dengan token.</td></tr>}
           </tbody>
         </table>
       </div>

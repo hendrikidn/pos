@@ -17,7 +17,7 @@ Tahap 1 (rekonsiliasi non-tunai), tahap 2 (event log, kunci order, aturan real-t
 | `packages/sim` | Simulator aliran event outlet untuk test dan demo |
 | `apps/api` | Backend NestJS + PostgreSQL: ingest event, rekonsiliasi bank, insiden, review, notifikasi |
 | `apps/dashboard` | Dashboard owner (Next.js): daftar insiden, bukti, jendela CCTV, review |
-| `apps/admin` | Konsol admin platform (Next.js, UI terpisah dari dashboard owner; owner masuk dengan **email + kode sekali pakai**, token jadi jalur cadangan; owner mengundang OPS/manager/supervisor sendiri dari dashboard): membuat dan menangguhkan tenant, menerbitkan atau mencabut token owner, dan **KPI tenant** (pesanan, penerimaan, perangkat, insiden). Outlet dikelola owner tenant di dashboard-nya. Token `adm_`, dibuat lewat `npm run api:admin` |
+| `apps/admin` | Konsol admin platform (Next.js, UI terpisah dari dashboard owner; pengguna masuk dengan **email + password** (lupa password lewat kode email; token jadi jalur cadangan); owner mengundang OPS/manager/supervisor sendiri dari dashboard): membuat dan menangguhkan tenant, menerbitkan atau mencabut token owner, dan **KPI tenant** (pesanan, penerimaan, perangkat, insiden). Outlet dikelola owner tenant di dashboard-nya. Token `adm_`, dibuat lewat `npm run api:admin` |
 | `packages/pos-core` | Inti POS tanpa DOM: order, kunci void/diskon/refund, shift buta, event log + outbox, sinkronisasi |
 | `apps/pos/android` | Pembungkus Android (Capacitor): printer ESC/POS, Keystore, postur, kios, layar kedua. Lihat [ANDROID.md](apps/pos/ANDROID.md) |
 | `firmware/sensor-node` | Firmware sensor kehadiran (ESP32-C3 + LD2410): inti C yang diuji di komputer, aplikasi ESP32, alat kalibrasi |

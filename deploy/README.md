@@ -223,7 +223,7 @@ Buka `https://pos.dolanyu.com/login` di browser; harus tanpa peringatan sertifik
 
 ## 6b. Email kode masuk (Brevo)
 
-Owner masuk ke dashboard dengan **kode 6 digit yang dikirim ke emailnya**, bukan token. API mengirim email lewat SMTP; panduan ini memakai Brevo. Tanpa langkah ini kode tidak terkirim dan owner hanya bisa masuk dengan token cadangan.
+Pengguna dashboard masuk dengan **email + password**. Email dipakai untuk **mengatur dan mengatur ulang password** (kode 6 digit) dan sebagai jalur masuk alternatif tanpa password. API mengirim email lewat SMTP; panduan ini memakai Brevo. Tanpa langkah ini kode tidak terkirim: pengguna baru tidak bisa mengatur password pertamanya, dan owner hanya bisa masuk dengan token cadangan.
 
 1. Buat akun di [brevo.com](https://www.brevo.com).
 2. **Verifikasi domain pengirim** (agar email tidak masuk spam atau ditolak). Di Brevo: *Senders, Domains & Dedicated IPs → Domains → Add a domain* → `dolanyu.com`. Brevo menampilkan beberapa record DNS (kode verifikasi TXT, DKIM, dan DMARC) yang Anda tambahkan di panel DNS `dolanyu.com`, lalu klik *Authenticate*. Setelah statusnya terotentikasi, `no-reply@dolanyu.com` boleh dipakai sebagai pengirim.
@@ -239,7 +239,7 @@ Owner masuk ke dashboard dengan **kode 6 digit yang dikirim ke emailnya**, bukan
    MAIL_FROM=POS Guard <no-reply@dolanyu.com>
    ```
 5. Terapkan: `docker compose up -d api` (hanya API yang perlu dimulai ulang). Log API menampilkan `email kode masuk: SMTP smtp-relay.brevo.com:587, pengirim ...`; bila SMTP belum diisi tampil `PERINGATAN: SMTP_HOST belum diisi`.
-6. Uji: buat tenant dengan email Anda sendiri di konsol admin (langkah 7), buka `https://pos.dolanyu.com/login`, masukkan email, dan periksa kotak masuk (juga folder spam pada percobaan pertama).
+6. Uji: buat tenant dengan email Anda sendiri di konsol admin (langkah 7), buka halaman masuk, pilih **Lupa password / atur password**, masukkan email, dan periksa kotak masuk (juga folder spam pada percobaan pertama).
 
 Catatan:
 - Rincian menu dan nama kolom di Brevo bisa berubah; ikuti petunjuk Brevo bila berbeda dari yang di atas. Paket gratis punya batas kiriman harian; cek batas saat ini di akun Anda dan pastikan cukup untuk jumlah login owner.
@@ -259,7 +259,7 @@ Token ADMIN (`adm_...`) dicetak **sekali**; simpan di pengelola sandi. Token ini
 Buka `https://pos-admin.dolanyu.com`, masuk dengan token admin, lalu **Tenant baru**:
 1. Isi nama tenant, outlet pertama, terminal POS (mis. `pos-1, pos-2`), **email owner**, dan ID owner.
 2. Klik **Buat tenant**. Dengan email owner, **tidak ada token** yang dibuat (centang "Terbitkan juga token owner" bila ingin jalur cadangan).
-3. Pemilik membuka `https://pos.dolanyu.com`, memasukkan emailnya, lalu memasukkan kode 6 digit yang dikirim ke email itu. Setelah masuk ia menambah staf, menu, dan memasang sensor di Pengaturan.
+3. Pemilik membuka dashboard, memilih **Lupa password / atur password**, memasukkan emailnya, lalu kode 6 digit dari email beserta password baru (minimal 10 karakter; kalimat panjang boleh). Ia langsung masuk, dan berikutnya cukup email + password. Setelah masuk ia menambah staf, menu, dan memasang sensor di Pengaturan.
 
 Tanpa email owner, perilaku lama berlaku: token owner muncul **sekali** dan dibagikan ke pemilik.
 
@@ -390,7 +390,9 @@ Kembali ke versi terbaru: `git checkout main && ~/pos/deploy/deploy.sh`.
 - Nginx/Caddy harus meneruskan `X-Forwarded-For` (sudah di contoh di atas). API memakai `TRUST_PROXY=1` (satu proxy tepercaya) untuk membedakan pemanggil pada pembatas percobaan kode pairing. Bila ada proxy lain di depan (mis. Cloudflare Proxied), jumlahnya perlu disesuaikan.
 - API terhubung sebagai pemilik database, lalu `SET ROLE app_user` untuk isolasi per tenant (RLS). Itu rancangan yang disengaja.
 - Token OWNER setara kunci utama satu tenant. Token **ADMIN** setara kunci utama seluruh platform: simpan di pengelola sandi, jangan dibagikan, dan terbitkan ulang (`--rotate`) bila bocor.
-- **Login email:** kode 6 digit disimpan sebagai hash berasin, berlaku 10 menit, sekali pakai, dan mati setelah 5 kali salah; hanya kode terbaru yang berlaku. Dibatasi 1 permintaan per menit dan 5 per jam per email, serta 20 permintaan dan 20 percobaan salah per 15 menit per alamat klien (alamat klien diteruskan dashboard dari nginx lewat `X-Forwarded-For`). Sesi berlaku 7 hari, dicabut saat keluar, saat pengguna dinonaktifkan, atau saat emailnya diganti. **Siapa pun yang menguasai kotak masuk email owner bisa masuk sebagai owner**, jadi sarankan owner memakai email dengan verifikasi dua langkah. Sandi SMTP ada di `.env`; jaga seperti rahasia lain.
+- **Password:** disimpan sebagai hash scrypt berasin (N=65536, r=8, p=1; parameter tersimpan di hash), minimal 10 karakter, maksimal 128, dan menolak yang terlalu umum, berulang, atau memuat nama email. **Akun dikunci 15 menit setelah 5 password salah berturut-turut**; kode email atau atur ulang password tetap bisa dipakai untuk masuk. Login gagal selalu berpesan sama dan berwaktu sama, baik email tak terdaftar, nonaktif, belum punya password, maupun password salah. Hash tidak terbaca dari jalur tenant (hak akses per kolom di database), tidak muncul di respons, dan tidak masuk log. Mengatur ulang atau mengganti password memutus sesi lain; mengganti email menghapus password lama.
+- **Kode email:** 6 digit, berlaku 10 menit, sekali pakai, mati setelah 5 kali salah, disimpan sebagai hash berasin, dan hanya kode terbaru yang berlaku. Kode untuk masuk dan kode atur ulang password tidak saling menggantikan. Dibatasi 1 permintaan per menit dan 5 per jam per email, serta 20 permintaan dan 20 percobaan salah per 15 menit per alamat klien (alamat klien diteruskan dashboard dari nginx lewat `X-Forwarded-For`). Respons permintaan kode selalu sama agar daftar email tidak bisa ditebak.
+- **Sesi:** 7 hari, dicabut saat keluar, saat pengguna dinonaktifkan, saat emailnya diganti, atau saat password diatur ulang. **Siapa pun yang menguasai kotak masuk email pengguna bisa mengatur ulang password-nya**, jadi sarankan owner memakai email dengan verifikasi dua langkah. Sandi SMTP ada di `.env`; jaga seperti rahasia lain.
 - Konsol admin dipisahkan dari dashboard owner: domain berbeda, cookie berbeda (`SameSite=Strict`, sesi 12 jam), dan jenis token berbeda. Token admin ditolak di endpoint tenant dan sebaliknya (403). Pasang pembatasan IP di nginx (contoh di langkah 6) bila IP Anda tetap.
 - Pembatas percobaan kode pairing disimpan di memori API, jadi reset saat API restart.
 
@@ -407,6 +409,7 @@ Kembali ke versi terbaru: `git checkout main && ~/pos/deploy/deploy.sh`.
 | API restart terus | Sandi database di `.env` berubah setelah volume dibuat | Kembalikan sandi lama (sandi hanya dipakai saat volume pertama dibuat) |
 | Login konsol admin: "Token tidak valid" | Memakai token owner (`api_`) | Konsol hanya menerima token admin (`adm_`) |
 | `admin-token.ts`: "admin sudah ada" | ID admin sudah dibuat | Tambahkan `--rotate` untuk token baru |
+| Akun terkunci ("terlalu banyak percobaan gagal untuk akun ini") | 5 password salah berturut-turut | Tunggu 15 menit, atau **Lupa password / atur password** (kode email) untuk langsung membuka kunci |
 | Kode login tidak sampai | SMTP belum diisi, domain pengirim belum terotentikasi di Brevo, atau email tidak terdaftar/nonaktif | Lihat log `docker compose logs api` (cari `[mail]`); periksa folder spam; cek status domain di Brevo; pastikan email terdaftar di konsol admin |
 | "terlalu banyak permintaan" saat login | Batas per alamat (20 per 15 menit) atau per email (5 per jam) | Tunggu; atau `docker compose restart api` mereset batas per alamat |
 | Semua pengguna terkena batas bersamaan | nginx tidak meneruskan `X-Forwarded-For` | Pastikan `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` ada di blok `pos.dolanyu.com` |

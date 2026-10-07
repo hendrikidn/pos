@@ -14,7 +14,7 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
           {(me.role === 'OWNER' || me.role === 'OPS') && <Link href="/settings">Pengaturan</Link>}
         </nav>
         <div className="who">
-          <span>{me.userId} · {me.role}</span>
+          <Link href="/account">{me.userId} · {me.role}</Link>
           <LogoutButton />
         </div>
       </header>

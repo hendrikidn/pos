@@ -14,7 +14,9 @@ Internet ──HTTPS──► web server yang SUDAH ada (80/443)
                                                                    PostgreSQL (internal Docker, tanpa port)
 ```
 
-> **Status:** konfigurasi ini **belum dijalankan di VPS sungguhan** dan Docker tidak tersedia di mesin pengembangan. Yang sudah diuji: instalasi dependensi yang difilter, API start dari hasil instalasi itu (migrasi otomatis, `/healthz`), build dan start dashboard produksi, serta alur API terhadap PostgreSQL 18 asli. **Belum terbukti:** build image, Compose, konfigurasi nginx/Caddy di bawah, `backup.sh`, dan prosedur pemulihan. Bila ada langkah yang gagal, salin pesan errornya.
+> **Deploy dan update: satu perintah, `~/pos/deploy/deploy.sh`** (langkah 5 dan 10). Sebelum yang pertama, selesaikan langkah 1–4 (DNS, pengguna, Docker, kode, `.env`).
+
+> **Status:** konfigurasi ini **belum dijalankan di VPS sungguhan** dan Docker tidak tersedia di mesin pengembangan. Yang sudah diuji: instalasi dependensi yang difilter, API start dari hasil instalasi itu (migrasi otomatis, `/healthz`), build dan start dashboard produksi, serta alur API terhadap PostgreSQL 18 asli. **Belum terbukti:** build image, Compose, `deploy.sh` (logikanya diuji dengan Docker tiruan: jalur sukses, layanan gagal, cadangan gagal, konfigurasi salah), konfigurasi nginx/Caddy di bawah, `backup.sh`, dan prosedur pemulihan. Bila ada langkah yang gagal, salin pesan errornya.
 
 ## Apa yang bisa bentrok, dan apa yang tidak
 
@@ -107,15 +109,14 @@ Simpan sandi database di pengelola sandi Anda.
 ## 5. Jalankan (sebagai `posguard`)
 
 ```
-cd ~/pos/deploy
-docker compose up -d --build
+~/pos/deploy/deploy.sh
 ```
-Build pertama 5–10 menit. Lalu:
+Satu perintah ini: memeriksa `deploy/.env` dan Docker, menarik kode terbaru, mencadangkan database (bila sudah berjalan), membangun dan menjalankan semua layanan, menunggu semuanya sehat, lalu menguji API, dashboard, konsol admin, dan alamat publik. Build pertama 5–10 menit. Bila ada layanan yang tidak sehat, skrip menampilkan lognya, memberi cara kembali ke commit sebelumnya, dan keluar dengan status gagal.
+
+Opsi: `--no-pull` (pakai kode yang ada di folder ini) dan `--no-backup` (lewati cadangan; tidak disarankan). Hasil akhirnya setara dengan memeriksa manual:
 ```
 docker compose ps                         # db, api, dashboard, admin: running/healthy
 curl http://127.0.0.1:18081/healthz       # {"ok":true}
-curl -I http://127.0.0.1:18082/login      # HTTP 200 (dashboard owner)
-curl -I http://127.0.0.1:18083/login      # HTTP 200 (konsol admin)
 ```
 Migrasi database berjalan otomatis saat API start. Pada tahap ini POS sudah hidup di VPS, tetapi baru bisa diakses dari VPS itu sendiri. Langkah 6 membukanya lewat domain.
 
@@ -327,10 +328,17 @@ Role `app_user` harus ada sebelum pemulihan karena hak aksesnya dirujuk oleh dum
 ## 10. Memperbarui versi (sebagai `posguard`)
 
 ```
-cd ~/pos && git pull
-cd deploy && docker compose up -d --build
+~/pos/deploy/deploy.sh
 ```
-Migrasi baru diterapkan otomatis. Data di volume tidak tersentuh. Web server lama tidak perlu diubah.
+Skrip yang sama dengan langkah 5, dan aman dijalankan berulang: mencadangkan database dulu (deploy dibatalkan bila cadangan gagal), menarik kode, membangun ulang, dan memeriksa kesehatan. Migrasi baru diterapkan otomatis; data di volume tidak tersentuh. Web server lama tidak perlu diubah.
+
+**Kembali ke versi sebelumnya** (kode saja; migrasi database hanya maju, jadi bila versi lama tidak cocok dengan skema yang sudah berubah, pulihkan database dari cadangan di langkah 9):
+```
+cd ~/pos && git log --oneline | head     # pilih commit
+git checkout <commit>
+~/pos/deploy/deploy.sh --no-pull --no-backup
+```
+Kembali ke versi terbaru: `git checkout main && ~/pos/deploy/deploy.sh`.
 
 ## 11. Perintah sehari-hari (sebagai `posguard`, dari `~/pos/deploy`)
 

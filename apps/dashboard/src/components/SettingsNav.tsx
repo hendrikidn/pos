@@ -4,6 +4,7 @@ const ITEMS = [
   { href: '/settings/staff', label: 'Staf & PIN', key: 'staff' },
   { href: '/settings/menu', label: 'Menu', key: 'menu' },
   { href: '/settings/outlet', label: 'Outlet', key: 'outlet' },
+  { href: '/settings/users', label: 'Pengguna', key: 'users' },
   { href: '/settings/devices', label: 'Perangkat', key: 'devices' },
 ] as const;
 

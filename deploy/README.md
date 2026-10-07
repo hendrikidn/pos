@@ -234,7 +234,7 @@ Owner masuk ke dashboard dengan **kode 6 digit yang dikirim ke emailnya**, bukan
    SMTP_HOST=smtp-relay.brevo.com
    SMTP_PORT=587
    SMTP_USER=xxxxxx@smtp-brevo.com
-   SMTP_PASS=xkeysib-...
+   SMTP_PASS=xsmtpsib-...
    MAIL_FROM=POS Guard <no-reply@dolanyu.com>
    ```
 5. Terapkan: `docker compose up -d api` (hanya API yang perlu dimulai ulang). Log API menampilkan `email kode masuk: SMTP smtp-relay.brevo.com:587, pengirim ...`; bila SMTP belum diisi tampil `PERINGATAN: SMTP_HOST belum diisi`.
@@ -267,7 +267,18 @@ Pembagian tugas:
 | Siapa | Mengelola |
 |---|---|
 | **Admin platform** (konsol `pos-admin`) | Tenant: buat, ganti nama, **tangguhkan/aktifkan**. **Pengguna dashboard**: tambah, ganti email, nonaktifkan (memutus sesinya). Token cadangan: terbitkan, cabut. Melihat **KPI** tiap tenant dan seluruh platform |
-| **Owner tenant** (dashboard `pos`) | **Outlet** (tambah, ubah nama dan terminal, pajak, EDC), staf, menu, perangkat |
+| **Owner tenant** (dashboard `pos`) | **Outlet** (tambah, ubah nama dan terminal, pajak, EDC), staf, menu, perangkat, dan **pengguna dashboard** (undang, ubah peran, ganti email, nonaktifkan; Pengaturan → Pengguna) |
+
+**Peran pengguna dashboard** (sesuai yang diberlakukan API):
+
+| Peran | Dapat | Dibuat oleh |
+|---|---|---|
+| **OWNER** | Semuanya: staf, menu, outlet, pengaturan, perangkat, pengguna, tinjau insiden, laporan bank | Admin platform |
+| **OPS** | Meninjau insiden, mengunggah laporan bank dan slip settlement, mengelola menu, memasang perangkat | Owner atau admin |
+| **MANAGER** | Melihat insiden, settlement EDC, dan menu (hanya baca) | Owner atau admin |
+| **SUPERVISOR** | Melihat insiden saja (hanya baca) | Owner atau admin |
+
+Insiden yang melibatkan seorang pengguna disembunyikan darinya, berdasarkan **ID pengguna**. Bila orang itu juga staf di POS, samakan ID pengguna dengan ID stafnya (kolom "ID staf POS" di form undangan). Owner tidak bisa membuat atau mengubah akun OWNER (termasuk dirinya sendiri) dan tidak bisa melihat pengguna tenant lain.
 
 Admin tidak menambah atau mengubah outlet; itu dilakukan owner di **Pengaturan → Outlet**. Semua tindakan admin tercatat di `audit_log`.
 

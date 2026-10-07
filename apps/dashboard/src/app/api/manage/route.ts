@@ -7,6 +7,8 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['POST', 'PUT'], path: /^\/v1\/menu(\/[a-z0-9_-]+)?$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/settings$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/settlements$/ },
+  { methods: ['POST'], path: /^\/v1\/users$/ },
+  { methods: ['PUT'], path: /^\/v1\/users\/[0-9]+$/ },
   { methods: ['POST'], path: /^\/v1\/outlets$/ },
   { methods: ['PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+$/ },
   { methods: ['POST'], path: /^\/v1\/devices\/pairing$/ },

@@ -14,6 +14,8 @@ import { IncidentService } from './incident.service';
 import { LoginController } from './login.controller';
 import { LoginService } from './login.service';
 import { MAILER, mailerFromEnv, type Mailer } from './mailer';
+import { TenantUsersController } from './tenant-users.controller';
+import { TenantUsersService } from './tenant-users.service';
 import { PlatformController } from './platform.controller';
 import { PlatformService } from './platform.service';
 import { PairingService } from './pairing.service';
@@ -40,7 +42,7 @@ export class AppModule {
   static forRoot(db: Database, opts: AppOptions = {}): DynamicModule {
     return {
       module: AppModule,
-      controllers: [ApiController, ConfigController, DeviceController, PlatformController, LoginController],
+      controllers: [ApiController, ConfigController, DeviceController, PlatformController, LoginController, TenantUsersController],
       providers: [
         // useFactory, bukan useValue: Nest menyerialisasi metadata modul dinamis untuk membuat token modul,
         // dan objek database (memori WASM) membuat serialisasi itu gagal.
@@ -52,7 +54,7 @@ export class AppModule {
         { provide: MAILER, useFactory: () => opts.mailer ?? mailerFromEnv() },
         { provide: CLOCK, useFactory: () => opts.clock ?? Date.now },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, IngestService, GuardService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, DeviceService, PairingService, PlatformService, LoginService,
+        AdminService, IngestService, GuardService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
       ],
       exports: [AdminService, ConfigService],
     };

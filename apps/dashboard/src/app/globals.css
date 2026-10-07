@@ -176,3 +176,4 @@ input.narrow { width: 120px; text-align: right; font: inherit; color: var(--text
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 .login input { width: 100%; box-sizing: border-box; }
+.table select { font: inherit; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }

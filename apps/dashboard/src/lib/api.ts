@@ -112,6 +112,17 @@ export function sameOrigin(req: Request): boolean {
   }
 }
 
+export interface DashboardUser {
+  id: number;
+  user_id: string;
+  email: string;
+  role: 'OWNER' | 'OPS' | 'MANAGER' | 'SUPERVISOR';
+  active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+  active_sessions: number;
+}
+
 export interface StaffRow {
   id: string;
   name: string;

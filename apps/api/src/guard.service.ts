@@ -1,0 +1,146 @@
+import { Inject, Injectable } from '@nestjs/common';
+import type { PosEvent } from '@pos/events';
+import {
+  buildIncidents, evaluateRules, type Capabilities, type Incident, type RuleHit,
+} from '@pos/rules';
+import { Database } from './db/database';
+import type { Queryable } from './db/driver';
+
+/** Aturan dievaluasi atas event 72 jam terakhir. Aturan pola mingguan (Kelas 3) memakai jalur sendiri nanti. */
+export const LOOKBACK_MS = 72 * 3_600_000;
+
+export interface EventRow {
+  id: string;
+  device_id: string;
+  outlet_id: string;
+  seq: number;
+  type: string;
+  device_time_ms: number;
+  clock_offset_ms: number;
+  actor_id: string | null;
+  prev_hash: string;
+  hash: string;
+  payload: Record<string, unknown>;
+}
+
+export const EVENT_COLUMNS =
+  'id, device_id, outlet_id, seq, type, device_time_ms, clock_offset_ms, actor_id, prev_hash, hash, payload';
+
+export function rowToEvent(r: EventRow): PosEvent {
+  return {
+    v: 1, id: r.id, deviceId: r.device_id, outletId: r.outlet_id, seq: r.seq, deviceTime: r.device_time_ms,
+    clockOffsetMs: r.clock_offset_ms, actorId: r.actor_id, prevHash: r.prev_hash, hash: r.hash,
+    type: r.type, payload: r.payload,
+  } as PosEvent;
+}
+
+export interface EvaluateResult {
+  incidents: Incident[];
+  /** Insiden kritis yang baru muncul pada evaluasi ini (untuk dikirimi notifikasi). */
+  newCritical: Incident[];
+}
+
+@Injectable()
+export class GuardService {
+  constructor(@Inject(Database) private readonly db: Database) {}
+
+  /**
+   * Menghitung ulang insiden satu outlet dari event 72 jam terakhir ditambah temuan rekonsiliasi bank,
+   * lalu menyimpannya. Status review manusia tidak pernah ditimpa. Insiden terbuka yang tidak lagi
+   * dihasilkan (mis. dibatalkan oleh data susulan) ditandai RETRACTED.
+   */
+  async evaluate(tenantId: string, outletId: string, now = Date.now()): Promise<EvaluateResult> {
+    return this.db.tenantTx(tenantId, async (q) => {
+      const outlet = (
+        await q.query<{ capabilities: Capabilities; terminals: string[] }>(
+          'select capabilities, terminals from outlet where id = $1',
+          [outletId],
+        )
+      ).rows[0];
+      if (!outlet) return { incidents: [], newCritical: [] };
+
+      const from = now - LOOKBACK_MS;
+      const events = (
+        await q.query<EventRow>(
+          `select ${EVENT_COLUMNS} from event where outlet_id = $1 and device_time_ms >= $2 order by device_id, seq`,
+          [outletId, from],
+        )
+      ).rows.map(rowToEvent);
+
+      const extraIntegrity = (
+        await q.query<{ device_id: string; seq: number; integrity: string; device_time_ms: number; actor_id: string | null }>(
+          `select device_id, seq, integrity, device_time_ms, actor_id from event
+           where outlet_id = $1 and device_time_ms >= $2 and integrity in ('BAD_SIGNATURE', 'MISSING_SIGNATURE')`,
+          [outletId, from],
+        )
+      ).rows.map((r) => ({ deviceId: r.device_id, seq: r.seq, kind: r.integrity, at: r.device_time_ms, actorId: r.actor_id }));
+
+      const bankHits = (
+        await q.query<{ hit: RuleHit }>('select hit from bank_finding where outlet_id = $1 and at_ms >= $2', [outletId, from])
+      ).rows.map((r) => r.hit);
+
+      const hits = [
+        ...evaluateRules({ events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity }),
+        ...bankHits,
+      ];
+      const incidents = buildIncidents(hits).map((i) => ({ ...i, id: `${outletId}:${i.id}` }));
+      const newCritical = await this.persist(q, tenantId, outletId, incidents, from);
+      return { incidents, newCritical };
+    });
+  }
+
+  private async persist(
+    q: Queryable, tenantId: string, outletId: string, incidents: Incident[], windowStart: number,
+  ): Promise<Incident[]> {
+    const existing = new Map(
+      (
+        await q.query<{ id: string; status: string; level: string }>(
+          'select id, status, level from incident where outlet_id = $1 and start_ms >= $2',
+          [outletId, windowStart],
+        )
+      ).rows.map((r) => [r.id, { status: r.status, level: r.level }]),
+    );
+    const newCritical: Incident[] = [];
+
+    for (const i of incidents) {
+      const prev = existing.get(i.id);
+      const status = prev?.status;
+      if (prev === undefined) {
+        if (i.level === 'CRITICAL') newCritical.push(i);
+        await q.query(
+          `insert into incident (id, tenant_id, outlet_id, terminal_id, start_ms, end_ms, score, level, multiplier,
+                                 order_ids, actor_ids, hits)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb)`,
+          [
+            i.id, tenantId, outletId, i.terminalId, i.startAt, i.endAt, i.score, i.level, i.multiplier,
+            JSON.stringify(i.orderIds), JSON.stringify(i.actorIds), JSON.stringify(i.hits),
+          ],
+        );
+      } else {
+        // Hanya insiden OPEN/RETRACTED yang dihitung ulang; yang sudah direview manusia dibiarkan.
+        const reopen = status === 'RETRACTED' ? ", status = 'OPEN'" : '';
+        if (status === 'OPEN' || status === 'RETRACTED') {
+          // Insiden yang naik menjadi kritis karena bukti tambahan juga perlu notifikasi.
+          if (i.level === 'CRITICAL' && prev.level !== 'CRITICAL') newCritical.push(i);
+          await q.query(
+            `update incident set terminal_id = $2, start_ms = $3, end_ms = $4, score = $5, level = $6, multiplier = $7,
+                    order_ids = $8::jsonb, actor_ids = $9::jsonb, hits = $10::jsonb, updated_at = now()${reopen}
+             where id = $1`,
+            [
+              i.id, i.terminalId, i.startAt, i.endAt, i.score, i.level, i.multiplier,
+              JSON.stringify(i.orderIds), JSON.stringify(i.actorIds), JSON.stringify(i.hits),
+            ],
+          );
+        }
+      }
+    }
+
+    const live = new Set(incidents.map((i) => i.id));
+    for (const [id, { status }] of existing) {
+      if (status === 'OPEN' && !live.has(id)) {
+        await q.query("update incident set status = 'RETRACTED', updated_at = now() where id = $1", [id]);
+      }
+    }
+    return newCritical;
+  }
+}

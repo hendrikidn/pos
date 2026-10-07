@@ -1,0 +1,20 @@
+node_modules
+dist
+.env
+.next
+next-env.d.ts
+*.tsbuildinfo
+apps/pos/android/build
+apps/pos/android/app/build
+apps/pos/android/.gradle
+apps/pos/android/local.properties
+apps/pos/android/capacitor-cordova-android-plugins/build
+apps/pos/dist
+
+# Lokal / pribadi
+.vscode
+fixtures/private/
+# Hasil sinkronisasi Capacitor (dibuat ulang dari apps/pos/dist)
+apps/pos/android/app/src/main/assets/public
+# Dokumen perencanaan (aturan deteksi fraud) tidak ikut repositori publik; hapus baris ini bila ingin menyertakannya
+docs/

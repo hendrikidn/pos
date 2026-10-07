@@ -1,0 +1,29 @@
+# Caddy mengurus sertifikat HTTPS otomatis untuk {$DOMAIN}.
+# API (sensor, terminal POS) dan dashboard (owner) berbagi satu domain.
+
+{
+	# Hanya Let's Encrypt, tanpa fallback ke ZeroSSL. Firmware sensor memverifikasi rantai sertifikat dengan bundel root CA
+	# sederhana; rantai Let's Encrypt (ISRG Root X1) terbukti cocok, sedangkan rantai penerbit lain bisa berujung pada root lama.
+	acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		-Server
+	}
+
+	# Jalur API untuk perangkat dan aplikasi POS.
+	@api path /v1/* /healthz
+	handle @api {
+		reverse_proxy api:3000
+	}
+
+	# Selain itu: dashboard.
+	handle {
+		reverse_proxy dashboard:3001
+	}
+}

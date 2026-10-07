@@ -1,0 +1,273 @@
+{
+  "_note": "MOCK. Data fiktif untuk pengembangan parser dan aturan rekonsiliasi.",
+  "outlet": "KOPI SENOPATI",
+  "date": "2026-10-01",
+  "edc": [
+    {
+      "bank": "BCA",
+      "mid": "000123456789",
+      "tid": "12345678"
+    },
+    {
+      "bank": "BRI",
+      "mid": "1234567890",
+      "tid": "87654321"
+    },
+    {
+      "bank": "MANDIRI",
+      "mid": "9988776655",
+      "tid": "55556666"
+    }
+  ],
+  "pos_payments": [
+    {
+      "order_id": "ord-0001",
+      "paid_at": "2026-10-01T08:15:20+07:00",
+      "tid": "12345678",
+      "method": "QRIS",
+      "amount": 45000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0002",
+      "paid_at": "2026-10-01T09:01:55+07:00",
+      "tid": "12345678",
+      "method": "EDC_DEBIT",
+      "amount": 78000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0003",
+      "paid_at": "2026-10-01T10:29:50+07:00",
+      "tid": "12345678",
+      "method": "QRIS",
+      "amount": 120000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0004",
+      "paid_at": "2026-10-01T11:11:40+07:00",
+      "tid": "12345678",
+      "method": "EDC_CREDIT",
+      "amount": 215000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0005",
+      "paid_at": "2026-10-01T12:05:30+07:00",
+      "tid": "12345678",
+      "method": "QRIS",
+      "amount": 56500,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0006",
+      "paid_at": "2026-10-01T12:09:20+07:00",
+      "tid": "12345678",
+      "method": "QRIS",
+      "amount": 56500,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0007",
+      "paid_at": "2026-10-01T13:19:48+07:00",
+      "tid": "12345678",
+      "method": "QRIS",
+      "amount": 99000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0008",
+      "paid_at": "2026-10-01T14:30:10+07:00",
+      "tid": "12345678",
+      "method": "QRIS",
+      "amount": 64000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0009",
+      "paid_at": "2026-10-01T15:46:50+07:00",
+      "tid": "12345678",
+      "method": "EDC_DEBIT",
+      "amount": 68000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0010",
+      "paid_at": "2026-10-01T18:21:58+07:00",
+      "tid": "12345678",
+      "method": "QRIS",
+      "amount": 150000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0011",
+      "paid_at": "2026-10-01T08:39:50+07:00",
+      "tid": "87654321",
+      "method": "QRIS",
+      "amount": 32000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0012",
+      "paid_at": "2026-10-01T10:14:40+07:00",
+      "tid": "87654321",
+      "method": "QRIS",
+      "amount": 71000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0013",
+      "paid_at": "2026-10-01T12:29:30+07:00",
+      "tid": "87654321",
+      "method": "EDC_DEBIT",
+      "amount": 145000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0014",
+      "paid_at": "2026-10-01T17:30:20+07:00",
+      "tid": "87654321",
+      "method": "QRIS",
+      "amount": 55000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0015",
+      "paid_at": "2026-10-01T13:54:50+07:00",
+      "tid": "87654321",
+      "method": "QRIS",
+      "amount": 48000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0016",
+      "paid_at": "2026-10-01T16:09:40+07:00",
+      "tid": "87654321",
+      "method": "QRIS",
+      "amount": 92000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0017",
+      "paid_at": "2026-10-01T18:44:30+07:00",
+      "tid": "87654321",
+      "method": "EDC_CREDIT",
+      "amount": 260000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0018",
+      "paid_at": "2026-10-01T20:00:40+07:00",
+      "tid": "87654321",
+      "method": "QRIS",
+      "amount": 37500,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0019",
+      "paid_at": "2026-10-01T07:55:05+07:00",
+      "tid": "55556666",
+      "method": "QRIS",
+      "amount": 28000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0020",
+      "paid_at": "2026-10-01T11:19:50+07:00",
+      "tid": "55556666",
+      "method": "QRIS",
+      "amount": 66000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0025",
+      "paid_at": "2026-10-01T12:40:00+07:00",
+      "tid": "55556666",
+      "method": "QRIS",
+      "amount": 77000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0021",
+      "paid_at": "2026-10-01T14:48:30+07:00",
+      "tid": "55556666",
+      "method": "EDC_DEBIT",
+      "amount": 112000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0022",
+      "paid_at": "2026-10-01T17:29:55+07:00",
+      "tid": "55556666",
+      "method": "QRIS",
+      "amount": 54000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0023",
+      "paid_at": "2026-10-01T19:09:40+07:00",
+      "tid": "55556666",
+      "method": "EDC_CREDIT",
+      "amount": 198000,
+      "approval_code": null
+    },
+    {
+      "order_id": "ord-0024",
+      "paid_at": "2026-10-01T20:14:10+07:00",
+      "tid": "55556666",
+      "method": "QRIS",
+      "amount": 41000,
+      "approval_code": null
+    }
+  ],
+  "expected": {
+    "matched": 20,
+    "r7_not_in_bank": [
+      "ord-0008",
+      "ord-0014",
+      "ord-0025"
+    ],
+    "pending_settlement_not_flagged": [
+      "ord-0024"
+    ],
+    "r8_amount_lower_in_bank": [
+      {
+        "order_id": "ord-0009",
+        "pos": 68000,
+        "bank": 34000
+      }
+    ],
+    "orphan_bank_txn": [
+      {
+        "bank": "BCA",
+        "approval_code": "123410",
+        "amount": 87500
+      }
+    ],
+    "ambiguous_resolved_fifo": [
+      [
+        "ord-0005",
+        "123405"
+      ],
+      [
+        "ord-0006",
+        "123406"
+      ]
+    ],
+    "r10_daily_gross": {
+      "BCA": {
+        "pos": 952000,
+        "bank": 941500
+      },
+      "BRI": {
+        "pos": 740500,
+        "bank": 685500
+      },
+      "MANDIRI (tanpa ord-0024 yang pending)": {
+        "pos": 535000,
+        "bank": 458000
+      }
+    }
+  }
+}

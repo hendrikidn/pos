@@ -1,0 +1,233 @@
+import { createPublicKey, verify as cryptoVerify, type KeyObject } from 'node:crypto';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { GENESIS_HASH, hashEvent, isEventType, type EventType, type PosEvent } from '@pos/events';
+import type { DeviceAuth } from './auth';
+import { Database } from './db/database';
+
+export const MAX_BATCH = 500;
+
+export interface IngestIssue {
+  seq: number;
+  kind: 'HASH_MISMATCH' | 'CHAIN_BROKEN' | 'SEQ_GAP' | 'DUPLICATE_MISMATCH' | 'BAD_SIGNATURE' | 'MISSING_SIGNATURE';
+  detail: string;
+}
+
+export interface IngestResult {
+  ackedSeq: number;
+  accepted: number;
+  duplicates: number;
+  issues: IngestIssue[];
+  serverTime: number;
+}
+
+type Hashable = Parameters<typeof hashEvent>[0];
+
+type Payload = Record<string, unknown>;
+const str = (p: Payload, k: string) => typeof p[k] === 'string' && p[k] !== '';
+const num = (p: Payload, k: string) => typeof p[k] === 'number' && Number.isFinite(p[k]);
+const bool = (p: Payload, k: string) => typeof p[k] === 'boolean';
+const oneOf = (p: Payload, k: string, values: readonly string[]) => typeof p[k] === 'string' && values.includes(p[k] as string);
+const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const;
+
+/**
+ * Pemeriksaan isi per tipe event. Tanpa ini, satu event dengan field hilang (bug firmware atau perangkat nakal)
+ * bisa membuat mesin aturan gagal untuk seluruh outlet.
+ */
+const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
+  'order.created': (p) => (str(p, 'orderId') && oneOf(p, 'orderType', ['DINE_IN', 'TAKE_AWAY', 'EMPLOYEE']) ? null : 'orderId/orderType tidak valid'),
+  'order.sent_to_kitchen': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
+  'kitchen.status_changed': (p) => (str(p, 'orderId') && oneOf(p, 'status', ['COOKING', 'READY', 'SERVED']) ? null : 'orderId/status tidak valid'),
+  'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? null : 'orderId/total tidak valid'),
+  'discount.applied': (p) =>
+    str(p, 'orderId') && oneOf(p, 'kind', ['MANUAL', 'MEMBER', 'COUPON']) && num(p, 'amount') && num(p, 'percent') && bool(p, 'verified')
+      ? null : 'field diskon tidak valid',
+  'payment.received': (p) => (str(p, 'orderId') && oneOf(p, 'method', METHODS) && num(p, 'amount') ? null : 'orderId/method/amount tidak valid'),
+  'payment.method_changed': (p) => (str(p, 'orderId') && oneOf(p, 'from', METHODS) && oneOf(p, 'to', METHODS) ? null : 'field tidak valid'),
+  'receipt.printed': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
+  'receipt.declined': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
+  'void.approved': (p) =>
+    str(p, 'orderId') && str(p, 'reasonCode') && num(p, 'amount') && Array.isArray(p['approverIds']) && (p['approverIds'] as unknown[]).every((a) => typeof a === 'string')
+      ? null : 'field void tidak valid',
+  'refund.created': (p) =>
+    str(p, 'refundId') && str(p, 'originalOrderId') && num(p, 'amount') && oneOf(p, 'method', METHODS) && str(p, 'approverId')
+      ? null : 'field refund tidak valid',
+  'drawer.opened': () => null,
+  'printer.status': (p) =>
+    oneOf(p, 'state', ['ok', 'paperNearEnd', 'paperOut', 'coverOpen', 'overheated', 'disconnected', 'unknown']) && oneOf(p, 'source', ['device', 'claim'])
+      ? null : 'state/source tidak valid',
+  'printer.paper_claim': (p) => (bool(p, 'active') ? null : 'active wajib boolean'),
+  'device.heartbeat': (p) =>
+    oneOf(p, 'kind', ['sensor', 'printer', 'terminal']) && (p['status'] === undefined || oneOf(p, 'status', ['ok', 'no_radar', 'blocked']))
+      ? null
+      : 'kind/status tidak valid',
+  'device.posture': (p) =>
+    bool(p, 'autoTime') && bool(p, 'adb') && bool(p, 'devOptions') && bool(p, 'kiosk') && bool(p, 'rooted') && str(p, 'appVersion') && (p['appVersion'] as string).length <= 40
+      ? null : 'field posture tidak valid',
+  'shift.opened': (p) => (str(p, 'shiftId') && num(p, 'openingCash') ? null : 'shiftId/openingCash tidak valid'),
+  'cash.counted': (p) => (str(p, 'shiftId') && num(p, 'counted') && num(p, 'expected') ? null : 'shiftId/counted/expected tidak valid'),
+  'shift.closed': (p) => (str(p, 'shiftId') ? null : 'shiftId wajib'),
+  'presence.session': (p) =>
+    num(p, 'start') && num(p, 'end') && num(p, 'peakMove') && num(p, 'peakStatic') && (p['end'] as number) >= (p['start'] as number)
+      ? null : 'start/end/peak tidak valid',
+};
+
+
+/** Memeriksa bentuk satu event dari perangkat. Mengembalikan pesan kesalahan, atau event bertipe jika valid. */
+export function parseEvent(raw: unknown): PosEvent | string {
+  if (typeof raw !== 'object' || raw === null) return 'event bukan objek';
+  const e = raw as Record<string, unknown>;
+  if (e['v'] !== 1) return 'versi event tidak didukung';
+  if (!isEventType(e['type'])) return `tipe event tidak dikenal: ${String(e['type'])}`;
+  for (const f of ['id', 'deviceId', 'outletId', 'prevHash', 'hash'] as const) {
+    if (typeof e[f] !== 'string' || e[f] === '') return `field ${f} wajib string`;
+  }
+  if (!Number.isInteger(e['seq']) || (e['seq'] as number) < 1) return 'seq harus bilangan bulat ≥ 1';
+  if (typeof e['deviceTime'] !== 'number' || !Number.isFinite(e['deviceTime'])) return 'deviceTime harus angka';
+  if (typeof e['clockOffsetMs'] !== 'number' || !Number.isFinite(e['clockOffsetMs'])) return 'clockOffsetMs harus angka';
+  if (e['actorId'] !== null && typeof e['actorId'] !== 'string') return 'actorId harus string atau null';
+  if (e['sig'] !== undefined && (typeof e['sig'] !== 'string' || !/^[A-Za-z0-9_-]{20,128}$/.test(e['sig']))) return 'sig harus base64url';
+  if (typeof e['payload'] !== 'object' || e['payload'] === null || Array.isArray(e['payload'])) return 'payload harus objek';
+  const bad = PAYLOAD_CHECKS[e['type']](e['payload'] as Payload);
+  if (bad) return `payload ${e['type']}: ${bad}`;
+  return raw as PosEvent;
+}
+
+/** Mengurai kunci publik SPKI (base64) milik perangkat; mengembalikan null bila bukan kunci P-256 yang sah. */
+export function parsePublicKey(b64: string): KeyObject | null {
+  try {
+    const key = createPublicKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'spki' });
+    return key.asymmetricKeyType === 'ec' && key.asymmetricKeyDetails?.namedCurve === 'prime256v1' ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Memeriksa tanda tangan ES256 (r||s) atas string hash event. */
+export function verifySignature(key: KeyObject, hash: string, sig: string): boolean {
+  try {
+    return cryptoVerify('sha256', Buffer.from(hash, 'utf8'), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(sig, 'base64url'));
+  } catch {
+    return false;
+  }
+}
+
+@Injectable()
+export class IngestService {
+  constructor(@Inject(Database) private readonly db: Database) {}
+
+  /**
+   * Menyimpan batch event dari satu perangkat. Idempoten per (device, seq).
+   * Event yang tidak lolos pemeriksaan hash/rantai tetap disimpan (sebagai bukti) dan ditandai,
+   * lalu dilaporkan di `issues` dan dinilai oleh aturan R24.
+   */
+  async ingest(auth: DeviceAuth, rawEvents: unknown): Promise<IngestResult> {
+    if (!Array.isArray(rawEvents)) throw new BadRequestException('events harus array');
+    if (rawEvents.length > MAX_BATCH) throw new BadRequestException(`maksimal ${MAX_BATCH} event per batch`);
+
+    const events: PosEvent[] = [];
+    for (const [i, raw] of rawEvents.entries()) {
+      const parsed = parseEvent(raw);
+      if (typeof parsed === 'string') throw new BadRequestException(`event[${i}]: ${parsed}`);
+      if (parsed.deviceId !== auth.deviceId) throw new BadRequestException(`event[${i}]: deviceId tidak sesuai token`);
+      if (parsed.outletId !== auth.outletId) throw new BadRequestException(`event[${i}]: outletId tidak sesuai token`);
+      events.push(parsed);
+    }
+    events.sort((a, b) => a.seq - b.seq);
+
+    return this.db.tenantTx(auth.tenantId, async (q) => {
+      const dev = (
+        await q.query<{ last_seq: number; last_hash: string; public_key: string | null }>(
+          'select last_seq, last_hash, public_key from device where id = $1 for update',
+          [auth.deviceId],
+        )
+      ).rows[0];
+      if (!dev) throw new BadRequestException('perangkat tidak ditemukan');
+      // Setelah kunci terdaftar, tanda tangan wajib. Sebelum itu, event diterima tanpa pemeriksaan tanda tangan.
+      const deviceKey = dev.public_key ? parsePublicKey(dev.public_key) : null;
+      const checkSig = async (e: PosEvent): Promise<IngestIssue['kind'] | null> => {
+        if (!dev.public_key) return null;
+        let kind: IngestIssue['kind'] | null = null;
+        if (!e.sig) kind = 'MISSING_SIGNATURE';
+        else if (!deviceKey || !verifySignature(deviceKey, e.hash, e.sig)) kind = 'BAD_SIGNATURE';
+        if (kind) await note({ seq: e.seq, kind, detail: kind === 'MISSING_SIGNATURE' ? 'perangkat ini wajib menandatangani event' : 'tanda tangan tidak sah' });
+        return kind;
+      };
+
+      let lastSeq = dev.last_seq;
+      let lastHash = dev.last_hash === '' ? GENESIS_HASH : dev.last_hash;
+      let accepted = 0;
+      let duplicates = 0;
+      const issues: IngestIssue[] = [];
+      const note = async (issue: IngestIssue) => {
+        issues.push(issue);
+        await q.query(
+          'insert into integrity_issue (tenant_id, outlet_id, device_id, seq, kind, detail) values ($1, $2, $3, $4, $5, $6)',
+          [auth.tenantId, auth.outletId, auth.deviceId, issue.seq, issue.kind, issue.detail],
+        );
+      };
+
+      for (const e of events) {
+        const insert = async (integrity: IngestIssue['kind'] | null) =>
+          q.query(
+            `insert into event (id, tenant_id, outlet_id, device_id, seq, type, device_time_ms, clock_offset_ms,
+                                actor_id, prev_hash, hash, payload, integrity, sig)
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)`,
+            [
+              e.id, auth.tenantId, auth.outletId, auth.deviceId, e.seq, e.type, e.deviceTime, e.clockOffsetMs,
+              e.actorId, e.prevHash, e.hash, JSON.stringify(e.payload), integrity, e.sig ?? null,
+            ],
+          );
+
+        if (e.seq <= lastSeq) {
+          const stored = (
+            await q.query<{ hash: string }>('select hash from event where device_id = $1 and seq = $2', [auth.deviceId, e.seq])
+          ).rows[0];
+          if (stored) {
+            if (stored.hash !== e.hash) {
+              await note({ seq: e.seq, kind: 'DUPLICATE_MISMATCH', detail: 'seq sudah ada dengan isi berbeda' });
+            }
+            duplicates++;
+            continue;
+          }
+          // Event susulan: seq-nya lebih rendah dari yang terakhir diterima tetapi belum tersimpan (batch tiba tidak berurutan).
+          const { hash: claimed, sig: _s, ...unsigned } = e;
+          let late: IngestIssue['kind'] | null = null;
+          if (hashEvent(unsigned as Hashable) !== claimed) {
+            late = 'HASH_MISMATCH';
+            await note({ seq: e.seq, kind: late, detail: 'isi event tidak sesuai hash' });
+          }
+          late ??= await checkSig(e);
+          await insert(late);
+          accepted++;
+          continue;
+        }
+
+        let integrity: IngestIssue['kind'] | null = null;
+        const { hash, sig: _sig, ...rest } = e;
+        if (hashEvent(rest as Hashable) !== hash) {
+          integrity = 'HASH_MISMATCH';
+          await note({ seq: e.seq, kind: integrity, detail: 'isi event tidak sesuai hash' });
+        }
+        if (e.seq !== lastSeq + 1) {
+          integrity ??= 'SEQ_GAP';
+          await note({ seq: e.seq, kind: 'SEQ_GAP', detail: `seq ${lastSeq + 1}..${e.seq - 1} hilang` });
+        } else if (e.prevHash !== lastHash) {
+          integrity ??= 'CHAIN_BROKEN';
+          await note({ seq: e.seq, kind: 'CHAIN_BROKEN', detail: 'prevHash tidak cocok dengan event sebelumnya' });
+        }
+
+        integrity ??= await checkSig(e);
+        await insert(integrity);
+        lastSeq = e.seq;
+        lastHash = e.hash;
+        accepted++;
+      }
+
+      const serverTime = Date.now();
+      await q.query('update device set last_seq = $2, last_hash = $3, last_seen_ms = $4 where id = $1', [
+        auth.deviceId, lastSeq, lastHash, serverTime,
+      ]);
+      return { ackedSeq: lastSeq, accepted, duplicates, issues, serverTime };
+    });
+  }
+}

@@ -1,0 +1,13 @@
+.git
+**/node_modules
+**/.next
+**/dist
+**/*.tsbuildinfo
+.env
+deploy/.env
+apps/pos/android
+apps/pos/src
+docs
+firmware
+fixtures
+*.md

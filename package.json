@@ -1,0 +1,24 @@
+{
+  "name": "pos-guard",
+  "private": true,
+  "version": "0.0.1",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/dashboard/tsconfig.json && tsc --noEmit -p apps/pos/tsconfig.json",
+    "api": "tsx apps/api/src/main.ts",
+    "demo": "tsx apps/api/src/demo.ts",
+    "dashboard": "npm run dev -w @pos/dashboard",
+    "pos": "npm run dev -w @pos/pos-app",
+    "api:setup": "npm run setup -w @pos/api --"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

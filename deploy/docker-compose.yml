@@ -1,0 +1,74 @@
+# POS Guard di satu VPS: PostgreSQL + API + dashboard di belakang Caddy (HTTPS otomatis).
+# Jalankan dari folder deploy/:  docker compose up -d --build
+name: posguard
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: posguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?isi POSTGRES_PASSWORD di deploy/.env}
+      POSTGRES_DB: posguard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U posguard -d posguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Sengaja TIDAK ada `ports`: database hanya terjangkau API lewat jaringan internal Docker.
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://posguard:${POSTGRES_PASSWORD}@db:5432/posguard
+      PORT: "3000"
+      # Satu proxy tepercaya (Caddy): alamat pemanggil diambil dari X-Forwarded-For.
+      TRUST_PROXY: "1"
+      DASHBOARD_URL: https://${DOMAIN:?isi DOMAIN di deploy/.env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_TEMPLATE: ${WHATSAPP_TEMPLATE:-}
+      WHATSAPP_LANGUAGE: ${WHATSAPP_LANGUAGE:-}
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: dashboard
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_URL: http://api:3000
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+      - dashboard
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

@@ -13,6 +13,9 @@ async function main() {
   // Jumlah proxy tepercaya di depan API (mis. TRUST_PROXY=1 untuk nginx/Caddy). Kosong = tidak ada proxy.
   const tp = process.env['TRUST_PROXY'];
   const trustProxy = tp === undefined || tp === '' ? undefined : /^\d+$/.test(tp) ? Number(tp) : tp;
+  console.log(process.env['SMTP_HOST']
+    ? `email kode masuk: SMTP ${process.env['SMTP_HOST']}:${process.env['SMTP_PORT'] ?? 587}, pengirim ${process.env['MAIL_FROM'] ?? '(MAIL_FROM kosong)'}`
+    : 'PERINGATAN: SMTP_HOST belum diisi; kode masuk email tidak bisa dikirim (owner hanya bisa masuk dengan token)');
   const app = await createApp(db, { corsOrigins, trustProxy });
   const port = Number(process.env['PORT'] ?? 3000);
   await app.listen(port);

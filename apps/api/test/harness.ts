@@ -5,6 +5,7 @@ import { AdminService } from '../src/admin.service';
 import { createApp } from '../src/bootstrap';
 import { Database } from '../src/db/database';
 import { PgliteDriver } from '../src/db/driver';
+import type { MailMessage, Mailer } from '../src/mailer';
 import type { Channel } from '../src/notification.service';
 import type { Notifier } from '../src/pipeline.service';
 
@@ -15,8 +16,26 @@ export class RecordingNotifier implements Notifier {
   }
 }
 
+/** Mailer uji: menyimpan email yang "terkirim" dan mengambil kode 6 digit dari isinya. */
+export class RecordingMailer implements Mailer {
+  readonly name = 'recording';
+  readonly sent: MailMessage[] = [];
+  failNext = false;
+  async send(m: MailMessage) {
+    if (this.failNext) { this.failNext = false; throw new Error('SMTP mati (simulasi)'); }
+    this.sent.push(m);
+  }
+  /** Kode di email terakhir ke alamat itu. */
+  lastCode(to: string): string | undefined {
+    const m = [...this.sent].reverse().find((x) => x.to === to);
+    return m?.text.match(/\b(\d{6})\b/)?.[1];
+  }
+  count(to: string) { return this.sent.filter((x) => x.to === to).length; }
+}
+
 export interface Harness {
   db: Database;
+  mailer: RecordingMailer;
   app: NestExpressApplication;
   admin: AdminService;
   notifier: RecordingNotifier;
@@ -38,12 +57,13 @@ export class RecordingChannel implements Channel {
 }
 
 /** Dengan `channel`, NotificationService sungguhan dipakai; tanpa itu, notifikasi hanya dicatat oleh RecordingNotifier. */
-export async function createHarness(nowMs: number, opts: { channel?: Channel; pinIterations?: number; trustProxy?: number | string } = {}): Promise<Harness> {
+export async function createHarness(nowMs: number, opts: { channel?: Channel; pinIterations?: number; trustProxy?: number | string; mailer?: RecordingMailer } = {}): Promise<Harness> {
   const db = new Database(await PgliteDriver.create());
   await db.migrate();
   const notifier = new RecordingNotifier();
+  const mailer = opts.mailer ?? new RecordingMailer();
   let now = nowMs;
-  const app = await createApp(db, { notifier: opts.channel ? undefined : notifier, channel: opts.channel, dashboardUrl: 'https://guard.example', pinIterations: opts.pinIterations ?? 1_000, clock: () => now, trustProxy: opts.trustProxy });
+  const app = await createApp(db, { notifier: opts.channel ? undefined : notifier, channel: opts.channel, dashboardUrl: 'https://guard.example', pinIterations: opts.pinIterations ?? 1_000, clock: () => now, trustProxy: opts.trustProxy, mailer });
   await app.listen(0);
   const port = (app.getHttpServer().address() as { port: number }).port;
   const admin = app.get(AdminService);
@@ -59,7 +79,7 @@ export async function createHarness(nowMs: number, opts: { channel?: Channel; pi
   };
 
   return {
-    db, app, admin, notifier,
+    db, app, admin, notifier, mailer,
     setNow: (ms) => { now = ms; },
     http,
     postEvents: (token, events) => http('POST', '/v1/events', token, { events }),

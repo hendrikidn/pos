@@ -37,6 +37,13 @@ services:
       TRUST_PROXY: "1"
       DASHBOARD_URL: https://${DOMAIN:?isi DOMAIN di deploy/.env}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
+      # Email kode masuk (SMTP). Contoh Brevo ada di .env.example.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-}
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WHATSAPP_TEMPLATE: ${WHATSAPP_TEMPLATE:-}

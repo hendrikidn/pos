@@ -7,6 +7,8 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['PUT'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+$/ },
   { methods: ['POST'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/(suspend|reactivate|owner-tokens)$/ },
   { methods: ['POST'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/tokens\/[0-9]+\/revoke$/ },
+  { methods: ['POST'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/users$/ },
+  { methods: ['PUT'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/users\/[0-9]+$/ },
 ];
 
 export async function POST(req: Request) {

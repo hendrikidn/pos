@@ -11,6 +11,9 @@ import { DeviceController } from './device.controller';
 import { DeviceService } from './device.service';
 import { GuardService } from './guard.service';
 import { IncidentService } from './incident.service';
+import { LoginController } from './login.controller';
+import { LoginService } from './login.service';
+import { MAILER, mailerFromEnv, type Mailer } from './mailer';
 import { PlatformController } from './platform.controller';
 import { PlatformService } from './platform.service';
 import { PairingService } from './pairing.service';
@@ -28,6 +31,8 @@ export interface AppOptions {
   /** Iterasi PBKDF2 untuk hash PIN baru. Tes memakai nilai kecil agar cepat. */
   pinIterations?: number;
   clock?: Clock;
+  /** Pengirim email kode masuk. Bila kosong dipilih dari environment (SMTP_*). */
+  mailer?: Mailer;
 }
 
 @Module({})
@@ -35,7 +40,7 @@ export class AppModule {
   static forRoot(db: Database, opts: AppOptions = {}): DynamicModule {
     return {
       module: AppModule,
-      controllers: [ApiController, ConfigController, DeviceController, PlatformController],
+      controllers: [ApiController, ConfigController, DeviceController, PlatformController, LoginController],
       providers: [
         // useFactory, bukan useValue: Nest menyerialisasi metadata modul dinamis untuk membuat token modul,
         // dan objek database (memori WASM) membuat serialisasi itu gagal.
@@ -44,9 +49,10 @@ export class AppModule {
         { provide: 'PIN_ITERATIONS', useFactory: () => opts.pinIterations ?? Number(process.env['PIN_ITERATIONS'] ?? PIN_ITERATIONS) },
         { provide: 'DASHBOARD_URL', useFactory: () => opts.dashboardUrl ?? process.env['DASHBOARD_URL'] },
         { provide: NOTIFIER, useFactory: (svc: NotificationService) => opts.notifier ?? svc, inject: [NotificationService] },
+        { provide: MAILER, useFactory: () => opts.mailer ?? mailerFromEnv() },
         { provide: CLOCK, useFactory: () => opts.clock ?? Date.now },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, IngestService, GuardService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, DeviceService, PairingService, PlatformService,
+        AdminService, IngestService, GuardService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, DeviceService, PairingService, PlatformService, LoginService,
       ],
       exports: [AdminService, ConfigService],
     };

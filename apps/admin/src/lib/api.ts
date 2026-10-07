@@ -91,11 +91,23 @@ export interface TokenRow {
   revoked_at: string | null;
 }
 
+export interface UserRow {
+  id: number;
+  user_id: string;
+  email: string;
+  role: 'OWNER' | 'OPS' | 'MANAGER' | 'SUPERVISOR';
+  active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+  active_sessions: number;
+}
+
 export interface TenantDetail {
   tenant: { id: string; name: string; created_at: string; suspended_at: string | null; suspended_reason: string | null };
   outlets: OutletRow[];
   devices: DeviceRow[];
   tokens: TokenRow[];
+  users: UserRow[];
   kpi: TenantKpi;
   outletKpis: OutletKpi[];
   daily: DailyPoint[];

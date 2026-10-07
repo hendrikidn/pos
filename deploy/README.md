@@ -99,6 +99,7 @@ Di `.env`:
 - `DOMAIN=pos.dolanyu.com`
 - `POSTGRES_PASSWORD=` isi dengan hasil `openssl rand -hex 24`
 - `API_PORT`, `DASHBOARD_PORT`, `ADMIN_PORT`: biarkan 18081/18082/18083 kecuali bentrok.
+- `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`: kredensial email untuk kode masuk (lihat langkah 6b: Brevo).
 - Opsional: `CORS_ORIGINS` dan `WHATSAPP_*`.
 
 Simpan sandi database di pengelola sandi Anda.
@@ -219,6 +220,32 @@ curl https://pos.dolanyu.com/healthz        # {"ok":true}
 ```
 Buka `https://pos.dolanyu.com/login` di browser; harus tanpa peringatan sertifikat. Situs lama harus tetap normal.
 
+## 6b. Email kode masuk (Brevo)
+
+Owner masuk ke dashboard dengan **kode 6 digit yang dikirim ke emailnya**, bukan token. API mengirim email lewat SMTP; panduan ini memakai Brevo. Tanpa langkah ini kode tidak terkirim dan owner hanya bisa masuk dengan token cadangan.
+
+1. Buat akun di [brevo.com](https://www.brevo.com).
+2. **Verifikasi domain pengirim** (agar email tidak masuk spam atau ditolak). Di Brevo: *Senders, Domains & Dedicated IPs → Domains → Add a domain* → `dolanyu.com`. Brevo menampilkan beberapa record DNS (kode verifikasi TXT, DKIM, dan DMARC) yang Anda tambahkan di panel DNS `dolanyu.com`, lalu klik *Authenticate*. Setelah statusnya terotentikasi, `no-reply@dolanyu.com` boleh dipakai sebagai pengirim.
+3. Ambil kredensial SMTP: *SMTP & API → tab SMTP*. Catat:
+   - **SMTP login** (bentuknya `xxxxxx@smtp-brevo.com`; **bukan** email akun Anda),
+   - **SMTP key**: klik *Generate a new SMTP key* (**bukan** sandi akun).
+4. Isi `deploy/.env` (sebagai `posguard`):
+   ```
+   SMTP_HOST=smtp-relay.brevo.com
+   SMTP_PORT=587
+   SMTP_USER=xxxxxx@smtp-brevo.com
+   SMTP_PASS=xkeysib-...
+   MAIL_FROM=POS Guard <no-reply@dolanyu.com>
+   ```
+5. Terapkan: `docker compose up -d api` (hanya API yang perlu dimulai ulang). Log API menampilkan `email kode masuk: SMTP smtp-relay.brevo.com:587, pengirim ...`; bila SMTP belum diisi tampil `PERINGATAN: SMTP_HOST belum diisi`.
+6. Uji: buat tenant dengan email Anda sendiri di konsol admin (langkah 7), buka `https://pos.dolanyu.com/login`, masukkan email, dan periksa kotak masuk (juga folder spam pada percobaan pertama).
+
+Catatan:
+- Rincian menu dan nama kolom di Brevo bisa berubah; ikuti petunjuk Brevo bila berbeda dari yang di atas. Paket gratis punya batas kiriman harian; cek batas saat ini di akun Anda dan pastikan cukup untuk jumlah login owner.
+- Pakai port **587** (STARTTLS) atau **465** (`SMTP_SECURE=true`). Port 25 biasanya diblokir penyedia VPS.
+- `SMTP_ALLOW_PLAIN=true` hanya untuk uji lokal dengan server SMTP tanpa TLS. **Jangan** dipakai di produksi: sandi SMTP akan terkirim tanpa enkripsi.
+- Email kode masuk hanya dikirim bila email terdaftar dan aktif; respons di layar selalu sama agar daftar email pengguna tidak bisa ditebak.
+
 ## 7. Buat admin platform pertama, lalu buat tenant dari konsol
 
 **Admin pertama hanya bisa dibuat lewat server** (belum ada siapa pun yang boleh masuk ke konsol). Sebagai `posguard`:
@@ -229,15 +256,17 @@ docker compose run --rm api node_modules/.bin/tsx apps/api/src/admin-token.ts --
 Token ADMIN (`adm_...`) dicetak **sekali**; simpan di pengelola sandi. Token ini lebih kuat daripada token owner mana pun: ia bisa membuat tenant dan menerbitkan token owner untuk semua tenant.
 
 Buka `https://pos-admin.dolanyu.com`, masuk dengan token admin, lalu **Tenant baru**:
-1. Isi nama tenant, outlet pertama, terminal POS (mis. `pos-1, pos-2`), dan ID owner.
-2. Klik **Buat tenant**. Token owner muncul **sekali**; salin dan berikan ke pemilik usaha.
-3. Pemilik masuk ke `https://pos.dolanyu.com` dengan token itu, lalu menambah staf, menu, dan memasang sensor di Pengaturan.
+1. Isi nama tenant, outlet pertama, terminal POS (mis. `pos-1, pos-2`), **email owner**, dan ID owner.
+2. Klik **Buat tenant**. Dengan email owner, **tidak ada token** yang dibuat (centang "Terbitkan juga token owner" bila ingin jalur cadangan).
+3. Pemilik membuka `https://pos.dolanyu.com`, memasukkan emailnya, lalu memasukkan kode 6 digit yang dikirim ke email itu. Setelah masuk ia menambah staf, menu, dan memasang sensor di Pengaturan.
+
+Tanpa email owner, perilaku lama berlaku: token owner muncul **sekali** dan dibagikan ke pemilik.
 
 Pembagian tugas:
 
 | Siapa | Mengelola |
 |---|---|
-| **Admin platform** (konsol `pos-admin`) | Tenant: buat, ganti nama, **tangguhkan/aktifkan**, serta token owner (terbitkan, cabut). Melihat **KPI** tiap tenant dan seluruh platform |
+| **Admin platform** (konsol `pos-admin`) | Tenant: buat, ganti nama, **tangguhkan/aktifkan**. **Pengguna dashboard**: tambah, ganti email, nonaktifkan (memutus sesinya). Token cadangan: terbitkan, cabut. Melihat **KPI** tiap tenant dan seluruh platform |
 | **Owner tenant** (dashboard `pos`) | **Outlet** (tambah, ubah nama dan terminal, pajak, EDC), staf, menu, perangkat |
 
 Admin tidak menambah atau mengubah outlet; itu dilakukan owner di **Pengaturan → Outlet**. Semua tindakan admin tercatat di `audit_log`.
@@ -309,6 +338,7 @@ Migrasi baru diterapkan otomatis. Data di volume tidak tersentuh. Web server lam
 - Nginx/Caddy harus meneruskan `X-Forwarded-For` (sudah di contoh di atas). API memakai `TRUST_PROXY=1` (satu proxy tepercaya) untuk membedakan pemanggil pada pembatas percobaan kode pairing. Bila ada proxy lain di depan (mis. Cloudflare Proxied), jumlahnya perlu disesuaikan.
 - API terhubung sebagai pemilik database, lalu `SET ROLE app_user` untuk isolasi per tenant (RLS). Itu rancangan yang disengaja.
 - Token OWNER setara kunci utama satu tenant. Token **ADMIN** setara kunci utama seluruh platform: simpan di pengelola sandi, jangan dibagikan, dan terbitkan ulang (`--rotate`) bila bocor.
+- **Login email:** kode 6 digit disimpan sebagai hash berasin, berlaku 10 menit, sekali pakai, dan mati setelah 5 kali salah; hanya kode terbaru yang berlaku. Dibatasi 1 permintaan per menit dan 5 per jam per email, serta 20 permintaan dan 20 percobaan salah per 15 menit per alamat klien (alamat klien diteruskan dashboard dari nginx lewat `X-Forwarded-For`). Sesi berlaku 7 hari, dicabut saat keluar, saat pengguna dinonaktifkan, atau saat emailnya diganti. **Siapa pun yang menguasai kotak masuk email owner bisa masuk sebagai owner**, jadi sarankan owner memakai email dengan verifikasi dua langkah. Sandi SMTP ada di `.env`; jaga seperti rahasia lain.
 - Konsol admin dipisahkan dari dashboard owner: domain berbeda, cookie berbeda (`SameSite=Strict`, sesi 12 jam), dan jenis token berbeda. Token admin ditolak di endpoint tenant dan sebaliknya (403). Pasang pembatasan IP di nginx (contoh di langkah 6) bila IP Anda tetap.
 - Pembatas percobaan kode pairing disimpan di memori API, jadi reset saat API restart.
 
@@ -325,6 +355,9 @@ Migrasi baru diterapkan otomatis. Data di volume tidak tersentuh. Web server lam
 | API restart terus | Sandi database di `.env` berubah setelah volume dibuat | Kembalikan sandi lama (sandi hanya dipakai saat volume pertama dibuat) |
 | Login konsol admin: "Token tidak valid" | Memakai token owner (`api_`) | Konsol hanya menerima token admin (`adm_`) |
 | `admin-token.ts`: "admin sudah ada" | ID admin sudah dibuat | Tambahkan `--rotate` untuk token baru |
+| Kode login tidak sampai | SMTP belum diisi, domain pengirim belum terotentikasi di Brevo, atau email tidak terdaftar/nonaktif | Lihat log `docker compose logs api` (cari `[mail]`); periksa folder spam; cek status domain di Brevo; pastikan email terdaftar di konsol admin |
+| "terlalu banyak permintaan" saat login | Batas per alamat (20 per 15 menit) atau per email (5 per jam) | Tunggu; atau `docker compose restart api` mereset batas per alamat |
+| Semua pengguna terkena batas bersamaan | nginx tidak meneruskan `X-Forwarded-For` | Pastikan `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` ada di blok `pos.dolanyu.com` |
 | Build gagal / "Killed" | Memori kurang saat build dashboard | Tambah swap 2 GB (`fallocate -l 2G /swapfile`, `mkswap`, `swapon`) atau build saat situs lain sepi |
 | Sensor: koneksi aman (HTTPS) gagal | Sertifikat belum terbit, domain salah, atau proxy Cloudflare aktif | Pastikan `https://pos.dolanyu.com/healthz` terbuka di browser; set DNS `pos` ke DNS only |
 | Sensor: "kode pairing tidak valid" | Kode kedaluwarsa (15 menit) atau sudah dipakai | Buat kode baru di dashboard |

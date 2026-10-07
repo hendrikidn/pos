@@ -5,6 +5,7 @@ import { Shell } from '@/components/Shell';
 import { StatTile } from '@/components/StatTile';
 import { TenantActions } from '@/components/TenantActions';
 import { TenantManager } from '@/components/TenantManager';
+import { UserManager } from '@/components/UserManager';
 import { api, ApiError, authed, type AdminMe, type TenantDetail } from '@/lib/api';
 import { ago, dateWib, num, rupiah, rupiahShort } from '@/lib/format';
 
@@ -86,6 +87,7 @@ export default async function TenantPage({ params }: { params: Promise<{ id: str
         <p className="muted small">Outlet dikelola oleh owner tenant di dashboard-nya (Pengaturan → Outlet).</p>
       </section>
 
+      <UserManager tenantId={d.tenant.id} users={d.users} />
       <TenantManager d={d} now={now} />
       <TenantActions id={d.tenant.id} name={d.tenant.name} suspended={suspended} />
     </Shell>

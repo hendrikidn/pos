@@ -42,7 +42,8 @@ export function TenantManager({ d, now }: { d: TenantDetail; now: number }) {
       {notice && <p className="ok-note" role="status">{notice}</p>}
 
       <section className="panel">
-        <h2>Token owner</h2>
+        <h2>Token owner (jalur cadangan)</h2>
+        <p className="muted small">Login utama memakai kode email. Token tetap berlaku sampai dicabut dan berguna sebagai cadangan atau untuk integrasi.</p>
         <div style={{ overflowX: 'auto' }}>
         <table className="table">
           <thead><tr><th>ID</th><th>Pemilik</th><th>Keterangan</th><th>Dibuat</th><th>Status</th><th /></tr></thead>

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { newToken, sha256, type AdminAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
+import { EMAIL_RE, normalizeEmail } from './login.service';
 import { CLOCK, type Clock } from './pipeline.service';
 import { computeKpis, dailySeries, emptyKpi, type TenantKpi } from './platform-kpi';
 
@@ -15,6 +16,17 @@ export interface NewTenantInput {
   outletName?: unknown;
   terminals?: unknown;
   ownerId?: unknown;
+  /** Email owner untuk login dengan kode. Bila diisi, token tetap tidak diterbitkan kecuali `issueToken` true. */
+  ownerEmail?: unknown;
+  issueToken?: unknown;
+}
+
+const ROLES = ['OWNER', 'OPS', 'MANAGER', 'SUPERVISOR'] as const;
+
+function email(v: unknown): string {
+  const e = normalizeEmail(v);
+  if (e.length > 254 || !EMAIL_RE.test(e)) throw new BadRequestException('format email tidak valid');
+  return e;
 }
 
 function id(label: string, v: unknown): string {
@@ -55,7 +67,7 @@ export class PlatformService {
       this.db.admin.query<{ id: string; name: string; created_at: string; suspended_at: string | null; suspended_reason: string | null }>(
         'select id, name, created_at, suspended_at, suspended_reason from tenant order by created_at desc, id',
       ),
-      this.db.admin.query<{ tenant_id: string; n: number }>("select tenant_id, count(*)::int as n from api_token where role = 'OWNER' and revoked_at is null group by tenant_id"),
+      this.db.admin.query<{ tenant_id: string; n: number }>("select tenant_id, count(*)::int as n from api_token where role = 'OWNER' and revoked_at is null and not session group by tenant_id"),
       computeKpis(this.db, now),
     ]);
     const tok = new Map(tokens.rows.map((r) => [r.tenant_id, r.n]));
@@ -86,7 +98,7 @@ export class PlatformService {
       await this.db.admin.query('select id, name, created_at, suspended_at, suspended_reason from tenant where id = $1', [tenantId])
     ).rows[0];
     if (!t) throw new NotFoundException('tenant tidak ditemukan');
-    const [outlets, devices, tokens, kpis, daily] = await Promise.all([
+    const [outlets, devices, tokens, kpis, daily, users] = await Promise.all([
       this.db.admin.query('select id, name, terminals from outlet where tenant_id = $1 order by id', [tenantId]),
       this.db.admin.query(
         'select id, kind, outlet_id, terminal_id, last_seen_ms, revoked_at from device where tenant_id = $1 order by outlet_id, id',
@@ -94,17 +106,26 @@ export class PlatformService {
       ),
       // Hanya metadata: hash dan token polos tidak pernah dikembalikan.
       this.db.admin.query(
-        'select id::int as id, user_id, role, label, created_at, revoked_at from api_token where tenant_id = $1 order by id desc',
+        'select id::int as id, user_id, role, label, created_at, revoked_at from api_token where tenant_id = $1 and not session order by id desc',
         [tenantId],
       ),
       computeKpis(this.db, now, tenantId),
       dailySeries(this.db, now, tenantId),
+      // Sesi login email yang masih berlaku dihitung per pengguna; isinya (token) tidak pernah dikembalikan.
+      this.db.admin.query(
+        `select u.id::int as id, u.user_id, u.email, u.role, u.active, u.created_at, u.last_login_at,
+                (select count(*)::int from api_token s where s.tenant_id = u.tenant_id and s.user_id = u.user_id and s.session
+                   and s.revoked_at is null and s.expires_at > now()) as active_sessions
+         from dashboard_user u where u.tenant_id = $1 order by u.id`,
+        [tenantId],
+      ),
     ]);
     return {
       tenant: t,
       outlets: outlets.rows,
       devices: devices.rows,
       tokens: tokens.rows,
+      users: users.rows,
       kpi: kpis.tenants.get(tenantId) ?? emptyKpi(),
       outletKpis: kpis.byOutlet.get(tenantId) ?? [],
       daily,
@@ -119,20 +140,28 @@ export class PlatformService {
     const outletName = name('Nama outlet', input.outletName);
     const termIds = terminals(input.terminals);
     const ownerId = input.ownerId === undefined || input.ownerId === '' ? 'owner' : id('ID owner', input.ownerId);
+    const ownerEmail = input.ownerEmail === undefined || input.ownerEmail === '' ? null : email(input.ownerEmail);
+    // Dengan email owner, login memakai kode email dan token tidak perlu dibuat (bisa diminta lewat issueToken).
+    const issueToken = input.issueToken === undefined ? ownerEmail === null : input.issueToken === true;
 
     return this.db.driver.transaction(async (q) => {
       if ((await q.query('select 1 from tenant where id = $1', [tenantId])).rowCount) throw new ConflictException(`tenant "${tenantId}" sudah ada`);
+      if (ownerEmail && (await q.query('select 1 from dashboard_user where lower(email) = $1', [ownerEmail])).rowCount) throw new ConflictException('email sudah dipakai pengguna lain');
       if ((await q.query('select 1 from outlet where id = $1', [outletId])).rowCount) throw new ConflictException(`outlet "${outletId}" sudah dipakai`);
       await q.query('insert into tenant (id, name) values ($1, $2)', [tenantId, tenantName]);
       await q.query('insert into outlet (id, tenant_id, name, terminals) values ($1, $2, $3, $4::jsonb)', [
         outletId, tenantId, outletName, JSON.stringify(termIds),
       ]);
-      const ownerToken = newToken('api');
-      await q.query("insert into api_token (token_hash, tenant_id, user_id, role, label) values ($1, $2, $3, 'OWNER', $4)", [
-        sha256(ownerToken), tenantId, ownerId, 'token awal (dibuat admin)',
-      ]);
-      await this.audit(q, tenantId, admin, 'platform.tenant.create', { tenantId, tenantName, outletId, ownerId });
-      return { tenantId, outletId, ownerId, ownerToken };
+      let ownerToken: string | undefined;
+      if (issueToken) {
+        ownerToken = newToken('api');
+        await q.query("insert into api_token (token_hash, tenant_id, user_id, role, label) values ($1, $2, $3, 'OWNER', $4)", [
+          sha256(ownerToken), tenantId, ownerId, 'token awal (dibuat admin)',
+        ]);
+      }
+      if (ownerEmail) await q.query("insert into dashboard_user (tenant_id, user_id, email, role) values ($1, $2, $3, 'OWNER')", [tenantId, ownerId, ownerEmail]);
+      await this.audit(q, tenantId, admin, 'platform.tenant.create', { tenantId, tenantName, outletId, ownerId, ownerEmail, tokenIssued: issueToken });
+      return { tenantId, outletId, ownerId, ownerEmail, ownerToken };
     });
   }
 
@@ -160,6 +189,47 @@ export class PlatformService {
         tenantId, suspended, suspended ? reason : null,
       ]);
       await this.audit(q, tenantId, admin, suspended ? 'platform.tenant.suspend' : 'platform.tenant.reactivate', suspended ? { reason } : {});
+    });
+  }
+
+  /** Menambah pengguna dashboard (login dengan kode email). userId dibuat dari email bila tidak diberikan. */
+  async addUser(admin: AdminAuth, tenantId: string, input: { email?: unknown; userId?: unknown; role?: unknown }) {
+    const mail = email(input.email);
+    const role = input.role === undefined ? 'OWNER' : String(input.role);
+    if (!(ROLES as readonly string[]).includes(role)) throw new BadRequestException(`peran harus salah satu dari: ${ROLES.join(', ')}`);
+    const slug = mail.split('@')[0]!.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30);
+    const userId = input.userId === undefined || input.userId === '' ? id('ID pengguna', slug.length >= 2 ? slug : 'user') : id('ID pengguna', input.userId);
+    return this.db.driver.transaction(async (q) => {
+      if (!(await q.query('select 1 from tenant where id = $1', [tenantId])).rowCount) throw new NotFoundException('tenant tidak ditemukan');
+      if ((await q.query('select 1 from dashboard_user where lower(email) = $1', [mail])).rowCount) throw new ConflictException('email sudah dipakai pengguna lain');
+      if ((await q.query('select 1 from dashboard_user where tenant_id = $1 and user_id = $2', [tenantId, userId])).rowCount) throw new ConflictException(`ID pengguna "${userId}" sudah dipakai di tenant ini`);
+      const row = (await q.query<{ id: number }>('insert into dashboard_user (tenant_id, user_id, email, role) values ($1, $2, $3, $4) returning id::int as id', [tenantId, userId, mail, role])).rows[0]!;
+      await this.audit(q, tenantId, admin, 'platform.user.add', { userId, email: mail, role });
+      return { id: row.id, userId, email: mail, role };
+    });
+  }
+
+  /**
+   * Mengganti email atau menonaktifkan/mengaktifkan pengguna. Mengganti email atau menonaktifkan mencabut semua sesi pengguna itu,
+   * sehingga akses lama (misalnya email yang jatuh ke orang lain) langsung putus.
+   */
+  async updateUser(admin: AdminAuth, tenantId: string, userRef: number, input: { email?: unknown; active?: unknown }) {
+    const newEmail = input.email === undefined ? null : email(input.email);
+    if (newEmail === null && typeof input.active !== 'boolean') throw new BadRequestException('tidak ada yang diubah');
+    await this.db.driver.transaction(async (q) => {
+      const u = (await q.query<{ user_id: string; email: string; active: boolean }>('select user_id, email, active from dashboard_user where id = $1 and tenant_id = $2 for update', [userRef, tenantId])).rows[0];
+      if (!u) throw new NotFoundException('pengguna tidak ditemukan');
+      if (newEmail !== null && newEmail !== u.email.toLowerCase() && (await q.query('select 1 from dashboard_user where lower(email) = $1 and id <> $2', [newEmail, userRef])).rowCount) {
+        throw new ConflictException('email sudah dipakai pengguna lain');
+      }
+      const active = typeof input.active === 'boolean' ? input.active : u.active;
+      await q.query('update dashboard_user set email = coalesce($2, email), active = $3 where id = $1', [userRef, newEmail, active]);
+      if (newEmail !== null || !active) {
+        await q.query('update api_token set revoked_at = now() where tenant_id = $1 and user_id = $2 and session and revoked_at is null', [tenantId, u.user_id]);
+        // Kode yang sudah terkirim ke email lama tidak boleh bisa dipakai lagi.
+        await q.query('update login_code set used_at = now() where user_ref = $1 and used_at is null', [userRef]);
+      }
+      await this.audit(q, tenantId, admin, 'platform.user.update', { userId: u.user_id, ...(newEmail !== null ? { emailChanged: true } : {}), active });
     });
   }
 

@@ -3,6 +3,7 @@ import { AdminService } from './admin.service';
 import type { ApiAuth } from './auth';
 import { ConfigService } from './config.service';
 import { createApp } from './bootstrap';
+import { ConsoleMailer } from './mailer';
 import { Database } from './db/database';
 import { PgliteDriver } from './db/driver';
 
@@ -15,6 +16,7 @@ async function main() {
   await db.migrate();
   const app = await createApp(db, {
     dashboardUrl: process.env['DASHBOARD_URL'] ?? 'http://localhost:3001',
+    mailer: new ConsoleMailer(), // demo: kode masuk dicetak di konsol ini
     corsOrigins: ['http://localhost:3002', 'http://127.0.0.1:3002'],
   });
   const port = Number(process.env['PORT'] ?? 3000);
@@ -32,6 +34,7 @@ async function main() {
   const liveSensorToken = await admin.createDevice('demo', 'senopati', 'sensor-pos1', 'sensor'); // sensor ESP32 sungguhan untuk terminal pos-1
   const owner = await admin.createApiToken('demo', 'owner-demo', 'OWNER', 'demo owner');
   const manager = await admin.createApiToken('demo', 'rina', 'MANAGER', 'demo manager');
+  await db.admin.query("insert into dashboard_user (tenant_id, user_id, email, role) values ('demo', 'owner-demo', 'owner@demo.local', 'OWNER'), ('demo', 'rina', 'rina@demo.local', 'MANAGER')");
 
   // Konfigurasi terminal: pengaturan outlet, staf (PIN disimpan sebagai hash), dan menu, lewat layanan yang sama dengan API.
   const config = app.get(ConfigService);
@@ -133,7 +136,8 @@ async function main() {
   console.log(`
 API demo berjalan di http://localhost:${port}
 
-Token login dashboard (tempel di halaman login):
+Login dashboard: pakai email owner@demo.local (atau rina@demo.local), kode 6 digit dicetak di konsol ini.
+Atau jalur cadangan dengan token (tempel di halaman login, pilih "Masuk dengan token"):
   OWNER   ${owner}
   MANAGER ${manager}
 

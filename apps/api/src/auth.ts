@@ -80,7 +80,7 @@ export class AuthGuard implements CanActivate {
     if (token.startsWith('api_')) {
       const r = await this.db.admin.query<{ tenant_id: string; user_id: string; role: ApiRole; suspended: boolean }>(
         `select a.tenant_id, a.user_id, a.role, t.suspended_at is not null as suspended
-         from api_token a join tenant t on t.id = a.tenant_id where a.token_hash = $1 and a.revoked_at is null`,
+         from api_token a join tenant t on t.id = a.tenant_id where a.token_hash = $1 and a.revoked_at is null and (a.expires_at is null or a.expires_at > now())`,
         [hash],
       );
       const a = r.rows[0];

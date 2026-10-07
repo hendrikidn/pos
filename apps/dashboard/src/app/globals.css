@@ -121,7 +121,7 @@ form.review label.opt {
 }
 form.review label.opt:has(input:checked) { border-color: var(--accent); }
 form.review small { display: block; color: var(--muted); }
-textarea, input[type='text'], input[type='password'] {
+textarea, input[type='text'], input[type='password'], input[type='email'], input[type='number'] {
   width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
   border-radius: 8px; padding: 9px 10px;
 }
@@ -172,3 +172,7 @@ h3 { font-size: 15px; margin: 18px 0 4px; }
 .evidence li { margin-bottom: 6px; }
 input.narrow { width: 120px; text-align: right; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
 .slip-text { width: 100%; margin-top: 8px; font: 13px ui-monospace, Menlo, monospace; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.login input { width: 100%; box-sizing: border-box; }

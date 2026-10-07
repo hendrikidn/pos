@@ -53,6 +53,19 @@ export class PlatformController {
     return { ok: true };
   }
 
+  @Post('tenants/:tenantId/users')
+  addUser(@Req() req: AuthedRequest, @Param('tenantId') tenantId: string, @Body() body: { email?: unknown; userId?: unknown; role?: unknown }) {
+    return this.platform.addUser(requireAdmin(req), tenantId, body ?? {});
+  }
+
+  @Put('tenants/:tenantId/users/:userRef')
+  async updateUser(@Req() req: AuthedRequest, @Param('tenantId') tenantId: string, @Param('userRef') userRef: string, @Body() body: { email?: unknown; active?: unknown }) {
+    const admin = requireAdmin(req);
+    if (!/^[0-9]{1,9}$/.test(userRef)) throw new BadRequestException('id pengguna tidak valid');
+    await this.platform.updateUser(admin, tenantId, Number(userRef), body ?? {});
+    return { ok: true };
+  }
+
   @Post('tenants/:tenantId/owner-tokens')
   issue(@Req() req: AuthedRequest, @Param('tenantId') tenantId: string, @Body() body: { ownerId?: unknown; label?: unknown }) {
     return this.platform.issueOwnerToken(requireAdmin(req), tenantId, body ?? {});

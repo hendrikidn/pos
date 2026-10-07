@@ -147,7 +147,7 @@ npm run dashboard   # terminal 2: dashboard di http://localhost:3001
    export DATABASE_URL=postgres://USER@localhost:5432/posguard
    npm run api:admin -- --id hendrik --name "Hendrik"        # mencetak token ADMIN (adm_...) sekali
    ```
-   Jalankan API dan konsol admin (`npm run api`, `npm run admin`), buka http://localhost:3003, masuk dengan token admin, lalu **Tenant baru**. Token owner yang muncul dipakai untuk masuk ke dashboard (langkah 4).
+   Jalankan API dan konsol admin (`npm run api`, `npm run admin`), buka http://localhost:3003, masuk dengan token admin, lalu **Tenant baru**. Isi **email owner**: dashboard (http://localhost:3001) lalu dimasuki dengan email itu, dan kode 6 digit dicetak di konsol API (mode demo memakai pengirim konsol; produksi lewat SMTP, lihat deploy/README.md). Tanpa email, token owner yang muncul dipakai untuk masuk (langkah 4).
    Cara lama lewat baris perintah (opsional): siapkan database sekali (ganti `USER` dengan nama pengguna Mac Anda, yang menjadi superuser bawaan Postgres.app):
    ```
    export DATABASE_URL=postgres://USER@localhost:5432/posguard

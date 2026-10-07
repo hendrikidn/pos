@@ -10,7 +10,7 @@ export default async function NewTenantPage() {
   return (
     <Shell me={me}>
       <h1>Tenant baru</h1>
-      <p className="sub">Membuat tenant, outlet pertama, dan token owner sekaligus.</p>
+      <p className="sub">Membuat tenant, outlet pertama, dan akun owner sekaligus.</p>
       <NewTenantForm dashboardUrl={dashboardUrl} />
     </Shell>
   );

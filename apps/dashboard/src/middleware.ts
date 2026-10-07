@@ -5,7 +5,7 @@ const COOKIE = 'guard_token';
 /** Halaman selain /login memerlukan cookie token; keabsahannya diperiksa API pada setiap permintaan. */
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const open = pathname === '/login' || pathname.startsWith('/api/login');
+  const open = pathname === '/login' || pathname.startsWith('/api/login') || pathname.startsWith('/api/otp');
   if (!open && !req.cookies.get(COOKIE)?.value) {
     const url = req.nextUrl.clone();
     url.pathname = '/login';

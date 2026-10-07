@@ -153,7 +153,7 @@ button{width:100%;margin-top:18px;padding:14px;font-size:16px;font-weight:600;bo
 button:disabled{opacity:.5}button.net{background:#fff;color:#1b1f24;border:1px solid #bbb;margin-top:8px;font-weight:400;text-align:left}
 .msg{margin-top:16px;padding:12px;border-radius:8px;background:#fff;border:1px solid #ddd}
 .err{border-color:#c0392b;color:#c0392b}.ok{border-color:#1e8e3e;color:#1e8e3e}.small{font-size:13px;color:#555}</style></head><body>
-<h1>Setup sensor POS Guard</h1>
+<h1>Setup sensor Anatta POS</h1>
 <p class="small">Perangkat: %MAC%</p>
 <form id="f"><label for="ssid">WiFi outlet (2,4 GHz)</label>
 <select id="sel">%NETS%</select>
@@ -186,7 +186,7 @@ async function poll(){
     if(s.state==='working'){show(s.msg);setTimeout(poll,1500);return}
     if(s.state==='done'){show(s.msg,'ok');return}
     if(s.state==='failed'){show(s.msg,'err');go.disabled=false;return}
-  }catch(e){show('Menunggu perangkat... Bila HP terputus dari WiFi POSGUARD, sambungkan lagi; atau lihat layar OLED dan dashboard.');}
+  }catch(e){show('Menunggu perangkat... Bila HP terputus dari WiFi ANATTA, sambungkan lagi; atau lihat layar OLED dan dashboard.');}
   setTimeout(poll,2000)}
 f.addEventListener('submit',async e=>{e.preventDefault();if(!ssid.value){show('Pilih atau ketik nama WiFi.','err');return}go.disabled=true;show('Mengirim...');
   try{await fetch('/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(f))});poll()}
@@ -223,7 +223,7 @@ static void runPortal(const DeviceConfig *keep, ShowLines show, Background bg, u
     String mac = WiFi.macAddress();
     String suffix = mac.substring(12);
     suffix.replace(":", "");
-    String apName = "POSGUARD-" + suffix;
+    String apName = "ANATTA-" + suffix;
     char apPass[12];
     // Pairing awal: sandi tetap SETUP_AP_PASS (kode pairing sekali pakai yang mengamankan perangkat). Mode ganti WiFi tidak
     // memakai kode pairing, jadi tetap acak agar orang di sekitar tidak bisa mengganti WiFi sensor.

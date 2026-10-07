@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">POS Guard</string>
-    <string name="title_activity_main">POS Guard</string>
+    <string name="app_name">Anatta POS</string>
+    <string name="title_activity_main">Anatta POS</string>
     <string name="package_name">id.posguard.pos</string>
     <string name="custom_url_scheme">id.posguard.pos</string>
 </resources>

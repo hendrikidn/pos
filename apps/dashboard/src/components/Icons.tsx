@@ -40,7 +40,7 @@ export const IconInfo = () => (
   <Svg size={18}><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" /></Svg>
 );
 
-/** Logo POS Guard: perisai dengan tanda centang. */
+/** Logo Anatta POS: perisai dengan tanda centang. */
 export function Logo({ size = 40 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true" focusable="false">

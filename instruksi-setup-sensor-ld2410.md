@@ -1,6 +1,6 @@
-# Instruksi Kerja: Memasang Sensor Kehadiran (ESP32-C3 + LD2410 + OLED) ke POS Guard
+# Instruksi Kerja: Memasang Sensor Kehadiran (ESP32-C3 + LD2410 + OLED) ke Anatta POS
 
-Panduan langkah demi langkah untuk pemula hardware (Mac). Sensor mengirim sesi kehadiran customer ke API POS Guard; hasilnya dipakai aturan deteksi fraud dan dilihat owner di dashboard.
+Panduan langkah demi langkah untuk pemula hardware (Mac). Sensor mengirim sesi kehadiran customer ke API Anatta POS; hasilnya dipakai aturan deteksi fraud dan dilihat owner di dashboard.
 
 ```
 LD2410 → ESP32-C3 → WiFi → API (POST /v1/events) → aturan fraud → dashboard owner
@@ -111,13 +111,13 @@ npm install
 | VCC | 3V3 |
 | GND | GND |
 | SDA | GPIO8 |
-| SCL | GPIO9 |
+| SCL | **GPIO5** |
 
 Catatan:
 - Sensor butuh **5 V**; logika TX/RX 3,3 V, aman langsung ke ESP32.
 - TX dan RX **disilang**: TX sensor ke GPIO4 (RX ESP), RX sensor ke GPIO3 (TX ESP).
 - Cek urutan pin di silkscreen OLED (bisa `GND VCC SCL SDA`).
-- GPIO9 juga tombol BOOT. Menekan BOOT mengganggu layar selama ditekan, tidak lebih.
+- **SCL OLED ke GPIO5, bukan GPIO9.** GPIO9 dipakai tombol BOOT (reset pabrik: tahan 10 detik). Bila SCL disambung ke GPIO9, layar OLED membeku dan reset tahan tidak berfungsi.
 
 > Panduan lama memakai GPIO20/21 untuk sensor. **Jangan dipakai**: firmware project ini memakai GPIO4/GPIO3.
 
@@ -168,7 +168,7 @@ Catatan: API dengan `DATABASE_URL` tidak memuat data contoh; dashboard kosong sa
 1. Salin `firmware/sensor-node/app/secrets.example.h` menjadi `firmware/sensor-node/app/secrets.h`.
 2. Isi **hanya** alamat server:
    ```cpp
-   #define SERVER_URL "https://pos.dolanyu.com"     // produksi (VPS), HTTPS
+   #define SERVER_URL "https://anatta-pos.dolanyu.com"     // produksi (VPS), HTTPS
    // uji lokal tanpa VPS: "http://IP-MAC:3000"     (tanpa enkripsi, hanya untuk jaringan lokal)
    ```
    WiFi, token, dan identitas perangkat **tidak** diisi di sini; semuanya lewat pairing (langkah 7).
@@ -190,14 +190,14 @@ Satu firmware untuk semua sensor. Token dibuat server dan disimpan di flash sens
 1. **Dashboard → Pengaturan → Perangkat → Tambah perangkat.**
    Pilih outlet, jenis **Sensor kehadiran**, dan terminal yang disangga (mis. `pos-1`). Klik **Buat kode pairing**.
 2. Catat kode 8 karakter (mis. `VMWW-SRC2`). Berlaku **15 menit**, **sekali pakai**, dan tidak ditampilkan lagi.
-3. Nyalakan sensor. Karena belum dipasang, OLED menampilkan **SETUP SENSOR**, nama WiFi `POSGUARD-xxxx`, dan sandinya.
-4. Di HP, sambung ke WiFi `POSGUARD-xxxx` memakai sandi di OLED. Portal terbuka otomatis; bila tidak, buka `http://192.168.4.1`.
+3. Nyalakan sensor. Karena belum dipasang, OLED menampilkan **SETUP SENSOR**, nama WiFi `ANATTA-xxxx`, dan sandinya.
+4. Di HP, sambung ke WiFi `ANATTA-xxxx` memakai sandi di OLED. Portal terbuka otomatis; bila tidak, buka `http://192.168.4.1`.
 5. Pilih WiFi outlet (2,4 GHz), isi sandinya dan kode pairing, lalu **Pasang perangkat**.
 6. Sensor menyambung ke WiFi, menukar kode dengan token, menyimpannya, dan restart. OLED menampilkan **TERPASANG**.
 7. Di dashboard, sensor muncul **Online** di daftar perangkat.
 
 Catatan:
-- HP bisa terputus sebentar dari WiFi `POSGUARD-xxxx` saat sensor pindah channel; itu normal. Hasilnya juga terlihat di OLED dan dashboard.
+- HP bisa terputus sebentar dari WiFi `ANATTA-xxxx` saat sensor pindah channel; itu normal. Hasilnya juga terlihat di OLED dan dashboard.
 - Kode salah atau kedaluwarsa: buat kode baru. Salah kode 10 kali dari alamat yang sama dalam 15 menit ditolak sementara.
 
 **Mode uji tanpa pairing (opsional):** definisikan `WIFI_SSID`, `WIFI_PASS`, `DEVICE_ID`, `DEVICE_TOKEN`, `OUTLET_ID` (dan `TERMINAL_ID`) di `secrets.h` dengan token dari `npm run demo`. Hanya dipakai bila flash belum berisi identitas. Jangan dipakai di produksi.
@@ -257,11 +257,11 @@ Zona dan ambang bergantung pada tempat. **Jangan memakai nilai bawaan di outlet 
 | Port tidak muncul | Kabel hanya untuk charger | Ganti kabel data; coba mode BOOT/RESET |
 | Upload gagal | Board tidak masuk mode flash | Tahan BOOT, tekan RESET, lepas BOOT, unggah ulang |
 | Kompilasi lama sekali | Unduhan toolchain pertama (±2 GB) | Tunggu; berikutnya hanya ±20 detik |
-| OLED kosong | SDA/SCL tertukar, atau VCC salah | Periksa kabel; OLED di 3V3, SDA GPIO8, SCL GPIO9 |
+| OLED kosong | SDA/SCL tertukar, atau VCC salah | Periksa kabel; OLED di 3V3, SDA GPIO8, SCL GPIO5 |
 | `Radar: no_radar` | TX/RX tidak disilang, tanpa 5 V, atau pin salah | TX sensor ke GPIO4, RX sensor ke GPIO3, sensor ke 5V |
-| Portal `POSGUARD-xxxx` tidak muncul | Sensor sudah terpasang | Reset pabrik (BOOT 10 detik) |
+| Portal `ANATTA-xxxx` tidak muncul | Sensor sudah terpasang | Reset pabrik (BOOT 10 detik) |
 | "Gagal tersambung ke WiFi" di portal | WiFi 5 GHz, atau sandi salah | Pakai WiFi 2,4 GHz, periksa sandi |
-| "Koneksi aman (HTTPS) ... gagal" | Jam belum sinkron, domain salah, atau sertifikat server tidak sah (mis. sertifikat belum terbit di web server) | Pastikan `https://pos.dolanyu.com/healthz` terbuka di browser; WiFi sensor harus punya internet (NTP) |
+| "Koneksi aman (HTTPS) ... gagal" | Jam belum sinkron, domain salah, atau sertifikat server tidak sah (mis. sertifikat belum terbit di web server) | Pastikan `https://anatta-pos.dolanyu.com/healthz` terbuka di browser; WiFi sensor harus punya internet (NTP) |
 | "Jam tidak bisa disinkronkan" | WiFi tanpa akses internet (NTP diblokir) | Pakai WiFi yang punya internet; sertifikat HTTPS tidak bisa divalidasi tanpa jam |
 | "Tidak bisa menghubungi server" | `SERVER_URL` salah, API mati, atau beda jaringan | Cek IP Mac (`ipconfig getifaddr en0`), pastikan `npm run demo` jalan, satu WiFi |
 | "kode pairing tidak valid" | Kode salah, kedaluwarsa, atau sudah dipakai | Buat kode baru di dashboard |
@@ -271,7 +271,7 @@ Zona dan ambang bergantung pada tempat. **Jangan memakai nilai bawaan di outlet 
 
 ## Batas yang perlu diketahui
 
-- HTTP polos hanya untuk jaringan uji. Produksi wajib HTTPS (`https://pos.dolanyu.com`): firmware memvalidasi sertifikat terhadap bundel root CA bawaan. HTTPS **belum dijalankan di perangkat** (hanya dikompilasi dan bundelnya diverifikasi di komputer). Penyematan sertifikat (pinning) belum ada.
+- HTTP polos hanya untuk jaringan uji. Produksi wajib HTTPS (`https://anatta-pos.dolanyu.com`): firmware memvalidasi sertifikat terhadap bundel root CA bawaan. HTTPS **belum dijalankan di perangkat** (hanya dikompilasi dan bundelnya diverifikasi di komputer). Penyematan sertifikat (pinning) belum ada.
 - Tanda tangan event dengan kunci perangkat (eFuse/HMAC) belum ada di sensor: pemegang token yang tahu format rantai bisa memalsukan event.
 - Radar mendeteksi keberadaan, bukan identitas. Alert dari sensor adalah indikasi untuk dicek dengan CCTV.
 

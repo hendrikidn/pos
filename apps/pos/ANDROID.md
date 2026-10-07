@@ -1,4 +1,4 @@
-# POS Guard di Android (pembungkus Capacitor)
+# Anatta POS di Android (pembungkus Capacitor)
 
 Aplikasi POS web (`apps/pos`) dibungkus menjadi aplikasi Android. Pembungkus menambah: printer ESC/POS lewat jaringan atau USB, kunci perangkat di Android Keystore, laporan postur keamanan, mode kios, dan layar customer di layar fisik kedua.
 

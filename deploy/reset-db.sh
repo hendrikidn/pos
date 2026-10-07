@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hapus SELURUH data database POS Guard dan mulai dari kosong. Hanya untuk data uji. Jalankan di server sebagai pengguna posguard:
+# Hapus SELURUH data database Anatta POS dan mulai dari kosong. Hanya untuk data uji. Jalankan di server sebagai pengguna posguard:
 #
 #   ~/pos/deploy/reset-db.sh --admin hendrik "Hendrik"   # reset, lalu buat admin platform baru dan cetak tokennya
 #   ~/pos/deploy/reset-db.sh                             # reset saja (buat admin sendiri sesudahnya, lihat README)

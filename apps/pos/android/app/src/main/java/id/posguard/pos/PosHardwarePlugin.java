@@ -48,7 +48,7 @@ import java.util.Arrays;
 import java.util.regex.Pattern;
 
 /**
- * Jembatan perangkat keras untuk POS Guard. Lapisan ini sengaja tipis: pengiriman byte ke printer, postur
+ * Jembatan perangkat keras untuk Anatta POS. Lapisan ini sengaja tipis: pengiriman byte ke printer, postur
  * keamanan perangkat, mode kios, tanda tangan dengan Android Keystore, dan layar customer kedua.
  * Logika (ESC/POS, kunci void, rantai hash) tetap di JavaScript agar diuji di satu tempat.
  */

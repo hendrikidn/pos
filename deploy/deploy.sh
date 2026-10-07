@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy atau perbarui POS Guard di server dengan satu perintah. Jalankan sebagai pengguna posguard:
+# Deploy atau perbarui Anatta POS di server dengan satu perintah. Jalankan sebagai pengguna posguard:
 #
 #   ~/pos/deploy/deploy.sh                 # tarik kode terbaru, cadangkan DB, bangun, jalankan, periksa
 #   ~/pos/deploy/deploy.sh --no-pull       # pakai kode yang sudah ada di folder ini (mis. setelah checkout commit lama)
@@ -38,7 +38,7 @@ docker compose version >/dev/null 2>&1 || die "plugin 'docker compose' tidak ada
 docker info >/dev/null 2>&1 || die "tidak bisa mengakses Docker. Pastikan pengguna ini ada di grup 'docker' (sudo usermod -aG docker \$USER, lalu login ulang)"
 [ -f .env ] || die "deploy/.env belum ada. Jalankan: cp .env.example .env, lalu isi DOMAIN dan POSTGRES_PASSWORD"
 [ -n "$(envval POSTGRES_PASSWORD)" ] || die "POSTGRES_PASSWORD di deploy/.env masih kosong (buat dengan: openssl rand -hex 24)"
-[ -n "$(envval DOMAIN)" ] || die "DOMAIN di deploy/.env masih kosong (mis. pos.dolanyu.com)"
+[ -n "$(envval DOMAIN)" ] || die "DOMAIN di deploy/.env masih kosong (mis. anatta-pos.dolanyu.com)"
 ok "Docker, compose, dan deploy/.env siap"
 
 API_PORT="$(envval API_PORT)"; API_PORT="${API_PORT:-18081}"

@@ -69,7 +69,7 @@ export function mailerFromEnv(env: NodeJS.ProcessEnv = process.env): Mailer {
   const host = env['SMTP_HOST'];
   if (!host) return new UnconfiguredMailer();
   const from = env['MAIL_FROM'];
-  if (!from) throw new Error('MAIL_FROM wajib diisi bila SMTP_HOST diisi (mis. "POS Guard <no-reply@dolanyu.com>")');
+  if (!from) throw new Error('MAIL_FROM wajib diisi bila SMTP_HOST diisi (mis. "Anatta POS <no-reply@dolanyu.com>")');
   const port = Number(env['SMTP_PORT'] ?? 587);
   // Hanya untuk menguji dengan server SMTP lokal tanpa TLS. Jangan diaktifkan di produksi: email dan sandi SMTP terkirim tanpa enkripsi.
   const allowPlain = env['SMTP_ALLOW_PLAIN'] === 'true';

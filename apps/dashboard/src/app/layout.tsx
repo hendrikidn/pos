@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'POS Guard',
+  title: 'Anatta POS',
   description: 'Insiden anomali transaksi kasir untuk direview owner',
 };
 

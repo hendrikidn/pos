@@ -20,7 +20,7 @@ bool provisionLoad(DeviceConfig &cfg);
 void provisionClear();
 
 /**
- * Portal setup: membuat WiFi `POSGUARD-xxxx` (sandi tampil di OLED), teknisi mengisi WiFi outlet dan kode pairing dari HP.
+ * Portal setup: membuat WiFi `ANATTA-xxxx` (sandi tampil di OLED), teknisi mengisi WiFi outlet dan kode pairing dari HP.
  * Perangkat menukar kode dengan token ke server, menyimpannya, lalu restart. Fungsi ini tidak kembali.
  */
 [[noreturn]] void provisionPortal(ShowLines show);

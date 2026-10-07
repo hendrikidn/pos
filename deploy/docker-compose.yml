@@ -1,6 +1,6 @@
-# POS Guard di VPS yang sudah punya situs lain: PostgreSQL + API + dashboard.
+# Anatta POS di VPS yang sudah punya situs lain: PostgreSQL + API + dashboard.
 # TIDAK memakai port 80/443 dan tidak menjalankan web server sendiri. API dan dashboard hanya dibuka di 127.0.0.1 pada port
-# yang jarang dipakai; web server yang sudah ada (nginx/Caddy/...) meneruskan pos.dolanyu.com ke sana dan mengurus HTTPS.
+# yang jarang dipakai; web server yang sudah ada (nginx/Caddy/...) meneruskan anatta-pos.dolanyu.com ke sana dan mengurus HTTPS.
 # Jalankan dari folder deploy/:  docker compose up -d --build
 name: posguard
 

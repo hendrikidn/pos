@@ -51,7 +51,7 @@ describe('login owner dengan email dan kode sekali pakai', () => {
     expect((await request(OWNER)).body).toEqual({ ok: true });
     expect(h.mailer.count(OWNER)).toBe(1);
     const mail = h.mailer.sent.find((m) => m.to === OWNER)!;
-    expect(mail.subject).toMatch(/^Kode masuk POS Guard: \d{6}$/);
+    expect(mail.subject).toMatch(/^Kode masuk Anatta POS: \d{6}$/);
     expect(mail.text).toContain('10 menit');
     const code = h.mailer.lastCode(OWNER)!;
 
@@ -317,13 +317,13 @@ describe('SmtpMailer terhadap server SMTP', () => {
   afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
   it('mengirim email sungguhan lewat SMTP dengan pengirim, penerima, subjek, dan isi yang benar', async () => {
-    const mailer = new SmtpMailer({ host: '127.0.0.1', port, secure: false, from: 'POS Guard <no-reply@contoh.id>', allowPlain: true });
-    await mailer.send({ to: 'owner@contoh.id', subject: 'Kode masuk POS Guard: 482913', text: 'Kode masuk POS Guard Anda: 482913' });
+    const mailer = new SmtpMailer({ host: '127.0.0.1', port, secure: false, from: 'Anatta POS <no-reply@contoh.id>', allowPlain: true });
+    await mailer.send({ to: 'owner@contoh.id', subject: 'Kode masuk Anatta POS: 482913', text: 'Kode masuk Anatta POS Anda: 482913' });
     expect(received).toHaveLength(1);
     const raw = received[0]!;
     expect(raw).toMatch(/^From: .*no-reply@contoh\.id/mi);
     expect(raw).toMatch(/^To: owner@contoh\.id/mi);
-    expect(raw).toMatch(/^Subject: Kode masuk POS Guard: 482913/mi);
+    expect(raw).toMatch(/^Subject: Kode masuk Anatta POS: 482913/mi);
     expect(raw).toContain('482913');
   });
 

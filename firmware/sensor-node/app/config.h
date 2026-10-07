@@ -24,7 +24,7 @@
 #define RESET_BOOT_COUNT 5
 #define RESET_BOOT_WINDOW_MS 6000UL
 
-// Sandi WiFi portal pairing awal (POSGUARD-xxxx). Minimal 8 karakter (syarat WPA2).
+// Sandi WiFi portal pairing awal (ANATTA-xxxx). Minimal 8 karakter (syarat WPA2).
 #define SETUP_AP_PASS "12345678"
 
 // Bila WiFi tersimpan tidak tersambung selama WIFI_FALLBACK_MS, buka portal ganti WiFi (identitas tetap) selama

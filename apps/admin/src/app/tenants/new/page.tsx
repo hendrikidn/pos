@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function NewTenantPage() {
   const me = await authed(() => api<AdminMe>('/v1/admin/me'));
-  const dashboardUrl = process.env.DASHBOARD_URL ?? 'https://pos.dolanyu.com';
+  const dashboardUrl = process.env.DASHBOARD_URL ?? 'https://anatta-pos.dolanyu.com';
   return (
     <Shell me={me}>
       <h1>Tenant baru</h1>

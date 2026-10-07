@@ -407,7 +407,7 @@ function PrinterSettings({ rt, ctx }: { rt: Runtime; ctx: Ctx }) {
         <button onClick={() => { savePrinterSetting(setting); location.reload(); }}>Simpan dan muat ulang</button>
         {rt.escpos && (
           <>
-            <button className="secondary" onClick={async () => ctx.toast((await rt.printer.print('POS Guard\nTes cetak OK')) ? 'Tes cetak terkirim' : 'Tes cetak gagal', 'info')}>Tes cetak</button>
+            <button className="secondary" onClick={async () => ctx.toast((await rt.printer.print('Anatta POS\nTes cetak OK')) ? 'Tes cetak terkirim' : 'Tes cetak gagal', 'info')}>Tes cetak</button>
             <button className="secondary" onClick={async () => ctx.toast((await rt.escpos!.openDrawer()) ? 'Laci dibuka' : 'Gagal membuka laci', 'info')}>Buka laci</button>
           </>
         )}

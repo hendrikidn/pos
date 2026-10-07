@@ -1,12 +1,12 @@
-# Deploy POS Guard di VPS yang sudah punya situs lain (Ubuntu 24.04)
+# Deploy Anatta POS di VPS yang sudah punya situs lain (Ubuntu 24.04)
 
-PostgreSQL, API, dan dashboard berjalan dengan Docker Compose, terpisah dari situs yang sudah ada. POS **tidak memakai port 80/443** dan tidak menjalankan web server sendiri: web server yang sudah ada di VPS (nginx atau Caddy) meneruskan `pos.dolanyu.com` ke POS dan mengurus HTTPS-nya.
+PostgreSQL, API, dan dashboard berjalan dengan Docker Compose, terpisah dari situs yang sudah ada. POS **tidak memakai port 80/443** dan tidak menjalankan web server sendiri: web server yang sudah ada di VPS (nginx atau Caddy) meneruskan `anatta-pos.dolanyu.com` ke POS dan mengurus HTTPS-nya.
 
 ```
 Internet ──HTTPS──► web server yang SUDAH ada (80/443)
                       ├─ dolanyu.com                 → proyek lama (tidak diubah)
                       ├─ goldenlamian.dolanyu.com    → proyek lama (tidak diubah)
-                      ├─ pos.dolanyu.com              (untuk owner tenant, sensor, terminal POS)
+                      ├─ anatta-pos.dolanyu.com              (untuk owner tenant, sensor, terminal POS)
                       │    ├─ /v1/*, /healthz ─► 127.0.0.1:18081 ─► API ──┐
                       │    └─ lainnya ─────────► 127.0.0.1:18082 ─► Dashboard owner
                       └─ pos-admin.dolanyu.com        (untuk Anda sebagai admin platform)
@@ -46,12 +46,12 @@ Di pengelola DNS `dolanyu.com`, tambahkan record (record situs lama jangan diuba
 
 | Jenis | Nama | Nilai |
 |---|---|---|
-| A | `pos` | IP publik VPS (sama dengan situs lain) |
+| A | `anatta-pos` | IP publik VPS (sama dengan situs lain) |
 | A | `pos-admin` | IP publik VPS yang sama (untuk konsol admin platform) |
 
-Cek dari komputer Anda: `dig +short pos.dolanyu.com` harus IP VPS.
+Cek dari komputer Anda: `dig +short anatta-pos.dolanyu.com` harus IP VPS.
 
-> **Bila DNS dikelola Cloudflare:** set record `pos` ke **DNS only** (awan abu-abu), bukan Proxied. Dengan proxy Cloudflare, sertifikat yang dilihat sensor berasal dari Cloudflare dan rantainya bisa tidak cocok dengan bundel CA firmware.
+> **Bila DNS dikelola Cloudflare:** set record `anatta-pos` ke **DNS only** (awan abu-abu), bukan Proxied. Dengan proxy Cloudflare, sertifikat yang dilihat sensor berasal dari Cloudflare dan rantainya bisa tidak cocok dengan bundel CA firmware.
 
 ## 2. Buat pengguna dan direktori khusus POS
 
@@ -98,7 +98,7 @@ cp .env.example .env
 nano .env
 ```
 Di `.env`:
-- `DOMAIN=pos.dolanyu.com`
+- `DOMAIN=anatta-pos.dolanyu.com`
 - `POSTGRES_PASSWORD=` isi dengan hasil `openssl rand -hex 24`
 - `API_PORT`, `DASHBOARD_PORT`, `ADMIN_PORT`: biarkan 18081/18082/18083 kecuali bentrok.
 - `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`: kredensial email untuk kode masuk (lihat langkah 6b: Brevo).
@@ -122,16 +122,16 @@ Migrasi database berjalan otomatis saat API start. Pada tahap ini POS sudah hidu
 
 ## 6. Hubungkan web server yang sudah ada (sebagai admin)
 
-Pilih sesuai langkah 0. **Jangan mengubah blok situs lama**; tambahkan blok baru untuk `pos.dolanyu.com` saja.
+Pilih sesuai langkah 0. **Jangan mengubah blok situs lama**; tambahkan blok baru untuk `anatta-pos.dolanyu.com` saja.
 
 ### nginx
 
-Buat `/etc/nginx/sites-available/pos.dolanyu.com`:
+Buat `/etc/nginx/sites-available/anatta-pos.dolanyu.com`:
 ```nginx
 server {
     listen 80;
     listen [::]:80;
-    server_name pos.dolanyu.com;
+    server_name anatta-pos.dolanyu.com;
 
     client_max_body_size 12m;     # laporan bank diunggah sampai 10 MB
 
@@ -156,11 +156,11 @@ server {
 ```
 Aktifkan, uji, lalu minta sertifikat Let's Encrypt:
 ```
-sudo ln -s /etc/nginx/sites-available/pos.dolanyu.com /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/anatta-pos.dolanyu.com /etc/nginx/sites-enabled/
 sudo nginx -t                          # harus "syntax is ok"; bila gagal, JANGAN reload
 sudo systemctl reload nginx
 sudo apt install -y certbot python3-certbot-nginx     # bila belum ada
-sudo certbot --nginx -d pos.dolanyu.com
+sudo certbot --nginx -d anatta-pos.dolanyu.com
 ```
 `certbot --nginx` menambahkan bagian HTTPS dan pengalihan otomatis. `nginx -t` dan `reload` tidak memutus situs lama.
 
@@ -197,7 +197,7 @@ Konsol admin tidak meneruskan jalur API apa pun; ia berbicara ke API sendiri lew
 
 Tambahkan blok ini ke Caddyfile yang ada (dan satu blok `pos-admin.dolanyu.com { reverse_proxy 127.0.0.1:18083 }` untuk konsol admin), lalu `sudo systemctl reload caddy`:
 ```
-pos.dolanyu.com {
+anatta-pos.dolanyu.com {
 	tls {
 		# Hanya Let's Encrypt: firmware sensor memverifikasi rantai Let's Encrypt (ISRG Root X1);
 		# fallback ke penerbit lain bisa menghasilkan rantai yang ditolak sensor.
@@ -217,9 +217,9 @@ pos.dolanyu.com {
 
 Dari komputer Anda:
 ```
-curl https://pos.dolanyu.com/healthz        # {"ok":true}
+curl https://anatta-pos.dolanyu.com/healthz        # {"ok":true}
 ```
-Buka `https://pos.dolanyu.com/login` di browser; harus tanpa peringatan sertifikat. Situs lama harus tetap normal.
+Buka `https://anatta-pos.dolanyu.com/login` di browser; harus tanpa peringatan sertifikat. Situs lama harus tetap normal.
 
 ## 6b. Email kode masuk (Brevo)
 
@@ -236,7 +236,7 @@ Pengguna dashboard masuk dengan **email + password**. Email dipakai untuk **meng
    SMTP_PORT=587
    SMTP_USER=xxxxxx@smtp-brevo.com
    SMTP_PASS=xsmtpsib-...
-   MAIL_FROM=POS Guard <no-reply@dolanyu.com>
+   MAIL_FROM=Anatta POS <no-reply@dolanyu.com>
    ```
 5. Terapkan: `docker compose up -d api` (hanya API yang perlu dimulai ulang). Log API menampilkan `email kode masuk: SMTP smtp-relay.brevo.com:587, pengirim ...`; bila SMTP belum diisi tampil `PERINGATAN: SMTP_HOST belum diisi`.
 6. Uji: buat tenant dengan email Anda sendiri di konsol admin (langkah 7), buka halaman masuk, pilih **Lupa password / atur password**, masukkan email, dan periksa kotak masuk (juga folder spam pada percobaan pertama).
@@ -268,7 +268,7 @@ Pembagian tugas:
 | Siapa | Mengelola |
 |---|---|
 | **Admin platform** (konsol `pos-admin`) | Tenant: buat, ganti nama, **tangguhkan/aktifkan**. **Pengguna dashboard**: tambah, ganti email, nonaktifkan (memutus sesinya). Token cadangan: terbitkan, cabut. Melihat **KPI** tiap tenant dan seluruh platform |
-| **Owner tenant** (dashboard `pos`) | **Outlet** (tambah, ubah nama dan terminal, pajak, EDC), staf, menu, perangkat, dan **pengguna dashboard** (undang, ubah peran, ganti email, nonaktifkan; Pengaturan → Pengguna) |
+| **Owner tenant** (dashboard `anatta-pos`) | **Outlet** (tambah, ubah nama dan terminal, pajak, EDC), staf, menu, perangkat, dan **pengguna dashboard** (undang, ubah peran, ganti email, nonaktifkan; Pengaturan → Pengguna) |
 
 **Peran pengguna dashboard** (sesuai yang diberlakukan API):
 
@@ -297,8 +297,8 @@ Token admin hilang: `docker compose run --rm api node_modules/.bin/tsx apps/api/
 
 ## 8. Menghubungkan sensor dan terminal
 
-- Firmware sensor: `SERVER_URL "https://pos.dolanyu.com"` di `secrets.h`, lalu pairing seperti di panduan sensor. Sensor butuh WiFi yang punya internet (NTP dan HTTPS).
-- Terminal POS: alamat API `https://pos.dolanyu.com`.
+- Firmware sensor: `SERVER_URL "https://anatta-pos.dolanyu.com"` di `secrets.h`, lalu pairing seperti di panduan sensor. Sensor butuh WiFi yang punya internet (NTP dan HTTPS).
+- Terminal POS: alamat API `https://anatta-pos.dolanyu.com`.
 
 ## 9. Cadangan database (sebagai `posguard`)
 
@@ -402,7 +402,7 @@ Kembali ke versi terbaru: `git checkout main && ~/pos/deploy/deploy.sh`.
 |---|---|---|
 | `docker compose up` gagal: "port is already allocated" | 18081/18082 dipakai proses lain | Ganti `API_PORT`/`DASHBOARD_PORT` di `.env` dan di konfigurasi nginx/Caddy |
 | `nginx -t` gagal | Salah ketik di blok baru | Perbaiki; **jangan** `reload` sebelum "syntax is ok" |
-| `certbot` gagal | DNS belum mengarah ke VPS, atau port 80 tidak mencapai nginx | `dig +short pos.dolanyu.com`; periksa `ufw` dan firewall panel Contabo |
+| `certbot` gagal | DNS belum mengarah ke VPS, atau port 80 tidak mencapai nginx | `dig +short anatta-pos.dolanyu.com`; periksa `ufw` dan firewall panel Contabo |
 | `502 Bad Gateway` | API/dashboard belum siap atau crash | `docker compose ps` dan `logs api`; coba `curl http://127.0.0.1:18081/healthz` |
 | Login dashboard: "asal permintaan tidak sah" | `Host` tidak diteruskan ke dashboard | Pastikan `proxy_set_header Host $host;` ada pada kedua `location` |
 | Login dashboard: "Token tidak dikenal" | Token dari lingkungan lain (demo/Mac) | Pakai token dari langkah 7 |
@@ -412,8 +412,8 @@ Kembali ke versi terbaru: `git checkout main && ~/pos/deploy/deploy.sh`.
 | Akun terkunci ("terlalu banyak percobaan gagal untuk akun ini") | 5 password salah berturut-turut | Tunggu 15 menit, atau **Lupa password / atur password** (kode email) untuk langsung membuka kunci |
 | Kode login tidak sampai | SMTP belum diisi, domain pengirim belum terotentikasi di Brevo, atau email tidak terdaftar/nonaktif | Lihat log `docker compose logs api` (cari `[mail]`); periksa folder spam; cek status domain di Brevo; pastikan email terdaftar di konsol admin |
 | "terlalu banyak permintaan" saat login | Batas per alamat (20 per 15 menit) atau per email (5 per jam) | Tunggu; atau `docker compose restart api` mereset batas per alamat |
-| Semua pengguna terkena batas bersamaan | nginx tidak meneruskan `X-Forwarded-For` | Pastikan `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` ada di blok `pos.dolanyu.com` |
+| Semua pengguna terkena batas bersamaan | nginx tidak meneruskan `X-Forwarded-For` | Pastikan `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` ada di blok `anatta-pos.dolanyu.com` |
 | Build gagal / "Killed" | Memori kurang saat build dashboard | Tambah swap 2 GB (`fallocate -l 2G /swapfile`, `mkswap`, `swapon`) atau build saat situs lain sepi |
-| Sensor: koneksi aman (HTTPS) gagal | Sertifikat belum terbit, domain salah, atau proxy Cloudflare aktif | Pastikan `https://pos.dolanyu.com/healthz` terbuka di browser; set DNS `pos` ke DNS only |
+| Sensor: koneksi aman (HTTPS) gagal | Sertifikat belum terbit, domain salah, atau proxy Cloudflare aktif | Pastikan `https://anatta-pos.dolanyu.com/healthz` terbuka di browser; set DNS `pos` ke DNS only |
 | Sensor: "kode pairing tidak valid" | Kode kedaluwarsa (15 menit) atau sudah dipakai | Buat kode baru di dashboard |
 | Banyak 429 pada pairing | Percobaan kode salah > 10 dari satu alamat | Tunggu 15 menit atau `docker compose restart api` |

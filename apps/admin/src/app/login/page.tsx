@@ -27,7 +27,7 @@ export default function LoginPage() {
 
   return (
     <main className="login">
-      <h1>POS Guard <span className="admin-tag">ADMIN</span></h1>
+      <h1>Anatta POS <span className="admin-tag">ADMIN</span></h1>
       <p className="sub">Konsol admin platform. Masuk dengan token admin (diawali <span className="mono">adm_</span>).</p>
       <form className="panel" onSubmit={submit}>
         <label htmlFor="token" className="sub" style={{ display: 'block', margin: '0 0 6px' }}>Token admin</label>

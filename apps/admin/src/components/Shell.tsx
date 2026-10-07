@@ -7,7 +7,7 @@ export function Shell({ me, children }: { me: AdminMe; children: ReactNode }) {
   return (
     <div className="shell">
       <header className="topbar">
-        <Link href="/" className="brand">POS Guard <span className="admin-tag">ADMIN</span></Link>
+        <Link href="/" className="brand">Anatta POS <span className="admin-tag">ADMIN</span></Link>
         <nav className="who" aria-label="Utama">
           <Link href="/">Tenant</Link>
           <Link href="/tenants/new">Tenant baru</Link>

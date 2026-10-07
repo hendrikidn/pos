@@ -1,4 +1,4 @@
-// Sensor kehadiran customer untuk POS Guard.
+// Sensor kehadiran customer untuk Anatta POS.
 // Alur: radar LD2410 -> pembaca frame -> detektor sesi -> event bertanda rantai hash -> antrean di flash -> POST /v1/events.
 #include <Arduino.h>
 #include <HTTPClient.h>
@@ -266,12 +266,12 @@ static void drawScreen() {
 void setup() {
     Serial.begin(115200);
     delay(300);
-    Serial.println("POS Guard sensor");
+    Serial.println("Anatta POS sensor");
 
     oled.begin();
     oled.setFont(u8g2_font_6x10_tf);
     oled.clearBuffer();
-    oled.drawStr(0, 12, "POS Guard sensor");
+    oled.drawStr(0, 12, "Anatta POS sensor");
     oled.drawStr(0, 26, "memulai...");
     oled.sendBuffer();
 

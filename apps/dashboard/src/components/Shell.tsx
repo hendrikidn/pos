@@ -22,7 +22,7 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
   return (
     <div className="app">
       <header className="mobilebar">
-        <Link href="/" className="brand"><Logo size={32} /><span>POS Guard</span></Link>
+        <Link href="/" className="brand"><Logo size={32} /><span>Anatta POS</span></Link>
         <div className="mobilebar-user">
           {user}
           <LogoutButton />
@@ -30,7 +30,7 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
       </header>
 
       <aside className="sidebar">
-        <Link href="/" className="brand"><Logo /><span className="brand-text">POS Guard</span></Link>
+        <Link href="/" className="brand"><Logo /><span className="brand-text">Anatta POS</span></Link>
         <NavLinks role={me.role} />
         <div className="side-foot">
           {user}

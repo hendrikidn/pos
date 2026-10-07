@@ -1,4 +1,4 @@
-/** Logo POS Guard (sama dengan dashboard owner): perisai dengan tanda centang. */
+/** Logo Anatta POS (sama dengan dashboard owner): perisai dengan tanda centang. */
 export function Logo({ size = 36 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true" focusable="false" className="logo">

@@ -1,4 +1,4 @@
-# POS Guard
+# Anatta POS
 
 POS F&B dengan deteksi fraud kasir. Perencanaan ada di [docs/](docs/): [SPEC-MVP](docs/SPEC-MVP.md), [ARCHITECTURE](docs/ARCHITECTURE.md), [BANK-REPORT-FORMAT](docs/BANK-REPORT-FORMAT.md).
 

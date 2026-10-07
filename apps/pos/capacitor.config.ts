@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'id.posguard.pos',
-  appName: 'POS Guard',
+  appName: 'Anatta POS',
   webDir: 'dist',
   server: {
     // Asal http://localhost: tetap "secure context" (WebCrypto tersedia) dan dapat memanggil API HTTP di jaringan lokal saat uji.

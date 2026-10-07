@@ -4,8 +4,8 @@
 // Alamat API. Produksi WAJIB https:// (sertifikat divalidasi terhadap bundel root CA di firmware).
 // http://IP:3000 hanya untuk uji di jaringan lokal; token dan data terkirim tanpa enkripsi.
 // Alamat ini tertanam di firmware; WiFi, token, dan identitas perangkat TIDAK: semuanya diisi lewat pairing
-// (portal setup "POSGUARD-xxxx" dengan kode dari dashboard, Pengaturan -> Perangkat).
-#define SERVER_URL "https://pos.dolanyu.com"
+// (portal setup "ANATTA-xxxx" dengan kode dari dashboard, Pengaturan -> Perangkat).
+#define SERVER_URL "https://anatta-pos.dolanyu.com"
 
 // ---- Mode uji tanpa pairing (opsional) ----
 // Hapus tanda komentar untuk melewati portal dan memakai token yang dicetak `npm run demo`. Jangan dipakai di produksi.

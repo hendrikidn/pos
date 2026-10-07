@@ -144,7 +144,7 @@ export default function LoginPage() {
     <main className="login">
       <div className="login-brand">
         <Logo size={56} />
-        <h1>POS Guard</h1>
+        <h1>Anatta POS</h1>
         <p>Pantau transaksi kasir outlet Anda</p>
       </div>
       {suspended && <p className="notice" role="alert">Akun tenant ini sedang ditangguhkan. Hubungi administrator.</p>}

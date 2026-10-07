@@ -75,7 +75,7 @@ describe('login email + password', () => {
       expect((await user(BOS)).has_password).toBe(false);
       await forgot(BOS);
       const mail = h.mailer.sent.filter((m) => m.to === BOS).at(-1)!;
-      expect(mail.subject).toMatch(/^Kode atur ulang password POS Guard: \d{6}$/);
+      expect(mail.subject).toMatch(/^Kode atur ulang password Anatta POS: \d{6}$/);
       expect(mail.text).toMatch(/password Anda tidak berubah/);
     });
 

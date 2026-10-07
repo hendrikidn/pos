@@ -139,14 +139,14 @@ export class LoginService {
     const mail =
       purpose === 'reset'
         ? {
-            subject: `Kode atur ulang password POS Guard: ${code}`,
-            text: `Kode untuk mengatur atau mengatur ulang password POS Guard Anda: ${code}\n\nBerlaku ${minutes} menit dan hanya bisa dipakai sekali.\nJika Anda tidak memintanya, abaikan email ini; password Anda tidak berubah.`,
-            html: `<p>Kode untuk mengatur atau mengatur ulang password POS Guard Anda:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:8px 0">${code}</p><p>Berlaku ${minutes} menit dan hanya bisa dipakai sekali.</p><p style="color:#666">Jika Anda tidak memintanya, abaikan email ini; password Anda tidak berubah.</p>`,
+            subject: `Kode atur ulang password Anatta POS: ${code}`,
+            text: `Kode untuk mengatur atau mengatur ulang password Anatta POS Anda: ${code}\n\nBerlaku ${minutes} menit dan hanya bisa dipakai sekali.\nJika Anda tidak memintanya, abaikan email ini; password Anda tidak berubah.`,
+            html: `<p>Kode untuk mengatur atau mengatur ulang password Anatta POS Anda:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:8px 0">${code}</p><p>Berlaku ${minutes} menit dan hanya bisa dipakai sekali.</p><p style="color:#666">Jika Anda tidak memintanya, abaikan email ini; password Anda tidak berubah.</p>`,
           }
         : {
-            subject: `Kode masuk POS Guard: ${code}`,
-            text: `Kode masuk POS Guard Anda: ${code}\n\nBerlaku ${minutes} menit dan hanya bisa dipakai sekali.\nJika Anda tidak meminta kode ini, abaikan email ini; akun Anda tetap aman.`,
-            html: `<p>Kode masuk POS Guard Anda:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:8px 0">${code}</p><p>Berlaku ${minutes} menit dan hanya bisa dipakai sekali.</p><p style="color:#666">Jika Anda tidak meminta kode ini, abaikan email ini; akun Anda tetap aman.</p>`,
+            subject: `Kode masuk Anatta POS: ${code}`,
+            text: `Kode masuk Anatta POS Anda: ${code}\n\nBerlaku ${minutes} menit dan hanya bisa dipakai sekali.\nJika Anda tidak meminta kode ini, abaikan email ini; akun Anda tetap aman.`,
+            html: `<p>Kode masuk Anatta POS Anda:</p><p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:8px 0">${code}</p><p>Berlaku ${minutes} menit dan hanya bisa dipakai sekali.</p><p style="color:#666">Jika Anda tidak meminta kode ini, abaikan email ini; akun Anda tetap aman.</p>`,
           };
     try {
       await this.mailer.send({ to: email, ...mail });

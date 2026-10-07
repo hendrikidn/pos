@@ -9,6 +9,8 @@ export const dynamic = 'force-dynamic';
 export default async function TenantsPage() {
   const [me, o, tenants] = await authed(() => Promise.all([api<AdminMe>('/v1/admin/me'), api<Overview>('/v1/admin/overview'), api<TenantRow[]>('/v1/admin/tenants')]));
   const now = Date.now();
+  const active = tenants.filter((t) => !t.suspended_at);
+  const suspended = tenants.filter((t) => t.suspended_at);
   return (
     <Shell me={me}>
       <h1>Platform</h1>
@@ -37,38 +39,56 @@ export default async function TenantsPage() {
       {tenants.length === 0 ? (
         <div className="empty">Belum ada tenant. <Link href="/tenants/new">Buat tenant pertama</Link>.</div>
       ) : (
-        <section className="panel">
-          <h2>Tenant</h2>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Tenant</th><th className="num">Outlet</th><th className="num">Perangkat online</th><th className="num">Pesanan 7h</th>
-                  <th className="num">Penerimaan 7h</th><th className="num">Insiden</th><th>Aktivitas terakhir</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tenants.map((t) => (
-                  <tr key={t.id} className={t.suspended_at ? 'off' : ''}>
-                    <td>
-                      <Link href={`/tenants/${t.id}`}>{t.name}</Link>{' '}
-                      {t.suspended_at && <span className="status off">Ditangguhkan</span>}
-                      <div className="muted small"><span className="mono">{t.id}</span> · dibuat {dateWib(t.created_at)}</div>
-                    </td>
-                    <td className="num">{t.kpi.outlets}</td>
-                    <td className="num">{t.kpi.devicesOnline} / {t.kpi.devicesTotal}</td>
-                    <td className="num">{num(t.kpi.orders7d)}</td>
-                    <td className="num" title={rupiah(t.kpi.revenue7d)}>{rupiahShort(t.kpi.revenue7d)}</td>
-                    <td className="num nowrap">{t.kpi.incidentsOpen}{t.kpi.incidentsCritical > 0 && <> · <span className="status off">{t.kpi.incidentsCritical} kritis</span></>}</td>
-                    <td>{t.kpi.lastActivityMs === null ? <span className="muted">belum pernah</span> : ago(t.kpi.lastActivityMs, now)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <>
+          {active.length === 0 ? (
+            <div className="empty">Tidak ada tenant aktif. <Link href="/tenants/new">Buat tenant baru</Link>.</div>
+          ) : (
+            <section className="panel">
+              <h2>Tenant aktif</h2>
+              <TenantTable rows={active} now={now} />
+            </section>
+          )}
+          {suspended.length > 0 && (
+            <details className="panel">
+              <summary><strong>Tenant ditangguhkan ({suspended.length})</strong></summary>
+              <TenantTable rows={suspended} now={now} />
+            </details>
+          )}
+        </>
       )}
       <p><Link href="/tenants/new" className="btn">Tenant baru</Link></p>
     </Shell>
+  );
+}
+
+function TenantTable({ rows, now }: { rows: TenantRow[]; now: number }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Tenant</th><th className="num">Outlet</th><th className="num">Perangkat online</th><th className="num">Pesanan 7h</th>
+            <th className="num">Penerimaan 7h</th><th className="num">Insiden</th><th>Aktivitas terakhir</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((t) => (
+            <tr key={t.id} className={t.suspended_at ? 'off' : ''}>
+              <td>
+                <Link href={`/tenants/${t.id}`}>{t.name}</Link>{' '}
+                {t.suspended_at && <span className="status off">Ditangguhkan</span>}
+                <div className="muted small"><span className="mono">{t.id}</span> · dibuat {dateWib(t.created_at)}</div>
+              </td>
+              <td className="num">{t.kpi.outlets}</td>
+              <td className="num">{t.kpi.devicesOnline} / {t.kpi.devicesTotal}</td>
+              <td className="num">{num(t.kpi.orders7d)}</td>
+              <td className="num" title={rupiah(t.kpi.revenue7d)}>{rupiahShort(t.kpi.revenue7d)}</td>
+              <td className="num nowrap">{t.kpi.incidentsOpen}{t.kpi.incidentsCritical > 0 && <> · <span className="status off">{t.kpi.incidentsCritical} kritis</span></>}</td>
+              <td>{t.kpi.lastActivityMs === null ? <span className="muted">belum pernah</span> : ago(t.kpi.lastActivityMs, now)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

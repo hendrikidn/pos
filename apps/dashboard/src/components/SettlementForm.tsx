@@ -64,9 +64,9 @@ export function SettlementForm({ outletId, edcs }: { outletId: string; edcs: { t
         <tbody>
           {CHANNELS.map(([c, label]) => (
             <tr key={c}>
-              <td>{label}</td>
-              <td className="num"><input aria-label={`${label} jumlah`} className="narrow" inputMode="numeric" value={lines[c]!.count} onChange={(e) => set(c, { count: e.target.value.replace(/\D/g, '') })} /></td>
-              <td className="num"><input aria-label={`${label} total`} className="narrow" inputMode="numeric" value={lines[c]!.amount} onChange={(e) => set(c, { amount: e.target.value.replace(/\D/g, '') })} /></td>
+              <td data-label="Jenis">{label}</td>
+              <td data-label="Jumlah transaksi (SALE)" className="num"><input aria-label={`${label} jumlah`} className="narrow" inputMode="numeric" value={lines[c]!.count} onChange={(e) => set(c, { count: e.target.value.replace(/\D/g, '') })} /></td>
+              <td data-label="Total (Rp)" className="num"><input aria-label={`${label} total`} className="narrow" inputMode="numeric" value={lines[c]!.amount} onChange={(e) => set(c, { amount: e.target.value.replace(/\D/g, '') })} /></td>
             </tr>
           ))}
         </tbody>

@@ -125,10 +125,10 @@ export function DeviceManager({
             <tbody>
               {pending.map((p) => (
                 <tr key={p.device_id}>
-                  <td className="mono">{p.device_id}{p.terminal_id ? ` → ${p.terminal_id}` : ''}</td>
-                  <td>{KIND_LABEL[p.kind]}</td>
-                  <td>{outlets.find((o) => o.id === p.outlet_id)?.name ?? p.outlet_id}</td>
-                  <td>{wibClock(Date.parse(p.expires_at))} WIB</td>
+                  <td data-label="Perangkat" className="mono">{p.device_id}{p.terminal_id ? ` → ${p.terminal_id}` : ''}</td>
+                  <td data-label="Jenis">{KIND_LABEL[p.kind]}</td>
+                  <td data-label="Outlet">{outlets.find((o) => o.id === p.outlet_id)?.name ?? p.outlet_id}</td>
+                  <td data-label="Berlaku sampai">{wibClock(Date.parse(p.expires_at))} WIB</td>
                   <td className="row-actions">
                     <button className="secondary" disabled={busy} onClick={() => void run(() => manage('DELETE', `/v1/devices/pairing/${p.device_id}`), `Kode untuk ${p.device_id} dibatalkan.`)}>
                       Batalkan
@@ -148,11 +148,11 @@ export function DeviceManager({
           <tbody>
             {devices.map((d) => (
               <tr key={d.id} className={d.revoked_at ? 'off' : ''}>
-                <td className="mono">{d.id}</td>
-                <td>{KIND_LABEL[d.kind]}</td>
-                <td>{outlets.find((o) => o.id === d.outlet_id)?.name ?? d.outlet_id}</td>
-                <td className="mono">{d.terminal_id ?? '–'}</td>
-                <td>{status(d)}</td>
+                <td data-label="ID" className="mono">{d.id}</td>
+                <td data-label="Jenis">{KIND_LABEL[d.kind]}</td>
+                <td data-label="Outlet">{outlets.find((o) => o.id === d.outlet_id)?.name ?? d.outlet_id}</td>
+                <td data-label="Terminal" className="mono">{d.terminal_id ?? '–'}</td>
+                <td data-label="Status">{status(d)}</td>
                 <td className="row-actions">
                   {role === 'OWNER' && !d.revoked_at && (
                     <button

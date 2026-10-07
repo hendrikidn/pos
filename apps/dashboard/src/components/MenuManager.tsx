@@ -32,10 +32,10 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
           <tbody>
             {items.map((m) => (
               <tr key={m.id} className={m.active ? '' : 'off'}>
-                <td>{m.name}<div className="muted small mono">{m.id}</div></td>
-                <td>{m.category}</td>
-                <td className="num">{rp(m.price)}</td>
-                <td>{m.active ? 'Aktif' : 'Nonaktif'}</td>
+                <td data-label="Menu">{m.name}<div className="muted small mono">{m.id}</div></td>
+                <td data-label="Kategori">{m.category}</td>
+                <td data-label="Harga" className="num">{rp(m.price)}</td>
+                <td data-label="Status">{m.active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="row-actions">
                   <button
                     className="secondary"

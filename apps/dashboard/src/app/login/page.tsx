@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { Logo } from '@/components/Icons';
 
 type Mode = 'password' | 'forgot' | 'otp' | 'token';
 const RESEND_SECONDS = 60;
@@ -141,7 +142,11 @@ export default function LoginPage() {
 
   return (
     <main className="login">
-      <h1>POS Guard</h1>
+      <div className="login-brand">
+        <Logo size={56} />
+        <h1>POS Guard</h1>
+        <p>Pantau transaksi kasir outlet Anda</p>
+      </div>
       {suspended && <p className="notice" role="alert">Akun tenant ini sedang ditangguhkan. Hubungi administrator.</p>}
 
       {mode === 'password' && (

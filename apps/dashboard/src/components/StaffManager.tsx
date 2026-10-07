@@ -33,10 +33,10 @@ export function StaffManager({ staff }: { staff: StaffRow[] }) {
           <tbody>
             {staff.map((s) => (
               <tr key={s.id} className={s.active ? '' : 'off'}>
-                <td>{s.name}</td>
-                <td className="mono">{s.id}</td>
-                <td>{ROLE_LABEL[s.role]}</td>
-                <td>{s.active ? 'Aktif' : 'Nonaktif'}</td>
+                <td data-label="Nama">{s.name}</td>
+                <td data-label="ID" className="mono">{s.id}</td>
+                <td data-label="Peran">{ROLE_LABEL[s.role]}</td>
+                <td data-label="Status">{s.active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="row-actions">
                   <button
                     className="secondary"

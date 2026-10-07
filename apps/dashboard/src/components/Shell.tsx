@@ -1,24 +1,44 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { Me } from '@/lib/api';
+import { Logo } from './Icons';
 import { LogoutButton } from './LogoutButton';
+import { NavLinks } from './NavLinks';
+
+const ROLE_LABEL: Record<string, string> = { OWNER: 'Owner', OPS: 'Ops', MANAGER: 'Manager', SUPERVISOR: 'Supervisor' };
 
 export function Shell({ me, children }: { me: Me; children: ReactNode }) {
+  const initial = (me.userId.trim()[0] ?? '?').toUpperCase();
+  const user = (
+    <Link href="/account" className="usercard" aria-label={`Akun ${me.userId}`}>
+      <span className="avatar" aria-hidden="true">{initial}</span>
+      <span className="usertext">
+        <b>{me.userId}</b>
+        <small>{ROLE_LABEL[me.role] ?? me.role}</small>
+      </span>
+    </Link>
+  );
+
   return (
-    <div className="shell">
-      <header className="topbar">
-        <Link href="/" className="brand">POS Guard</Link>
-        <nav className="who" aria-label="Utama">
-          <Link href="/">Insiden</Link>
-          {(me.role === 'OWNER' || me.role === 'OPS' || me.role === 'MANAGER') && <Link href="/settlements">Settlement EDC</Link>}
-          {(me.role === 'OWNER' || me.role === 'OPS') && <Link href="/settings">Pengaturan</Link>}
-        </nav>
-        <div className="who">
-          <Link href="/account">{me.userId} · {me.role}</Link>
+    <div className="app">
+      <header className="mobilebar">
+        <Link href="/" className="brand"><Logo size={32} /><span>POS Guard</span></Link>
+        <div className="mobilebar-user">
+          {user}
           <LogoutButton />
         </div>
       </header>
-      {children}
+
+      <aside className="sidebar">
+        <Link href="/" className="brand"><Logo /><span className="brand-text">POS Guard</span></Link>
+        <NavLinks role={me.role} />
+        <div className="side-foot">
+          {user}
+          <LogoutButton />
+        </div>
+      </aside>
+
+      <main className="main">{children}</main>
     </div>
   );
 }

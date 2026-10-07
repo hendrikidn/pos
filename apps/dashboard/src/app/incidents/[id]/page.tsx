@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ruleLabel } from '@pos/rules/src/labels';
 import { LevelBadge, StatusBadge } from '@/components/Badges';
 import { CopyButton } from '@/components/CopyButton';
+import { IconBack } from '@/components/Icons';
 import { ReviewForm } from '@/components/ReviewForm';
 import { Shell } from '@/components/Shell';
 import { api, ApiError, authed, type IncidentDetail, type Me } from '@/lib/api';
@@ -33,11 +34,12 @@ export default async function IncidentPage({ params }: { params: Promise<{ id: s
 
   return (
     <Shell me={me}>
-      <Link className="back" href={`/?outlet=${encodeURIComponent(inc.outlet_id)}`}>← Kembali ke {inc.outlet.name}</Link>
+      <Link className="back" href={`/?outlet=${encodeURIComponent(inc.outlet_id)}`}><IconBack /> {inc.outlet.name}</Link>
 
-      <h1>
-        <LevelBadge level={inc.level} /> <span className="score">Skor {inc.score}</span>
-      </h1>
+      <div className="page-head">
+        <h1>Skor <span className="score">{inc.score}</span></h1>
+        <LevelBadge level={inc.level} />
+      </div>
       <p className="sub">
         {inc.outlet.name} · {wibRange(inc.start_ms, inc.end_ms)} · <StatusBadge status={inc.status} />
       </p>

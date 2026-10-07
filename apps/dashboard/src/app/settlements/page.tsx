@@ -66,9 +66,9 @@ export default async function SettlementsPage({ searchParams }: { searchParams: 
               <tbody>
                 {b.result.channels.map((c) => (
                   <tr key={c.channel}>
-                    <td>{CHANNEL_LABEL[c.channel] ?? c.channel}</td>
-                    <td className="num">{c.pos.count} · {rp(c.pos.amount)}</td>
-                    <td className="num">{c.slip.count} · {rp(c.slip.amount)}</td>
+                    <td data-label="Jenis">{CHANNEL_LABEL[c.channel] ?? c.channel}</td>
+                    <td data-label="POS" className="num">{c.pos.count} · {rp(c.pos.amount)}</td>
+                    <td data-label="Slip" className="num">{c.slip.count} · {rp(c.slip.amount)}</td>
                     <td>{c.ok ? '✓' : `Selisih ${c.pos.count - c.slip.count} transaksi · ${c.pos.amount - c.slip.amount > 0 ? '+' : ''}${rp(c.pos.amount - c.slip.amount)}`}</td>
                   </tr>
                 ))}

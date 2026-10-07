@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { ruleLabel } from '@pos/rules/src/labels';
 import { LevelBadge, RuleChips, StatusBadge } from '@/components/Badges';
+import { IconClock, IconInfo } from '@/components/Icons';
 import { Shell } from '@/components/Shell';
 import { api, authed, type Incident, type Me, type Outlet } from '@/lib/api';
 import { ago, cctvInfo, wibRange } from '@/lib/format';
@@ -66,14 +68,15 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
       )}
 
       <div className="notice">
-        Insiden adalah <b>indikasi</b>, bukan bukti. Pastikan dengan rekaman CCTV sebelum menyimpulkan atau mengambil tindakan terhadap karyawan.
+        <IconInfo />
+        <span>Insiden adalah <b>indikasi</b>, bukan bukti. Pastikan dengan rekaman CCTV sebelum menyimpulkan atau mengambil tindakan terhadap karyawan.</span>
       </div>
 
       {tab === 'open' && (
         <div className="stats">
-          <div className="stat"><b>{counts.CRITICAL}</b><span>Kritis</span></div>
-          <div className="stat"><b>{counts.MEDIUM}</b><span>Sedang</span></div>
-          <div className="stat"><b>{counts.LOW}</b><span>Rendah</span></div>
+          <div className="stat stat-CRITICAL"><b>{counts.CRITICAL}</b><span>Kritis</span></div>
+          <div className="stat stat-MEDIUM"><b>{counts.MEDIUM}</b><span>Sedang</span></div>
+          <div className="stat stat-LOW"><b>{counts.LOW}</b><span>Rendah</span></div>
         </div>
       )}
 
@@ -87,22 +90,31 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ o
       ) : (
         incidents.map((i) => {
           const cctv = cctvInfo(i.start_ms, i.end_ms, outlet.cctv_retention_days, outlet.cctv_clock_offset_sec, now);
+          // Temuan terberat jadi judul; sisanya tampil sebagai chip kecil.
+          const main = [...i.hits].sort((a, b) => b.weight - a.weight)[0];
+          const others = [...new Set(i.hits.map((h) => h.rule))].filter((r) => r !== main?.rule);
           return (
-            <Link key={i.id} className="card" href={`/incidents/${encodeURIComponent(i.id)}`}>
-              <div className="card-head">
-                <LevelBadge level={i.level} />
-                <span className="score">Skor {i.score}</span>
-                {tab === 'done' && <StatusBadge status={i.status} />}
-                {tab === 'open' && cctv.status === 'URGENT' && <span className="badge badge-CRITICAL">Rekaman segera tertimpa</span>}
-                {tab === 'open' && cctv.status === 'EXPIRED' && <span className="badge badge-MEDIUM">Rekaman mungkin sudah tertimpa</span>}
-                <span className="when">{ago(i.end_ms, now)}</span>
+            <Link key={i.id} className={`incident incident-${i.level}`} href={`/incidents/${encodeURIComponent(i.id)}`}>
+              <div className="incident-body">
+                <div className="incident-top">
+                  <LevelBadge level={i.level} />
+                  {tab === 'done' && <StatusBadge status={i.status} />}
+                  {tab === 'open' && cctv.status === 'URGENT' && <span className="badge badge-CRITICAL">Rekaman segera tertimpa</span>}
+                  {tab === 'open' && cctv.status === 'EXPIRED' && <span className="badge badge-MEDIUM">Rekaman mungkin sudah tertimpa</span>}
+                  <span className="when"><IconClock /> {ago(i.end_ms, now)}</span>
+                </div>
+                <h3 className="incident-title">{main ? ruleLabel(main.rule) : 'Insiden'}</h3>
+                <div className="meta">
+                  {wibRange(i.start_ms, i.end_ms)}
+                  {i.order_ids.length > 0 && <> · Order {i.order_ids.join(', ')}</>}
+                  {i.actor_ids.length > 0 && <> · {i.actor_ids.join(', ')}</>}
+                </div>
+                {others.length > 0 && <RuleChips rules={others} />}
               </div>
-              <div className="meta">
-                {wibRange(i.start_ms, i.end_ms)}
-                {i.order_ids.length > 0 && <> · Order {i.order_ids.join(', ')}</>}
-                {i.actor_ids.length > 0 && <> · {i.actor_ids.join(', ')}</>}
+              <div className="incident-score" aria-label={`Skor ${i.score}`}>
+                <b>{i.score}</b>
+                <span>skor</span>
               </div>
-              <RuleChips rules={i.hits.map((h) => h.rule)} />
             </Link>
           );
         })

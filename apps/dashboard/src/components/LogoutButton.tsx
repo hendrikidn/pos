@@ -1,20 +1,23 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { IconLogout } from './Icons';
 
 export function LogoutButton() {
   const router = useRouter();
   return (
     <button
       type="button"
-      className="secondary"
+      className="logout"
+      aria-label="Keluar"
       onClick={async () => {
         await fetch('/api/logout', { method: 'POST' });
         router.push('/login');
         router.refresh();
       }}
     >
-      Keluar
+      <IconLogout />
+      <span>Keluar</span>
     </button>
   );
 }

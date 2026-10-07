@@ -51,9 +51,9 @@ export function UserManager({ users }: { users: DashboardUser[] }) {
                 const owner = u.role === 'OWNER';
                 return (
                   <tr key={u.id} className={u.active ? '' : 'off'}>
-                    <td>{u.email}</td>
-                    <td className="mono">{u.user_id}</td>
-                    <td>
+                    <td data-label="Email">{u.email}</td>
+                    <td data-label="ID" className="mono">{u.user_id}</td>
+                    <td data-label="Peran">
                       {owner ? ROLE_LABEL.OWNER : (
                         <select
                           aria-label={`Peran ${u.email}`}
@@ -69,10 +69,10 @@ export function UserManager({ users }: { users: DashboardUser[] }) {
                         </select>
                       )}
                     </td>
-                    <td>{u.last_login_at ? wibDateTime(Date.parse(u.last_login_at)) : <span className="muted">belum pernah</span>}</td>
-                    <td>{u.has_password ? 'Sudah diatur' : <span className="muted">belum</span>}</td>
-                    <td className="num">{u.active_sessions}</td>
-                    <td>{u.active ? 'Aktif' : 'Nonaktif'}</td>
+                    <td data-label="Terakhir masuk">{u.last_login_at ? wibDateTime(Date.parse(u.last_login_at)) : <span className="muted">belum pernah</span>}</td>
+                    <td data-label="Password">{u.has_password ? 'Sudah diatur' : <span className="muted">belum</span>}</td>
+                    <td data-label="Sesi aktif" className="num">{u.active_sessions}</td>
+                    <td data-label="Status">{u.active ? 'Aktif' : 'Nonaktif'}</td>
                     <td className="row-actions">
                       {owner ? (
                         <span className="muted small">dikelola administrator</span>

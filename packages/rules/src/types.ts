@@ -57,6 +57,22 @@ export interface RuleConfig {
   r34MaxOrdersPerDay: number;
   /** R42: toleransi sebelum absen masuk dan sesudah absen pulang. */
   r42GraceMs: number;
+  /** R17: laci terbuka tanpa pembayaran tunai dalam jarak ini (sebelum atau sesudah). */
+  r17MatchMs: number;
+  /** R20: jendela sebelum tutup shift, dan jumlah minimum cetak ulang dan pindah meja di dalamnya. */
+  r20WindowMs: number;
+  r20MinEvents: number;
+  /** R11: sampel minimum void, dan bagian void yang disetujui satu orang. */
+  r11MinVoids: number;
+  r11Share: number;
+  /** R12: minimum order kasir, minimum kejadian, simpangan baku, dan ambang mutlak bila rekan kurang dari dua. */
+  r12MinOrders: number;
+  r12MinEvents: number;
+  r12Sigma: number;
+  /** R13: minimum kejadian (void dan ganti metode bayar) dan nisbah terhadap bagian waktu kertas habis. */
+  r13MinEvents: number;
+  /** Jendela data untuk aturan pola (R11, R12, R13). */
+  patternWindowMs: number;
   weights: Record<string, number>;
 }
 
@@ -80,9 +96,19 @@ export const DEFAULT_CONFIG: RuleConfig = {
   /** R34: member yang dikaitkan ke lebih dari sekian order berbeda dalam satu hari. */
   r34MaxOrdersPerDay: 5,
   r42GraceMs: 15 * 60_000,
+  r17MatchMs: 30_000,
+  r20WindowMs: 60 * 60_000,
+  r20MinEvents: 3,
+  r11MinVoids: 5,
+  r11Share: 0.7,
+  r12MinOrders: 30,
+  r12MinEvents: 5,
+  r12Sigma: 2.5,
+  r13MinEvents: 5,
+  patternWindowMs: 14 * 24 * 3_600_000,
   weights: {
     R1: 15, R1_DRAWER: 30, R2: 30, R2_PROXY: 20, R3: 35, R4: 40, R5: 20, R5B: 25, R6: 25, R6_APPROVED: 10, R14: 20,
-    R18: 30, R18_APPROVED: 10, R21: 30, R22: 30, R23: 20, R24: 40, R25: 25, R30: 60, R30_UNTRACKED: 20, R31: 50, R32: 45, R33: 50, R34: 30, R35: 50, R36: 40, R40: 30, R41: 40, R42: 25, R43: 50, R44: 35, R45: 40, R46: 30, R47: 35, R48: 25, R49: 35, R29_TIME: 30, R29_DEBUG: 15, R29_ROOT: 40,
+    R18: 30, R18_APPROVED: 10, R21: 30, R22: 30, R23: 20, R24: 40, R25: 25, R30: 60, R30_UNTRACKED: 20, R31: 50, R32: 45, R33: 50, R34: 30, R35: 50, R36: 40, R40: 30, R41: 40, R42: 25, R43: 50, R44: 35, R45: 40, R46: 30, R47: 35, R48: 25, R49: 35, R11: 35, R12: 20, R13: 35, R15: 20, R16: 10, R17: 30, R17_APPROVED: 10, R19: 20, R20: 20, R50: 30, R51: 20, R52: 25, R53: 20, R29_TIME: 30, R29_DEBUG: 15, R29_ROOT: 40,
   },
 };
 

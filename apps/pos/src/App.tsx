@@ -5,6 +5,7 @@ import { CustomerDisplay, DISPLAY_CHANNEL, type DisplayView } from './CustomerDi
 import { Kds } from './Kds';
 import { Logo } from './Logo';
 import { OrderPanel } from './OrderPanel';
+import { DrawerDialog } from './Drawer';
 import { QueueDialog } from './Queue';
 import { ReservationDialog } from './Reservations';
 import { WebOrdersDialog } from './WebOrders';
@@ -164,6 +165,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
   const s = ctx.rt.syncStatus();
   const shift = engine.currentShift();
   const claim = engine.paperClaimActive();
+  const [drawerAsk, setDrawerAsk] = useState(false);
   return (
     <header className="topbar">
       <div className="brand"><Logo size={32} />{config.merchantName}</div>
@@ -180,6 +182,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
         <button className={`secondary ${claim ? 'warn' : ''}`} onClick={() => void run(ctx, () => engine.setPaperClaim(!claim))}>
           {claim ? 'Kertas habis ✓' : 'Kertas habis'}
         </button>
+        {shift && <button className="secondary" title="Buka laci kas tanpa transaksi (perlu alasan dan persetujuan)" onClick={() => setDrawerAsk(true)}>Buka laci</button>}
         <button
           className={`secondary ${engine.clockedInSince() === null ? 'warn' : ''}`}
           title={engine.clockedInSince() === null ? 'Catat jam masuk kerja Anda' : `Masuk sejak ${new Date(engine.clockedInSince()!).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}
@@ -198,6 +201,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
         <span className="muted small">{shift ? 'Shift buka' : 'Shift tutup'} · {user.name}</span>
         <button className="ghost" onClick={() => { engine.logout(); ctx.selectOrder(null); ctx.bump(); }}>Keluar</button>
       </div>
+      {drawerAsk && <DrawerDialog ctx={ctx} onClose={() => setDrawerAsk(false)} />}
     </header>
   );
 }

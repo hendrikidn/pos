@@ -13,7 +13,7 @@ const HOLD_LABEL: Record<string, string> = {
   STILL_DINING: 'Customer masih makan/minum', WAITING_GROUP: 'Menunggu rombongan lain', CUSTOMER_AWAY: 'Customer meninggalkan meja sementara',
   SYSTEM_ISSUE: 'Kendala sistem atau EDC', OTHER: 'Lainnya',
 };
-const METHOD_LABEL: Record<string, string> = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Platform online', DEPOSIT: 'Uang muka reservasi' };
+const METHOD_LABEL: Record<string, string> = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Platform online', DEPOSIT: 'Uang muka reservasi', QR_STATIC: 'QR statis' };
 
 /** Jam yang ditampilkan: dari satu jam sebelum aktivitas pertama sampai satu jam sesudah yang terakhir (minimal 8 jam). */
 function activeHours<T extends { hour: number; orders: number; net: number }>(rows: T[]): T[] {

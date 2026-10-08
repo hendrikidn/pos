@@ -59,6 +59,7 @@ describe('laporan penjualan: satu hari', () => {
       { method: 'EDC_CREDIT', payments: 0, amount: 0 },
       { method: 'PLATFORM', payments: 0, amount: 0 },
       { method: 'DEPOSIT', payments: 0, amount: 0 },
+      { method: 'QR_STATIC', payments: 0, amount: 0 },
     ]);
   });
 

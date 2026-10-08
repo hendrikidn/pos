@@ -4,8 +4,9 @@ import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 /**
  * PLATFORM: dibayar oleh platform pesan-antar (GoFood dan sejenisnya) dan diselesaikan ke outlet kemudian; hanya untuk order yang dikaitkan ke kanal online.
  * DEPOSIT: memakai uang muka reservasi (`reservationId` wajib); sahnya diperiksa server (aturan R43).
+ * QR_STATIC: QR statis cetak. Mati bawaan; hanya bila outlet mengaktifkannya, dan setiap pemakaiannya ditandai bila EDC atau QR dinamis tersedia (R19).
  */
-export type PaymentMethod = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT';
+export type PaymentMethod = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT' | 'QR_STATIC';
 export const ONLINE_CHANNELS = ['GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'] as const;
 export type OnlineChannel = (typeof ONLINE_CHANNELS)[number];
 export type OrderType = 'DINE_IN' | 'TAKE_AWAY' | 'EMPLOYEE';
@@ -155,7 +156,11 @@ export type EventBody =
       type: 'refund.created';
       payload: { refundId: string; originalOrderId: string; amount: number; method: PaymentMethod; approverId: string };
     }
-  | { type: 'drawer.opened'; payload: { orderId?: string } }
+  | {
+      type: 'drawer.opened';
+      /** `orderId`: dibuka karena pembayaran tunai order itu. Tanpa orderId = buka laci tanpa transaksi; `reason` dan `approverId` mencatat alasan dan penyetujunya (R17). */
+      payload: { orderId?: string; reason?: string; approverId?: string };
+    }
   | { type: 'printer.status'; payload: { state: PrinterState; source: 'device' | 'claim' } }
   | { type: 'printer.paper_claim'; payload: { active: boolean } }
   | {

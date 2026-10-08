@@ -962,6 +962,24 @@ export class PosEngine {
   }
 
   /**
+   * Membuka laci kas tanpa transaksi (tukar uang kecil, setor, dan sebagainya). Wajib beralasan dan disetujui orang lain; dicatat sebagai
+   * `drawer.opened` tanpa order, dan laci yang terbuka tanpa pembayaran tunai ditandai R17 (bobot rendah bila ada penyetuju).
+   */
+  async openDrawer(reason: string, approver: ApproverInput): Promise<Result<true>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    const why = reason.trim();
+    if (why.length < 3 || why.length > 60) return fail('REASON_REQUIRED', 'Isi alasan membuka laci (3–60 karakter).');
+    if (approver.userId === w.value) return fail('SELF_APPROVAL', 'Penyetuju harus orang lain.');
+    const role = this.dir.roleOf(approver.userId);
+    if (role !== 'SUPERVISOR' && role !== 'MANAGER' && role !== 'OWNER') return fail('APPROVER_ROLE', 'Penyetuju harus supervisor, manager, atau owner.');
+    const a = await this.checkApprovers([approver]);
+    if (!a.ok) return a;
+    await this.emit({ type: 'drawer.opened', payload: { reason: why, approverId: a.value[0]! } });
+    return ok(true);
+  }
+
+  /**
    * Menerima pembayaran. Pembayaran TUNAI untuk bill yang sudah ditahan melewati batas (`holdBillMinutes`) memerlukan
    * `holdReason` dari daftar baku; alasan dicatat sebagai event `bill.hold_reason` sebelum pembayarannya (kontrol bill recycling).
    */
@@ -979,6 +997,7 @@ export class PosEngine {
     if (!o.state.billPrinted) return fail('BILL_REQUIRED', 'Tagihan harus dicetak atau ditampilkan sebelum pembayaran.');
     if (o.channel && p.method !== 'PLATFORM') return fail('CHANNEL_PLATFORM_ONLY', 'Order online dibayar platform: pakai metode Platform.');
     if (!o.channel && p.method === 'PLATFORM') return fail('PLATFORM_NOT_ONLINE', 'Metode Platform hanya untuk order yang dibuat dari pesanan online.');
+    if (p.method === 'QR_STATIC' && !this.cfg.staticQr) return fail('STATIC_QR_OFF', 'QR statis belum diaktifkan untuk outlet ini.');
     // Uang muka reservasi: nominal dan sahnya diperiksa server (R43); terminal hanya memastikan reservasinya disebut.
     if (p.method === 'DEPOSIT' && !(Number.isInteger(p.reservationId) && (p.reservationId as number) > 0)) return fail('RESERVATION_REQUIRED', 'Pilih reservasi yang uang mukanya dipakai.');
 
@@ -998,7 +1017,7 @@ export class PosEngine {
     if (!Number.isInteger(amount) || amount <= 0) return fail('AMOUNT_INVALID', 'Nominal tidak valid.');
 
     let tid = p.tid;
-    if (p.method !== 'CASH' && p.method !== 'PLATFORM' && p.method !== 'DEPOSIT') {
+    if (p.method !== 'CASH' && p.method !== 'PLATFORM' && p.method !== 'DEPOSIT' && p.method !== 'QR_STATIC') {
       tid ??= this.cfg.edcs.length === 1 ? this.cfg.edcs[0]!.tid : undefined;
       if (!tid) return fail('EDC_REQUIRED', 'Pilih mesin EDC yang dipakai.');
       if (!this.cfg.edcs.some((x) => x.tid === tid)) return fail('EDC_UNKNOWN', 'Mesin EDC tidak terdaftar di outlet ini.');
@@ -1023,6 +1042,8 @@ export class PosEngine {
     o.payments.push({ method: p.method, amount, tid, approvalCode: p.approvalCode, at: this.d.now() });
     await this.trackCash('in', p.method, amount);
     await this.apply(o, e);
+    // Pembayaran tunai membuka laci: dicatat supaya laci yang terbuka tanpa pembayaran (R17) bisa dibedakan.
+    if (p.method === 'CASH') await this.emit({ type: 'drawer.opened', payload: { orderId } });
     return ok({ order: o, change });
   }
 

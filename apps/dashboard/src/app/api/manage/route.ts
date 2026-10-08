@@ -36,6 +36,7 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['POST', 'PUT'], path: /^\/v1\/ingredients(\/[a-z0-9_-]+)?$/ },
   { methods: ['PUT'], path: /^\/v1\/ingredients\/[a-z0-9_-]+\/bom$/ },
   { methods: ['POST'], path: /^\/v1\/bom\/calc$/ },
+  { methods: ['POST'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/paper-rolls$/ },
   { methods: ['POST'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/stock\/movements$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/settings$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/settlements$/ },

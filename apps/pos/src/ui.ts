@@ -10,7 +10,7 @@ export const STATUS_LABEL: Record<string, string> = {
 export const TYPE_LABEL: Record<string, string> = { DINE_IN: 'Dine-in', TAKE_AWAY: 'Take-away', EMPLOYEE: 'Karyawan' };
 
 export const METHOD_LABEL: Record<string, string> = {
-  CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Dibayar platform', DEPOSIT: 'Uang muka',
+  CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Dibayar platform', DEPOSIT: 'Uang muka', QR_STATIC: 'QR statis',
 };
 
 export interface Ctx {

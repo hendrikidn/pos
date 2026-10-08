@@ -71,7 +71,7 @@ export function renderBill(o: OrderRecord, cfg: PosConfig, title = 'BILL'): stri
   ].join('\n');
 }
 
-const METHOD_NAME: Record<string, string> = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Platform online', DEPOSIT: 'Uang muka' };
+const METHOD_NAME: Record<string, string> = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Platform online', DEPOSIT: 'Uang muka', QR_STATIC: 'QR statis' };
 
 export function renderReceipt(o: OrderRecord, cfg: PosConfig): string {
   const paid = o.payments.map((p) => line(METHOD_NAME[p.method] ?? p.method, rp(p.amount)));

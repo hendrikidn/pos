@@ -102,7 +102,7 @@ export function checkJournalLines(lines: unknown, accounts: Map<string, { active
   return null;
 }
 
-const METHOD_ACCOUNT = { CASH: SYSTEM.cash, QRIS: SYSTEM.digital, EDC_DEBIT: SYSTEM.digital, EDC_CREDIT: SYSTEM.digital, PLATFORM: SYSTEM.platform, DEPOSIT: SYSTEM.deposit } as const;
+const METHOD_ACCOUNT = { CASH: SYSTEM.cash, QRIS: SYSTEM.digital, EDC_DEBIT: SYSTEM.digital, EDC_CREDIT: SYSTEM.digital, PLATFORM: SYSTEM.platform, DEPOSIT: SYSTEM.deposit, QR_STATIC: SYSTEM.digital } as const;
 
 /** Jenis event yang dibutuhkan jurnal penjualan. */
 export const JOURNAL_EVENT_TYPES = ['payment.received', 'refund.created', 'order.created', 'bill.printed', 'cash.counted'];

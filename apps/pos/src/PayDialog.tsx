@@ -5,7 +5,7 @@ import { Modal } from './dialogs';
 import { Qr } from './Qr';
 import { CHANNEL_LABEL, METHOD_LABEL, orderLabel, rp, run, type Ctx } from './ui';
 
-type Method = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT';
+type Method = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT' | 'QR_STATIC';
 const METHODS: Method[] = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'];
 
 /** Logo sederhana per metode, digambar langsung agar tidak perlu berkas gambar dan tetap tampil saat offline. */
@@ -20,7 +20,7 @@ export function MethodIcon({ method }: { method: Method }) {
   if (method === 'CASH') {
     return <svg {...common}><rect x="2.5" y="6.5" width="19" height="11" rx="2" /><circle cx="12" cy="12" r="2.6" /><path d="M6 9.5v.01M18 14.5v.01" /></svg>;
   }
-  if (method === 'QRIS') {
+  if (method === 'QRIS' || method === 'QR_STATIC') {
     return <svg {...common}><rect x="3.5" y="3.5" width="7" height="7" rx="1" /><rect x="13.5" y="3.5" width="7" height="7" rx="1" /><rect x="3.5" y="13.5" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM20 14v.01M17 20h3.5M14 20v.01" /></svg>;
   }
   return (
@@ -69,7 +69,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
       method,
       amount,
       ...(needReason ? { holdReason } : {}),
-      ...(method === 'CASH' ? { tendered: cash || amount } : method === 'DEPOSIT' ? { reservationId: reservationId! } : { tid, approvalCode: code.trim() || undefined }),
+      ...(method === 'CASH' ? { tendered: cash || amount } : method === 'DEPOSIT' ? { reservationId: reservationId! } : method === 'QR_STATIC' ? {} : { tid, approvalCode: code.trim() || undefined }),
     });
     setBusy(false);
     ctx.bump();
@@ -127,7 +127,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
 
       <div className="pay-body">
         <nav className="pay-methods" aria-label="Metode pembayaran">
-          {(online ? (['PLATFORM'] as Method[]) : [...METHODS, ...(deposits.length > 0 ? (['DEPOSIT'] as Method[]) : [])]).map((m) => (
+          {(online ? (['PLATFORM'] as Method[]) : [...METHODS, ...(config.staticQr ? (['QR_STATIC'] as Method[]) : []), ...(deposits.length > 0 ? (['DEPOSIT'] as Method[]) : [])]).map((m) => (
             <button key={m} type="button" className={method === m ? 'on' : ''} aria-pressed={method === m} onClick={() => setMethod(m)}>
               <MethodIcon method={m} />
               <span>{METHOD_LABEL[m]}</span>
@@ -162,7 +162,9 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
             </>
           )}
 
-          {method === 'PLATFORM' ? null : method === 'DEPOSIT' ? (
+          {method === 'PLATFORM' ? null : method === 'QR_STATIC' ? (
+            <p className="notice">QR statis tidak bisa dicocokkan dengan bank secara otomatis, dan setiap pemakaiannya dicatat untuk ditinjau owner. Pakai EDC atau QR dinamis bila tersedia. Pastikan stiker QR di meja kasir atas nama <b>{config.merchantName}</b>.</p>
+          ) : method === 'DEPOSIT' ? (
             <fieldset className="opt-group">
               <legend>Reservasi yang uang mukanya dipakai</legend>
               <div className="opts">

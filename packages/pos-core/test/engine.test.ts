@@ -98,7 +98,7 @@ describe('alur order normal', () => {
     must(await c.engine.printReceipt(o.id));
 
     expect(await c.types()).toEqual([
-      'shift.opened', 'order.created', 'order.sent_to_kitchen', 'bill.printed', 'payment.received', 'receipt.printed',
+      'shift.opened', 'order.created', 'order.sent_to_kitchen', 'bill.printed', 'payment.received', 'drawer.opened', 'receipt.printed',
     ]);
     expect(verifyChain(await c.events())).toEqual([]);
     expect(c.engine.getOrder(o.id)!.state.status).toBe('PAID');
@@ -291,7 +291,7 @@ describe('ketahanan', () => {
     must(await engine.pay(id, { method: 'CASH', tendered: 50_000 }));
 
     const events: PosEvent[] = await recorder.pending();
-    expect(events.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+    expect(events.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5]); // 5 = drawer.opened sesudah pembayaran tunai
     expect(verifyChain(events)).toEqual([]);
   });
 
@@ -882,8 +882,8 @@ describe('bill tunai yang ditahan lama', () => {
     expect(c.engine.getOrder(id)!.state.status).toBe('BILLED');
 
     must(await c.engine.pay(id, { method: 'CASH', holdReason: 'STILL_DINING' }));
-    const tail = (await types()).slice(-2);
-    expect(tail).toEqual(['bill.hold_reason', 'payment.received']);
+    const tail = (await types()).slice(-3);
+    expect(tail).toEqual(['bill.hold_reason', 'payment.received', 'drawer.opened']);
     const e = (await c.events()).find((x) => x.type === 'bill.hold_reason')!;
     expect(e.type === 'bill.hold_reason' && e.payload).toEqual({ orderId: id, reason: 'STILL_DINING', heldMinutes: 60 });
     expect(c.engine.getOrder(id)!.state.status).toBe('PAID');

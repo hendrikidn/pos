@@ -2,7 +2,7 @@ import { correctedTime, type EventOf, type PosEvent } from '@pos/events';
 import { DEFAULT_CONFIG } from '@pos/rules';
 
 export const DAY_MS = 86_400_000;
-export const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT', 'PLATFORM', 'DEPOSIT'] as const;
+export const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT', 'PLATFORM', 'DEPOSIT', 'QR_STATIC'] as const;
 type Method = (typeof METHODS)[number];
 
 export interface SalesReportInput {

@@ -203,6 +203,7 @@ export interface OutletSettings {
   loyalty_point_value: number;
   loyalty_max_redeem_percent: number;
   online_channels: { channel: 'GOFOOD' | 'GRABFOOD' | 'SHOPEEFOOD'; commissionPercent: number }[];
+  static_qr_enabled?: boolean;
   edcs: { tid: string; bank: string; label: string }[];
   tables: { no: string; area: string; seats: number }[];
   policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number; holdBillMinutes?: number } | null;
@@ -290,7 +291,7 @@ export interface SalesReport {
   };
   byDay: { date: string; orders: number; net: number }[];
   byHour: { hour: number; orders: number; net: number }[];
-  byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT'; payments: number; amount: number }[];
+  byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT' | 'QR_STATIC'; payments: number; amount: number }[];
   byCashier: CashierRow[];
   byProduct: { itemId: string; name: string; qty: number; amount: number }[];
   byOption: { group: string; name: string; qty: number; amount: number }[];
@@ -325,6 +326,12 @@ export interface Ingredient { id: string; name: string; unit: 'g' | 'ml' | 'pcs'
 
 /** GET /v1/boms: BOM per batch bahan setengah jadi. */
 export type Boms = Record<string, { batchYield: number | null; lines: Record<string, number> }>;
+
+export interface PaperRolls {
+  assumptions: { rollMeters: number; docCm: number };
+  entries: { id: number; kind: 'PURCHASE' | 'COUNT'; rolls: number; note: string | null; userId: string; at: number }[];
+  periods: { countId: number; at: number; consumed: number; documents: number; expected: number; flagged: boolean }[];
+}
 
 export interface BomNode { id: string; name: string; unit: string; kind: 'RAW' | 'SEMI'; qty: number; cost: number; children?: BomNode[] }
 export interface BomCalc {

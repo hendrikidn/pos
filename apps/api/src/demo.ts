@@ -358,7 +358,7 @@ async function main() {
   await hr.setPay(seeder, 'budi', { payType: 'HOURLY', rate: 25_000, overtimeMultiplier: 1.5 });
   await hr.setPay(seeder, 'sari', { payType: 'MONTHLY', rate: 4_500_000, overtimeMultiplier: 1.5 });
   const todayStart = Math.floor((now + 7 * H) / (24 * H)) * 24 * H - 7 * H; // 00:00 WIB hari ini
-  for (let d = 1; d <= 5; d++) {
+  for (let d = 1; d <= 3; d++) {
     const day = todayStart - d * 24 * H;
     await hr.addManual(seeder, 'senopati', { staffId: 'budi', start: day + 9 * H, end: day + (d === 2 ? 19 : 17) * H, reason: 'Absensi demo' }, now);
     await hr.addManual(seeder, 'senopati', { staffId: 'sari', start: day + 13 * H, end: day + 21 * H, reason: 'Absensi demo' }, now);

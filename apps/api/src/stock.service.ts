@@ -224,12 +224,24 @@ export class StockService {
         // Bahan setengah jadi tanpa BOM tidak bisa diuraikan: pemakaian bahan bakunya akan diam-diam tidak terhitung.
         if (ing!.kind === 'SEMI') need((await q.query('select 1 from bom_line where parent_id = $1', [id])).rowCount > 0, `bahan setengah jadi ${id} belum punya BOM: isi BOM-nya dulu`);
       }
+      const beforeRows = (await q.query<{ ingredient_id: string; qty: number }>('select ingredient_id, qty from recipe_line where menu_id = $1 and option_id = $2', [menuId, optionId])).rows;
       await q.query('delete from recipe_line where menu_id = $1 and option_id = $2', [menuId, optionId]);
       for (const l of input.lines!) {
         await q.query('insert into recipe_line (tenant_id, menu_id, option_id, ingredient_id, qty) values ($1, $2, $3, $4, $5)', [auth.tenantId, menuId, optionId, l.ingredientId, l.qty]);
       }
+      await this.logChanges(q, auth, 'RECIPE', menuId, optionId, new Map(beforeRows.map((r) => [r.ingredient_id, r.qty])), new Map(input.lines!.map((l) => [l.ingredientId!, l.qty!])));
       await this.audit(q, auth, 'recipe.set', { menuId, optionId, lines: input.lines });
     });
+  }
+
+  /** Mencatat perubahan jumlah per bahan (dengan waktu layanan) untuk aturan R52; yang tidak berubah tidak dicatat. */
+  private async logChanges(q: Queryable, auth: ApiAuth, kind: 'RECIPE' | 'BOM', targetId: string, optionId: string, before: Map<string, number>, after: Map<string, number>, now = this.clock()) {
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      const b = before.get(id) ?? 0;
+      const a = after.get(id) ?? 0;
+      if (a === b) continue;
+      await q.query('insert into recipe_change (tenant_id, kind, target_id, option_id, ingredient_id, before_qty, after_qty, user_id, at_ms) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)', [auth.tenantId, kind, targetId, optionId, id, b, a, auth.userId, now]);
+    }
   }
 
   // ---------- BOM bahan setengah jadi ----------
@@ -255,6 +267,7 @@ export class StockService {
         if (problem === 'bahan tidak ditemukan') throw new NotFoundException(problem);
         throw new BadRequestException(problem);
       }
+      await this.logChanges(q, auth, 'BOM', parentId, '', defs.get(parentId) ?? new Map(), proposed.get(parentId)!);
       await q.query('delete from bom_line where parent_id = $1', [parentId]);
       for (const l of input.lines!) await q.query('insert into bom_line (tenant_id, parent_id, child_id, qty) values ($1, $2, $3, $4)', [auth.tenantId, parentId, l.ingredientId, l.qty]);
       await this.audit(q, auth, 'bom.set', { parentId, before: Object.fromEntries(defs.get(parentId) ?? []), after: Object.fromEntries(proposed.get(parentId)!) });

@@ -28,6 +28,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
   const [taxOnService, setTaxOnService] = useState(s.tax_on_service ?? true);
   const [rounding, setRounding] = useState(String(s.rounding_unit ?? 0));
   const [edcs, setEdcs] = useState(s.edcs);
+  const [staticQr, setStaticQr] = useState(s.static_qr_enabled ?? false);
   const [channels, setChannels] = useState<Record<string, string | null>>(() => Object.fromEntries((s.online_channels ?? []).map((c) => [c.channel, String(c.commissionPercent)])));
   const [perPoint, setPerPoint] = useState(String(s.loyalty_rupiah_per_point ?? 0));
   const [pointValue, setPointValue] = useState(String(s.loyalty_point_value ?? 0));
@@ -58,7 +59,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
       for (const no of nos) tables.push({ no, area: g.area.trim(), seats: Number(g.seats || 0) });
     }
     const r = await manage('PUT', `/v1/outlets/${s.id}/settings`, {
-      merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs, tables,
+      merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs, staticQrEnabled: staticQr, tables,
       onlineChannels: Object.entries(channels).filter(([, v]) => v !== null).map(([channel, v]) => ({ channel, commissionPercent: Number(v || 0) })),
       loyalty: { rupiahPerPoint: Number(perPoint || 0), pointValue: Number(pointValue || 0), maxRedeemPercent: Number(maxRedeem || 50) },
       policy: { secondApprovalAbove: Number(threshold), manualDiscountMaxPercent: Number(discount), employeeMealQuota: Number(mealQuota), holdBillMinutes: Number(hold) },
@@ -108,6 +109,10 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
         </div>
       ))}
       <p><button type="button" className="secondary" onClick={() => setEdcs([...edcs, { tid: '', bank: '', label: '' }])}>+ Tambah EDC</button></p>
+
+      <h3>QR statis</h3>
+      <label className="check-label"><input type="checkbox" checked={staticQr} onChange={(e) => setStaticQr(e.target.checked)} /> Izinkan QR statis cetak sebagai metode bayar</label>
+      <p className="muted small">Mati bawaan. QR statis tidak bisa dicocokkan dengan bank otomatis, dan bila outlet punya EDC setiap pemakaiannya menjadi temuan (R19). Aktifkan hanya bila EDC atau QR dinamis memang tidak tersedia.</p>
 
       <h3>Pesanan online</h3>
       <p className="muted small">Aktifkan platform yang dipakai outlet ini. Kasir lalu bisa membuat pesanan online (dibayar platform, tanpa diskon) dan laporan platform dicocokkan dengan POS di menu Pesanan Online. Komisi dipakai untuk perkiraan, angka sebenarnya dari laporan platform.</p>

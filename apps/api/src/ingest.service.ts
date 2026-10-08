@@ -29,7 +29,7 @@ const str = (p: Payload, k: string) => typeof p[k] === 'string' && p[k] !== '';
 const num = (p: Payload, k: string) => typeof p[k] === 'number' && Number.isFinite(p[k]);
 const bool = (p: Payload, k: string) => typeof p[k] === 'boolean';
 const oneOf = (p: Payload, k: string, values: readonly string[]) => typeof p[k] === 'string' && values.includes(p[k] as string);
-const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT', 'PLATFORM', 'DEPOSIT'] as const;
+const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT', 'PLATFORM', 'DEPOSIT', 'QR_STATIC'] as const;
 
 /** Layar dapur hanya mengubah status tiket (dan heartbeat); token yang bocor tidak boleh bisa memalsukan pembayaran. */
 const KDS_EVENT_TYPES: readonly EventType[] = ['kitchen.status_changed', 'device.heartbeat'];

@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { PosEvent } from '@pos/events';
 import {
-  buildIncidents, DEFAULT_CONFIG, evaluateCashMismatch, evaluatePatternRules, evaluateRules, type Capabilities, type Incident, type RuleHit,
+  buildIncidents, DEFAULT_CONFIG, evaluateBehaviorRules, evaluateCashMismatch, evaluatePatternRules, evaluateRules, type Capabilities, type Incident, type RuleHit,
 } from '@pos/rules';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { channelHits } from './channel.service';
+import { integrityHits } from './integrity-hits';
 import { reservationHits } from './reservation-hits';
 import { webOrderFacts } from './web-order-store';
 import { queueFacts } from './queue-store';
@@ -64,8 +65,8 @@ export class GuardService {
   async evaluate(tenantId: string, outletId: string, now = Date.now()): Promise<EvaluateResult> {
     return this.db.tenantTx(tenantId, async (q) => {
       const outlet = (
-        await q.query<{ capabilities: Capabilities; terminals: string[]; utc_offset_minutes: number; policy: { employeeMealQuota?: number } | null; shadow_days: number; shadow_started_ms: number | null }>(
-          'select capabilities, terminals, utc_offset_minutes, policy, shadow_days, shadow_started_ms from outlet where id = $1',
+        await q.query<{ capabilities: Capabilities; terminals: string[]; utc_offset_minutes: number; policy: { employeeMealQuota?: number } | null; shadow_days: number; shadow_started_ms: number | null; edcs: unknown[] }>(
+          'select capabilities, terminals, utc_offset_minutes, policy, shadow_days, shadow_started_ms, edcs from outlet where id = $1',
           [outletId],
         )
       ).rows[0];
@@ -118,8 +119,26 @@ export class GuardService {
       // Owner dan manager tidak diwajibkan absen (R42).
       const attendanceExempt = (await q.query<{ id: string }>("select id from staff where role in ('OWNER', 'MANAGER')")).rows.map((r) => r.id);
 
+      // Aturan perilaku (R11, R12, R13, R17, R19, R20) memakai jendela 14 hari dan hanya jenis event yang relevan.
+      const behaviorEvents = (
+        await q.query<EventRow>(
+          `select ${EVENT_COLUMNS} from event where outlet_id = $1 and device_time_ms >= $2
+             and type in ('order.created', 'void.approved', 'refund.created', 'discount.applied', 'receipt.declined', 'bill.printed', 'order.table_changed',
+                          'payment.received', 'payment.method_changed', 'drawer.opened', 'shift.opened', 'shift.closed', 'printer.status', 'printer.paper_claim')
+           order by device_id, seq`,
+          [outletId, now - DEFAULT_CONFIG.patternWindowMs],
+        )
+      ).rows.map(rowToEvent);
+      const behaviorHits = evaluateBehaviorRules({ events: behaviorEvents, now, emitFrom: from, dynamicQrAvailable: (outlet.edcs ?? []).length > 0, utcOffsetMinutes: outlet.utc_offset_minutes });
+      const integrity = (await integrityHits(q, outletId, from, now)).map((h): RuleHit => ({
+        rule: h.rule, key: h.key, weight: DEFAULT_CONFIG.weights[h.rule] ?? 0, modalities: ['POS'], outletId, terminalId: null, orderId: null, actorIds: h.actors,
+        at: h.at, windowStart: h.at, windowEnd: h.at, context: false, confidence: 'HIGH', note: h.note,
+      }));
+
       const hits = [
         ...loyaltyHits,
+        ...behaviorHits,
+        ...integrity,
         ...(await transferHits(q, outletId, now)).filter((t) => t.at >= from).map((t): RuleHit => ({
           rule: t.rule, key: t.key, weight: DEFAULT_CONFIG.weights[t.rule] ?? 0, modalities: ['POS'], outletId, terminalId: null, orderId: null, actorIds: [t.actor],
           at: t.at, windowStart: t.at, windowEnd: t.at, context: false, confidence: 'HIGH', note: t.note,

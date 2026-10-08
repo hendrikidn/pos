@@ -52,6 +52,8 @@ export interface PosConfig {
   edcs: Edc[];
   /** Kanal pesan-antar yang diaktifkan outlet beserta komisinya (dari server); kosong = tidak ada pesanan online. */
   channels?: { channel: OnlineChannel; commissionPercent: number }[];
+  /** QR statis cetak boleh dipakai sebagai metode bayar (diaktifkan owner; setiap pemakaian ditandai R19 bila ada EDC). */
+  staticQr?: boolean;
   /** Loyalty outlet (dari server); tidak ada = loyalty mati. */
   loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
   /** Promo aktif outlet (dari server). Kasir hanya memilih dari sini; kosong = tidak ada promo. */

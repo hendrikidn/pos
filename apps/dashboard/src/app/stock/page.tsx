@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { Shell } from '@/components/Shell';
 import { StockBoard } from '@/components/StockBoard';
-import { api, authed, type CountRow, type Me, type Outlet, type StockRow } from '@/lib/api';
+import { PaperPanel } from '@/components/PaperPanel';
+import { api, authed, type CountRow, type Me, type Outlet, type PaperRolls, type StockRow } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   const outlet = outlets.find((o) => o.id === sp.outlet) ?? outlets[0];
   if (!outlet) return <Shell me={me}><div className="empty">Belum ada outlet.</div></Shell>;
   const id = encodeURIComponent(outlet.id);
-  const [rows, counts] = await authed(() => Promise.all([api<StockRow[]>(`/v1/outlets/${id}/stock`), api<CountRow[]>(`/v1/outlets/${id}/stock/counts?limit=30`)]));
+  const [rows, counts, paper] = await authed(() => Promise.all([api<StockRow[]>(`/v1/outlets/${id}/stock`), api<CountRow[]>(`/v1/outlets/${id}/stock/counts?limit=30`), api<PaperRolls>(`/v1/outlets/${id}/paper-rolls`)]));
   const low = rows.filter((r) => r.status === 'LOW' || r.status === 'EMPTY').length;
 
   return (
@@ -29,6 +30,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
         </nav>
       )}
       <StockBoard outletId={outlet.id} rows={rows} counts={counts} />
+      <PaperPanel outletId={outlet.id} paper={paper} />
     </Shell>
   );
 }

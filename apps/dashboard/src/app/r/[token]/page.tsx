@@ -21,13 +21,13 @@ interface Receipt {
   rounding: number;
   total: number;
   paid: number;
-  payments: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT'; amount: number; at: number }[];
+  payments: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT' | 'QR_STATIC'; amount: number; at: number }[];
   refunded: number;
   voidedAt: number | null;
 }
 
 const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
-const METHOD: Record<string, string> = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Platform online', DEPOSIT: 'Uang muka reservasi' };
+const METHOD: Record<string, string> = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Platform online', DEPOSIT: 'Uang muka reservasi', QR_STATIC: 'QR statis' };
 const TYPE: Record<string, string> = { DINE_IN: 'Dine-in', TAKE_AWAY: 'Take-away', EMPLOYEE: 'Karyawan' };
 
 /** Struk digital untuk customer: halaman publik (alamatnya token acak dari QR), tanpa login dan tanpa data pribadi. */

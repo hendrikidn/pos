@@ -15,6 +15,17 @@ export interface EngineDeps {
   store: KeyValueStore;
   printer: Printer;
   now: () => number;
+  /** Pembuat token struk digital (22 karakter base64url). Bawaan: 128 bit acak dari WebCrypto. */
+  randomToken?: () => string;
+}
+
+/** 128 bit acak sebagai base64url tanpa padding (22 karakter). */
+export function randomReceiptToken(): string {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 export interface ApproverInput {
@@ -638,12 +649,32 @@ export class PosEngine {
     return ok({ order: o, change });
   }
 
+  /**
+   * Struk digital (QR) untuk order lunas. Idempoten: satu order satu token dan satu event; memanggilnya lagi hanya mengembalikan
+   * token yang sama. Struk digital dihitung sebagai struk yang diberikan (kecuali sudah dicetak), dan tidak memerlukan nomor HP.
+   */
+  async digitalReceipt(orderId: string): Promise<Result<{ token: string; order: OrderRecord }>> {
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    if (o.state.status !== 'PAID') return fail('NOT_PAID', 'Struk hanya untuk order yang sudah lunas.');
+    if (o.receipt === 'DECLINED') return fail('RECEIPT_DONE', 'Struk sudah dicatat tidak diberikan.');
+    if (!o.receiptToken) {
+      const token = (this.d.randomToken ?? randomReceiptToken)();
+      await this.emit({ type: 'receipt.digital', payload: { orderId, token } });
+      o.receiptToken = token;
+      if (o.receipt === 'NONE') o.receipt = 'DIGITAL';
+      await this.save(o);
+    }
+    return ok({ token: o.receiptToken, order: o });
+  }
+
   async printReceipt(orderId: string): Promise<Result<OrderRecord>> {
     const r = this.order(orderId);
     if (!r.ok) return r;
     const o = r.value;
     if (o.state.status !== 'PAID') return fail('NOT_PAID', 'Struk hanya untuk order yang sudah lunas.');
-    if (o.receipt !== 'NONE') return fail('RECEIPT_DONE', 'Struk sudah diproses.');
+    if (o.receipt === 'PRINTED' || o.receipt === 'DECLINED') return fail('RECEIPT_DONE', 'Struk sudah diproses.');
     if (!(await this.d.printer.print(renderReceipt(o, this.cfg)))) {
       return fail('PRINT_FAILED', 'Struk gagal dicetak. Periksa kertas, atau catat bahwa customer menolak struk.');
     }

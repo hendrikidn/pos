@@ -82,6 +82,11 @@ export type EventBody =
     }
   | { type: 'payment.method_changed'; payload: { orderId: string; from: PaymentMethod; to: PaymentMethod } }
   | { type: 'receipt.printed'; payload: { orderId: string } }
+  | {
+      type: 'receipt.digital';
+      /** Struk digital ditampilkan sebagai QR. `token`: 22 karakter base64url acak (128 bit) yang menjadi alamat struk di server. */
+      payload: { orderId: string; token: string };
+    }
   | { type: 'receipt.declined'; payload: { orderId: string; reason?: string } }
   | {
       type: 'void.approved';
@@ -120,7 +125,7 @@ export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
   'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
-  'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.declined', 'void.approved',
+  'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.digital', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',
 ] as const;
@@ -159,6 +164,9 @@ export type EventOf<T extends EventType> = Extract<PosEvent, { type: T }>;
 export type NewEvent = EventBody & { deviceTime: number; actorId?: string | null; clockOffsetMs?: number };
 
 type DistOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** Token struk digital: 22 karakter base64url (128 bit). */
+export const RECEIPT_TOKEN = /^[A-Za-z0-9_-]{22}$/;
 
 export const GENESIS_HASH = '0'.repeat(64);
 
@@ -296,6 +304,7 @@ export function orderIdOf(e: PosEvent): string | undefined {
     case 'payment.received':
     case 'payment.method_changed':
     case 'receipt.printed':
+    case 'receipt.digital':
     case 'receipt.declined':
     case 'void.approved':
       return e.payload.orderId;

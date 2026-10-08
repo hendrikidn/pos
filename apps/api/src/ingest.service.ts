@@ -1,6 +1,6 @@
 import { createPublicKey, verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { GENESIS_HASH, hashEvent, isEventType, type EventType, type PosEvent } from '@pos/events';
+import { GENESIS_HASH, hashEvent, isEventType, RECEIPT_TOKEN, type EventType, type PosEvent } from '@pos/events';
 import type { DeviceAuth } from './auth';
 import { Database } from './db/database';
 import { clampShadowStart, GO_LIVE_TYPES } from './shadow';
@@ -93,6 +93,7 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
   'payment.received': (p) => (str(p, 'orderId') && oneOf(p, 'method', METHODS) && num(p, 'amount') ? null : 'orderId/method/amount tidak valid'),
   'payment.method_changed': (p) => (str(p, 'orderId') && oneOf(p, 'from', METHODS) && oneOf(p, 'to', METHODS) ? null : 'field tidak valid'),
   'receipt.printed': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
+  'receipt.digital': (p) => (str(p, 'orderId') && typeof p['token'] === 'string' && RECEIPT_TOKEN.test(p['token']) ? null : 'orderId/token tidak valid'),
   'receipt.declined': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
   'void.approved': (p) =>
     str(p, 'orderId') && str(p, 'reasonCode') && num(p, 'amount') && Array.isArray(p['approverIds']) && (p['approverIds'] as unknown[]).every((a) => typeof a === 'string')

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import type { MenuItem, OrderRecord } from '@pos/pos-core';
 import { lineKey, VOID_REASONS } from '@pos/pos-core';
+import { Qr } from './Qr';
 import { MergeDialog, Modal, ModifierDialog, MoveTableDialog, NoteDialog, PayDialog, PinPad, SplitDialog } from './dialogs';
 import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, type Ctx } from './ui';
 
-type Dialog = 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null;
+type Dialog = 'qr' | 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null;
 
 export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
   const { engine, config } = ctx.rt;
@@ -157,10 +158,11 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
             {order.receipt === 'NONE' ? (
               <>
                 {(ctx.rt.engine.paperClaimActive() || ctx.rt.printerState() === 'paperOut') && (
-                  <p className="notice">Kertas habis. Tawarkan struk digital, atau catat bahwa struk tidak diberikan.</p>
+                  <p className="notice">Kertas habis. Struk digital (QR) dibuat otomatis dan tampil di layar customer; atau catat bahwa struk tidak diberikan.</p>
                 )}
                 <div className="actions wrap">
                   <button onClick={() => void run(ctx, () => engine.printReceipt(order.id))}>Cetak struk</button>
+                  <button className="secondary" onClick={() => void run(ctx, () => engine.digitalReceipt(order.id)).then((r) => r.ok && setDlg('qr'))}>Struk digital (QR)</button>
                   <button className="secondary" onClick={() => setDlg('decline')}>Struk tidak diberikan…</button>
                   <button className="secondary danger" onClick={() => setDlg('refund')}>Refund</button>
                   <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
@@ -168,8 +170,16 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
               </>
             ) : (
               <>
-                <p className="muted">{order.receipt === 'PRINTED' ? 'Struk dicetak.' : 'Struk tidak diberikan (tercatat).'}</p>
+                <p className="muted">
+                  {order.receipt === 'PRINTED' ? 'Struk dicetak.' : order.receipt === 'DIGITAL' ? 'Struk digital dibuat (QR di layar customer).' : 'Struk tidak diberikan (tercatat).'}
+                </p>
                 <div className="actions wrap">
+                  {order.receipt !== 'DECLINED' && (
+                    <button className="secondary" onClick={() => void run(ctx, () => engine.digitalReceipt(order.id)).then((r) => r.ok && setDlg('qr'))}>
+                      {order.receiptToken ? 'Tampilkan QR' : 'Struk digital (QR)'}
+                    </button>
+                  )}
+                  {order.receipt === 'DIGITAL' && <button className="secondary" onClick={() => void run(ctx, () => engine.printReceipt(order.id))}>Cetak struk</button>}
                   <button className="secondary danger" onClick={() => setDlg('refund')}>Refund</button>
                   <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
                 </div>
@@ -199,6 +209,16 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
             if (r.ok) setNoteFor(null);
           }}
         />
+      )}
+      {dlg === 'qr' && order.receiptToken && (
+        <Modal title="Struk digital" onClose={() => setDlg(null)}>
+          <div className="qr-box">
+            <Qr value={ctx.rt.receiptUrl(order.receiptToken)} size={260} label="Kode QR struk digital" />
+            <p className="muted">Customer memindai dengan kamera ponsel. Tidak perlu nomor HP. QR yang sama tampil di layar customer.</p>
+            <p className="small mono">{ctx.rt.receiptUrl(order.receiptToken)}</p>
+          </div>
+          <div className="actions"><button onClick={() => setDlg(null)}>Selesai</button></div>
+        </Modal>
       )}
       {dlg === 'table' && (
         <MoveTableDialog

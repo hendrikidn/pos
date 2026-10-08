@@ -90,6 +90,8 @@ export interface Runtime {
   posture(): Posture | null;
   config: PosConfig & { demoPins?: Record<string, string> };
   settings: Settings;
+  /** Alamat struk digital untuk QR: alamat dasar dari server (dashboard publik), atau alamat API terminal bila belum ada. */
+  receiptUrl(token: string): string;
   configStatus(): ConfigStatus;
   refreshConfig(): Promise<void>;
   syncStatus(): SyncStatus;
@@ -255,6 +257,7 @@ export async function createRuntime(): Promise<Boot> {
 
   const runtime: Runtime = {
     engine, printer, sim, escpos, config: engine.config, settings,
+    receiptUrl: (token) => `${engine.config.receiptBaseUrl ?? `${baseUrl}/r/`}${token}`,
     printerState: () => (sim ? (sim.paper ? 'ok' : 'paperOut') : printerState),
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,

@@ -10,6 +10,8 @@ export interface DeviceConfig {
   deviceId: string;
   /** Tidak ada pada konfigurasi lama: dianggap terminal. Layar dapur menerima staf dan menu kosong. */
   deviceKind?: 'terminal' | 'sensor' | 'kds';
+  /** Awal alamat struk digital (berakhiran "/r/"). */
+  receiptBaseUrl?: string;
   outlet: {
     id: string;
     merchantName: string;
@@ -26,6 +28,7 @@ export function toPosConfig(c: DeviceConfig): PosConfig {
     outletId: c.outlet.id,
     deviceId: c.deviceId,
     merchantName: c.outlet.merchantName,
+    ...(c.receiptBaseUrl ? { receiptBaseUrl: c.receiptBaseUrl } : {}),
     taxPercent: c.outlet.taxPercent,
     edcs: c.outlet.edcs,
     staff: c.staff,

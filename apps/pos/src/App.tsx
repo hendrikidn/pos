@@ -61,13 +61,25 @@ function Pos() {
     if (!rt) return;
     const send = () => {
       const v = rt.engine.customerView(selected);
-      const view = v ? ({ ...v, paperClaim: rt.engine.paperClaimActive() } satisfies DisplayView) : null;
+      const token = selected ? rt.engine.getOrder(selected)?.receiptToken : undefined;
+      const view = v
+        ? ({ ...v, paperClaim: rt.engine.paperClaimActive(), ...(token && v.status === 'PAID' ? { receiptUrl: rt.receiptUrl(token) } : {}) } satisfies DisplayView)
+        : null;
       channel.current?.postMessage(view);
       if (isNative) void hardware.displayShow({ view: JSON.stringify(view) }).catch(() => undefined);
     };
     send();
     const ch = channel.current;
     if (ch) ch.onmessage = (e) => e.data?.hello && send();
+  });
+
+  // Kertas habis (printer melapor atau klaim kasir): struk digital dibuat otomatis begitu order lunas dan QR-nya tampil di layar customer.
+  useEffect(() => {
+    if (!rt || !selected) return;
+    const o = rt.engine.getOrder(selected);
+    if (o && o.state.status === 'PAID' && o.receipt === 'NONE' && (rt.engine.paperClaimActive() || rt.printerState() === 'paperOut')) {
+      void rt.engine.digitalReceipt(o.id).then(bump);
+    }
   });
 
   if (!boot) return <div className="boot">Memuat…</div>;

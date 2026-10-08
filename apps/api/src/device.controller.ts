@@ -2,6 +2,7 @@ import { Body, Controller, Delete, ForbiddenException, Get, Inject, Param, Post,
 import { Public, requireApi, requireDevice, type AuthedRequest } from './auth';
 import { DeviceService } from './device.service';
 import { KdsService } from './kds.service';
+import { ReceiptService } from './receipt.service';
 import { PairingService, type PairingInput } from './pairing.service';
 
 @Controller('v1')
@@ -10,6 +11,7 @@ export class DeviceController {
     @Inject(DeviceService) private readonly devices: DeviceService,
     @Inject(PairingService) private readonly pairing: PairingService,
     @Inject(KdsService) private readonly kds: KdsService,
+    @Inject(ReceiptService) private readonly receipts: ReceiptService,
   ) {}
 
   /** Owner/ops membuat kode pairing sekali pakai (berlaku 15 menit) untuk perangkat baru. */
@@ -56,6 +58,13 @@ export class DeviceController {
     const device = requireDevice(req);
     if (device.deviceKind === 'sensor') throw new ForbiddenException('jenis perangkat ini tidak membaca tiket dapur');
     return this.kds.board(device);
+  }
+
+  /** Struk digital untuk customer (halaman /r/<token> di dashboard memanggil ini). Publik: tokennya sendiri yang menjadi kredensial. */
+  @Public()
+  @Get('receipts/:token')
+  receipt(@Param('token') token: string, @Req() req: AuthedRequest & { ip?: string }) {
+    return this.receipts.byToken(token, req.ip ?? 'unknown');
   }
 
   @Get('devices')

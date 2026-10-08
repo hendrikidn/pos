@@ -33,6 +33,8 @@ export interface PosConfig {
   outletId: string;
   deviceId: string;
   merchantName: string;
+  /** Awal alamat struk digital (berakhiran "/r/"); bila kosong, terminal memakai alamat API-nya. */
+  receiptBaseUrl?: string;
   /** Persen PBJT yang dikenakan setelah diskon */
   taxPercent: number;
   edcs: Edc[];
@@ -68,7 +70,8 @@ export interface PaymentRecord {
   at: number;
 }
 
-export type ReceiptStatus = 'NONE' | 'PRINTED' | 'DECLINED';
+/** DIGITAL: struk diberikan sebagai QR (tanpa kertas). */
+export type ReceiptStatus = 'NONE' | 'PRINTED' | 'DIGITAL' | 'DECLINED';
 
 export interface OrderRecord {
   id: string;
@@ -87,6 +90,8 @@ export interface OrderRecord {
   refunds: { amount: number; method: PaymentMethod }[];
   receipt: ReceiptStatus;
   kitchen: KitchenStatus | null;
+  /** Token struk digital (QR) bila sudah dibuat; satu order satu token. */
+  receiptToken?: string;
   /** Kapan bill pertama kali dicetak (jam perangkat). Dasar kontrol bill yang ditahan lama. */
   billedAt?: number;
   /** Alasan menahan bill sudah dicatat; pembayaran berikutnya untuk order ini tidak menanyakannya lagi. */

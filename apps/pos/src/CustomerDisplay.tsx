@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Qr } from './Qr';
 import { rp } from './ui';
 
 export interface DisplayView {
@@ -7,6 +8,8 @@ export interface DisplayView {
   totals: { subtotal: number; discount: number; tax: number; total: number };
   status: string;
   paperClaim: boolean;
+  /** Alamat struk digital; bila ada, layar menampilkan QR-nya. */
+  receiptUrl?: string;
 }
 
 export const DISPLAY_CHANNEL = 'pos-display';
@@ -36,6 +39,12 @@ export function CustomerDisplay() {
       {view.totals.tax > 0 && <p className="row"><span>PBJT</span><b>{rp(view.totals.tax)}</b></p>}
       <p className="row total"><span>Total</span><b>{rp(view.totals.total)}</b></p>
       {view.status === 'PAID' && <p className="thanks">Terima kasih. Pembayaran diterima.</p>}
+      {view.receiptUrl && (
+        <div className="display-qr">
+          <Qr value={view.receiptUrl} size={220} label="Kode QR struk digital" />
+          <p><b>Struk digital</b><br />Pindai dengan kamera ponsel. Tanpa nomor HP.</p>
+        </div>
+      )}
       {view.status !== 'PAID' && view.status !== 'DRAFT' && (
         <p className="verify">Bayar hanya ke QR atau mesin EDC resmi <b>{view.merchantName}</b>.</p>
       )}

@@ -276,3 +276,9 @@ main { flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch
 }
 
 .pill.s-HOLD { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-line); }
+
+/* Struk digital (QR) */
+.qr-box { display: grid; justify-items: center; gap: 8px; text-align: center; margin-top: 8px; }
+.qr-box .qr { border-radius: 10px; border: 1px solid var(--line); max-width: 100%; height: auto; }
+.qr-box .mono { word-break: break-all; color: var(--muted); }
+.display-qr { display: flex; align-items: center; gap: 24px; margin-top: 24px; } .display-qr .qr { border-radius: 12px; flex: none; } .display-qr p { font-size: 22px; line-height: 1.35; margin: 0; }

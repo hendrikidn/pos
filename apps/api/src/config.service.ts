@@ -101,6 +101,8 @@ export interface DeviceConfig {
   deviceId: string;
   /** Jenis perangkat: layar dapur tidak menerima staf dan menu. */
   deviceKind: DeviceAuth['deviceKind'];
+  /** Awal alamat struk digital (sudah berakhiran "/r/"); QR di layar customer = ini + token. Kosong = pakai alamat API terminal. */
+  receiptBaseUrl?: string;
   outlet: {
     id: string;
     merchantName: string;
@@ -117,6 +119,7 @@ export class ConfigService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject('PIN_ITERATIONS') private readonly iterations: number,
+    @Inject('DASHBOARD_URL') private readonly dashboardUrl: string | undefined,
   ) {}
 
   private audit(q: Queryable, auth: ApiAuth, action: string, detail: object) {
@@ -362,7 +365,9 @@ export class ConfigService {
           [device.outletId],
         )
       ).rows.map(({ modifier_groups, ...m }): DeviceConfig['menu'][number] => (modifier_groups.length > 0 ? { ...m, modifierGroups: modifier_groups } : m));
+      const receiptBaseUrl = this.dashboardUrl ? `${this.dashboardUrl.replace(/\/$/, '')}/r/` : undefined;
       const body = {
+        ...(receiptBaseUrl ? { receiptBaseUrl } : {}),
         outlet: { id: o.id, merchantName: o.merchant_name ?? o.name, taxPercent: o.tax_percent, edcs: o.edcs, policy: o.policy },
         staff: staff.map((s) => ({ id: s.id, name: s.name, role: s.role, salt: s.pin_salt, hash: s.pin_hash, iterations: s.pin_iterations })),
         menu,

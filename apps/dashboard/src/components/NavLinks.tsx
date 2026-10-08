@@ -18,6 +18,10 @@ export function NavLinks({ role }: { role: string }) {
       show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
     },
     {
+      href: '/procurement', label: 'Pengadaan', icon: <IconBox />, on: path.startsWith('/procurement'),
+      show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
+    },
+    {
       href: '/settlements', label: 'Settlement', icon: <IconCard />, on: path.startsWith('/settlements'),
       show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
     },

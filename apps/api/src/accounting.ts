@@ -16,6 +16,9 @@ export const SYSTEM = {
   cash: '1-1100',
   digital: '1-1200',
   platform: '1-1210',
+  bank: '1-1300',
+  inventory: '1-1400',
+  payable: '2-1100',
   commission: '6-5100',
   sales: '4-1000',
   service: '4-1100',
@@ -208,11 +211,31 @@ export function buildChannelJournal(rows: { date: string; gross: number; commiss
     const fee = d.gross - d.net;
     const lines: JournalLine[] = [
       { account: SYSTEM.platform, debit: 0, credit: d.gross },
-      { account: '1-1300', debit: d.net, credit: 0 },
+      { account: SYSTEM.bank, debit: d.net, credit: 0 },
       { account: SYSTEM.commission, debit: fee, credit: 0 },
     ].filter((l) => l.debit !== 0 || l.credit !== 0);
     return { ref: `JU-PLT-${outletId}-${date.replace(/-/g, '')}`, date, memo: `Penyelesaian platform pesan-antar ${date} (${d.n} pesanan)`, source: 'POS' as const, lines, ...(fee !== d.commission ? { notes: ['potongan platform tidak sama dengan komisi yang tercantum; selisihnya dibukukan sebagai beban komisi'] } : {}) };
   });
+}
+
+/**
+ * Jurnal pengadaan: penerimaan barang menambah persediaan dan utang usaha (Dr Persediaan, Cr Utang Usaha); pembayaran supplier melunasi utang
+ * (Dr Utang Usaha, Cr Kas untuk tunai atau Bank untuk transfer). Satu jurnal per penerimaan dan per pembayaran.
+ */
+export function buildPurchaseJournal(
+  receipts: { id: number; date: string; amount: number; invoiceRef: string | null; supplier: string }[],
+  payments: { id: number; date: string; amount: number; method: 'TUNAI' | 'TRANSFER'; supplier: string }[],
+): JournalEntry[] {
+  return [
+    ...receipts.filter((r) => r.amount > 0).map((r): JournalEntry => ({
+      ref: `JU-BELI-${r.id}`, date: r.date, memo: `Pembelian dari ${r.supplier}${r.invoiceRef ? ` (faktur ${r.invoiceRef})` : ''}`, source: 'POS',
+      lines: [{ account: SYSTEM.inventory, debit: r.amount, credit: 0 }, { account: SYSTEM.payable, debit: 0, credit: r.amount }],
+    })),
+    ...payments.map((p): JournalEntry => ({
+      ref: `JU-BAYAR-${p.id}`, date: p.date, memo: `Pembayaran ke ${p.supplier}`, source: 'POS',
+      lines: [{ account: SYSTEM.payable, debit: p.amount, credit: 0 }, { account: p.method === 'TUNAI' ? SYSTEM.cash : SYSTEM.bank, debit: 0, credit: p.amount }],
+    })),
+  ];
 }
 
 export interface TrialRow {

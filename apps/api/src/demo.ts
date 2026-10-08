@@ -6,6 +6,7 @@ import type { ApiAuth } from './auth';
 import { ConfigService } from './config.service';
 import { BillingService } from './billing.service';
 import { ChannelService } from './channel.service';
+import { PurchaseService } from './purchase.service';
 import { MemberService } from './member.service';
 import { StockService } from './stock.service';
 import { createApp } from './bootstrap';
@@ -327,6 +328,15 @@ async function main() {
   // Opname biji 6 jam lalu: 12% lebih sedikit dari perkiraan (selisih kurang yang ditandai).
   const beans = (await stockSvc.stock(seeder, 'senopati', now - 6 * H)).find((r) => r.ingredientId === 'biji')!;
   await mv(6, 'biji', 'COUNT', Math.round((beans.expected ?? 0) * 0.88));
+
+  // Pengadaan: dua supplier, satu PO sudah diterima sebagian (satu baris harganya di atas PO) dan satu PO masih draf.
+  const buy = app.get(PurchaseService);
+  await buy.createSupplier(seeder, { id: 'kopi-nusantara', name: 'Kopi Nusantara', phone: '0812 3000 1000' });
+  await buy.createSupplier(seeder, { id: 'susu-segar', name: 'Peternakan Susu Segar', phone: '0813 4000 2000' });
+  const po1 = await buy.createPo(seeder, { outletId: 'senopati', supplierId: 'kopi-nusantara', expectedDate: '2026-10-09', note: 'Stok mingguan', lines: [{ ingredientId: 'biji', qty: 10_000, unitCost: 0.12 }, { ingredientId: 'bubuk-matcha', qty: 1_000, unitCost: 0.4 }] });
+  await buy.orderPo(seeder, po1.id);
+  await buy.receive(seeder, po1.id, { invoiceRef: 'KN-2210', lines: [{ lineNo: 1, qty: 6_000, unitCost: 0.14 }] });
+  await buy.createPo(seeder, { outletId: 'senopati', supplierId: 'susu-segar', lines: [{ ingredientId: 'susu', qty: 30_000, unitCost: 0.0175 }, { ingredientId: 'oat', qty: 10_000, unitCost: 0.04 }] });
 
   const open = await call('/v1/outlets/senopati/incidents', owner);
   const old = open.find((i: { order_ids: string[] }) => i.order_ids.includes('A-007'));

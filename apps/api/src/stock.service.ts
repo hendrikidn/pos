@@ -44,8 +44,8 @@ export class StockService {
 
   listIngredients(auth: ApiAuth): Promise<IngredientInfo[]> {
     return this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query<{ id: string; name: string; unit: IngredientInfo['unit']; min_stock: number; active: boolean }>('select id, name, unit, min_stock, active from ingredient order by name')).rows
-        .map((r) => ({ id: r.id, name: r.name, unit: r.unit, minStock: r.min_stock, active: r.active })),
+      (await q.query<{ id: string; name: string; unit: IngredientInfo['unit']; min_stock: number; active: boolean; avg_cost: string }>('select id, name, unit, min_stock, active, avg_cost from ingredient order by name')).rows
+        .map((r) => ({ id: r.id, name: r.name, unit: r.unit, minStock: r.min_stock, active: r.active, avgCost: Number(r.avg_cost) })),
     );
   }
 
@@ -228,6 +228,15 @@ export class StockService {
       ).rows[0]!;
       return toMovement(r);
     });
+  }
+
+  /** Stok yang diperkirakan satu bahan di satu outlet sekarang (null bila belum pernah dihitung fisik). Dipakai pengadaan untuk menimbang harga rata-rata. */
+  async onHand(q: Queryable, outletId: string, ingredientId: string, now: number): Promise<number | null> {
+    const movements = await this.loadMovements(q, outletId, ingredientId);
+    const from = earliestBaseline(movements);
+    if (from === null) return null;
+    const consumption = await this.consumptionSince(q, outletId, from, now);
+    return stockAt(ingredientId, movements, consumption, await this.loadRecipes(q), now).expected;
   }
 
   /** Riwayat hitung fisik (opname) dengan selisihnya, terbaru dulu, dengan penanda selisih di atas toleransi. */

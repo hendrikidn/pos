@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { ApiAuth } from './auth';
 import {
-  buildChannelJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
+  buildChannelJournal, buildPurchaseJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
   type Account, type AccountType, type JournalEntry,
 } from './accounting';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
@@ -10,7 +10,7 @@ import type { Queryable } from './db/driver';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { resolveRange } from './report-range';
 import { toCsv } from './sales-export';
-import { DAY_MS, startOfLocalDay } from './sales-report';
+import { DAY_MS, localDate, startOfLocalDay } from './sales-report';
 
 const CODE_RE = /^[0-9]-[0-9]{4}$/;
 const TYPES: AccountType[] = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
@@ -153,7 +153,19 @@ export class AccountingService {
     const platform = (
       await q.query<{ date: string; gross: number; commission: number; net: number }>('select date, gross, commission, net from channel_order where outlet_id = $1 and date >= $2 and date <= $3', [outletId, r.from, r.to])
     ).rows;
-    return [...auto, ...buildChannelJournal(platform, outletId), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
+    const receipts = (
+      await q.query<{ id: string; received_at_ms: number; amount: string; invoice_ref: string | null; supplier: string }>(
+        `select r.id, r.received_at_ms, r.amount, r.invoice_ref, s.name as supplier from purchase_receipt r join supplier s on s.tenant_id = r.tenant_id and s.id = r.supplier_id
+         where r.outlet_id = $1 and r.received_at_ms >= $2 and r.received_at_ms < $3`, [outletId, fromMs, toMs],
+      )
+    ).rows.map((x) => ({ id: Number(x.id), date: localDate(Number(x.received_at_ms), r.off), amount: Number(x.amount), invoiceRef: x.invoice_ref, supplier: x.supplier }));
+    const payments = (
+      await q.query<{ id: string; paid_date: string; amount: string; method: 'TUNAI' | 'TRANSFER'; supplier: string }>(
+        `select p.id, p.paid_date, p.amount, p.method, s.name as supplier from supplier_payment p join supplier s on s.tenant_id = p.tenant_id and s.id = p.supplier_id
+         where p.outlet_id = $1 and p.paid_date >= $2 and p.paid_date <= $3`, [outletId, r.from, r.to],
+      )
+    ).rows.map((x) => ({ id: Number(x.id), date: x.paid_date, amount: Number(x.amount), method: x.method, supplier: x.supplier }));
+    return [...auto, ...buildChannelJournal(platform, outletId), ...buildPurchaseJournal(receipts, payments), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
   }
 
   /** Jurnal outlet pada rentang, ditambah daftar jurnal manual (termasuk yang dibatalkan) untuk pengelolaan. */

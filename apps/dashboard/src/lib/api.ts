@@ -394,3 +394,14 @@ export interface OnlineReconciliation {
   missing: { channel: OnlineChannelId; ref: string; date: string; amount: number; orderId: string; actorId: string | null; status: 'MISSING' | 'NO_REPORT' }[];
   totals: { orders: number; gross: number; commission: number; net: number };
 }
+
+export interface SupplierRow { id: string; name: string; phone: string | null; note: string | null; active: boolean }
+export interface PayableRow { supplierId: string; name: string; billed: number; paid: number; owed: number; flaggedReceipts: number; lastPaidDate: string | null }
+export type PoStatus = 'DRAFT' | 'ORDERED' | 'PARTIAL' | 'RECEIVED' | 'CANCELED';
+export interface PoRow { id: number; outletId: string; supplierId: string; supplierName: string; status: PoStatus; expectedDate: string | null; note: string | null; createdBy: string; createdAt: string; total: number; receivedAmount: number }
+export interface PoDetail {
+  id: number; outletId: string; supplierId: string; status: PoStatus; expectedDate: string | null; note: string | null; createdBy: string; cancelReason: string | null;
+  lines: { lineNo: number; ingredientId: string; name: string; unit: string; qty: number; unitCost: number; receivedQty: number }[];
+  receipts: { id: number; receivedAt: number; receivedBy: string; invoiceRef: string | null; amount: number; priceFlag: boolean }[];
+}
+export interface IngredientCostRow { id: string; name: string; unit: 'g' | 'ml' | 'pcs'; active: boolean; avgCost?: number }

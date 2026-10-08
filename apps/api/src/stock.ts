@@ -21,6 +21,8 @@ export interface IngredientInfo {
   unit: 'g' | 'ml' | 'pcs';
   minStock: number;
   active: boolean;
+  /** Harga pokok rata-rata per satuan terkecil (rupiah); 0 = belum pernah dibeli lewat pengadaan. Hanya pada daftar bahan. */
+  avgCost?: number;
 }
 
 export interface StockPosition {

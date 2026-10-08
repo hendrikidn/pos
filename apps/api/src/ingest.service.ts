@@ -29,7 +29,7 @@ const str = (p: Payload, k: string) => typeof p[k] === 'string' && p[k] !== '';
 const num = (p: Payload, k: string) => typeof p[k] === 'number' && Number.isFinite(p[k]);
 const bool = (p: Payload, k: string) => typeof p[k] === 'boolean';
 const oneOf = (p: Payload, k: string, values: readonly string[]) => typeof p[k] === 'string' && values.includes(p[k] as string);
-const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const;
+const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT', 'PLATFORM'] as const;
 
 /** Layar dapur hanya mengubah status tiket (dan heartbeat); token yang bocor tidak boleh bisa memalsukan pembayaran. */
 const KDS_EVENT_TYPES: readonly EventType[] = ['kitchen.status_changed', 'device.heartbeat'];
@@ -96,6 +96,7 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     if (p['items'] === undefined) return 'items wajib';
     return badItems(p);
   },
+  'order.channel_linked': (p) => (str(p, 'orderId') && oneOf(p, 'channel', ['GOFOOD', 'GRABFOOD', 'SHOPEEFOOD']) && typeof p['ref'] === 'string' && /^[A-Za-z0-9._-]{3,30}$/.test(p['ref']) ? null : 'orderId/channel/ref tidak valid'),
   'order.member_linked': (p) => (str(p, 'orderId') && str(p, 'memberId') && (p['memberId'] as string).length <= 40 ? null : 'orderId/memberId tidak valid'),
   'order.handoff_reclaimed': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
   'bill.hold_reason': (p) =>

@@ -8,7 +8,8 @@ import { OrderPanel } from './OrderPanel';
 import { TableMap } from './TableMap';
 import { hardware, isNative, kioskWanted, loadPrinterSetting, savePrinterSetting, setKioskWanted, type PrinterKind } from './native';
 import { createRuntime, saveSettings, setDemo, type Boot, type Runtime } from './runtime';
-import { isActive, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, TYPE_LABEL, type Ctx } from './ui';
+import type { OnlineChannel } from '@pos/events';
+import { CHANNEL_LABEL, isActive, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, TYPE_LABEL, type Ctx } from './ui';
 
 type Tab = 'order' | 'dapur' | 'shift' | 'pengaturan';
 
@@ -185,7 +186,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
 
 function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   const { engine } = ctx.rt;
-  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | null>(null);
+  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | 'online' | null>(null);
   const [table, setTable] = useState('');
   const incoming = ctx.rt.handoffs().incoming;
   const shift = engine.currentShift();
@@ -216,6 +217,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           <button onClick={() => void create('TAKE_AWAY')}>+ Take-away</button>
           <button className="secondary" onClick={() => setAsking(engine.config.tables?.length ? 'tables' : 'table')}>+ Dine-in</button>
           <button className="secondary" onClick={() => setAsking('employee')}>+ Karyawan</button>
+          {(engine.config.channels?.length ?? 0) > 0 && <button className="secondary" onClick={() => setAsking('online')}>+ Online</button>}
           {incoming.length > 0 && <button className="incoming" onClick={() => setAsking('incoming')}>Order masuk · {incoming.length}</button>}
         </div>
         <ul className="strip-list" aria-label="Order di shift ini">
@@ -247,6 +249,19 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           <div className="actions"><button disabled={!table} onClick={() => void create('DINE_IN', { tableNo: table })}>Buat order</button></div>
         </Modal>
       )}
+      {asking === 'online' && (
+        <OnlineDialog
+          channels={engine.config.channels!.map((c) => c.channel)}
+          onClose={() => setAsking(null)}
+          onCreate={async (channel, ref) => {
+            const r = await engine.createOnlineOrder(channel, ref);
+            ctx.bump();
+            if (!r.ok) return ctx.toast(r.message, 'error');
+            ctx.selectOrder(r.value.id);
+            setAsking(null);
+          }}
+        />
+      )}
       {asking === 'incoming' && <IncomingDialog ctx={ctx} onClose={() => setAsking(null)} />}
       {asking === 'employee' && (
         <Modal title="Order karyawan" onClose={() => setAsking(null)}>
@@ -259,6 +274,28 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Pesanan dari platform pesan-antar: pilih kanal dan ketik nomor pesanan seperti tertera di aplikasi platform. */
+function OnlineDialog({ channels, onClose, onCreate }: { channels: OnlineChannel[]; onClose: () => void; onCreate: (c: OnlineChannel, ref: string) => Promise<void> }) {
+  const [channel, setChannel] = useState<OnlineChannel>(channels[0]!);
+  const [ref, setRef] = useState('');
+  const [busy, setBusy] = useState(false);
+  return (
+    <Modal title="Pesanan online" onClose={onClose}>
+      <div className="seg">
+        {channels.map((c) => <button key={c} className={channel === c ? 'on' : ''} onClick={() => setChannel(c)}>{CHANNEL_LABEL[c]}</button>)}
+      </div>
+      <label className="field">Nomor pesanan di aplikasi {CHANNEL_LABEL[channel]}
+        <input value={ref} onChange={(e) => setRef(e.target.value.replace(/[^A-Za-z0-9._-]/g, ''))} maxLength={30} placeholder="mis. GF-123456" autoFocus />
+      </label>
+      <p className="muted">Pesanan dibayar platform sebesar tagihan, tanpa diskon. Nomor ini dicocokkan dengan laporan platform; nomor yang tidak ada di sana atau dipakai dua kali ditandai sebagai temuan.</p>
+      <div className="actions">
+        <button className="secondary" onClick={onClose}>Batal</button>
+        <button disabled={busy || ref.trim().length < 3} onClick={async () => { setBusy(true); await onCreate(channel, ref); setBusy(false); }}>Buat order</button>
+      </div>
+    </Modal>
   );
 }
 

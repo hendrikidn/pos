@@ -3,14 +3,17 @@ import type { OrderRecord } from '@pos/pos-core';
 import { HOLD_REASONS } from '@pos/order';
 import { Modal } from './dialogs';
 import { Qr } from './Qr';
-import { METHOD_LABEL, orderLabel, rp, run, type Ctx } from './ui';
+import { CHANNEL_LABEL, METHOD_LABEL, orderLabel, rp, run, type Ctx } from './ui';
 
-type Method = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT';
+type Method = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM';
 const METHODS: Method[] = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'];
 
 /** Logo sederhana per metode, digambar langsung agar tidak perlu berkas gambar dan tetap tampil saat offline. */
 export function MethodIcon({ method }: { method: Method }) {
   const common = { width: 28, height: 28, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
+  if (method === 'PLATFORM') {
+    return <svg {...common}><rect x="3" y="8" width="13" height="9" rx="1.5" /><path d="M16 11h3l2 2.5V17h-5" /><circle cx="7" cy="18" r="1.8" /><circle cx="17" cy="18" r="1.8" /></svg>;
+  }
   if (method === 'CASH') {
     return <svg {...common}><rect x="2.5" y="6.5" width="19" height="11" rx="2" /><circle cx="12" cy="12" r="2.6" /><path d="M6 9.5v.01M18 14.5v.01" /></svg>;
   }
@@ -29,7 +32,8 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
   const { engine, config } = ctx.rt;
   const totals = engine.totals(order);
   const due = engine.outstanding(order);
-  const [method, setMethod] = useState<Method>('CASH');
+  const online = !!order.channel;
+  const [method, setMethod] = useState<Method>(online ? 'PLATFORM' : 'CASH');
   const [tendered, setTendered] = useState('');
   const [tid, setTid] = useState(config.edcs[0]?.tid ?? '');
   const [code, setCode] = useState('');
@@ -116,7 +120,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
 
       <div className="pay-body">
         <nav className="pay-methods" aria-label="Metode pembayaran">
-          {METHODS.map((m) => (
+          {(online ? (['PLATFORM'] as Method[]) : METHODS).map((m) => (
             <button key={m} type="button" className={method === m ? 'on' : ''} aria-pressed={method === m} onClick={() => setMethod(m)}>
               <MethodIcon method={m} />
               <span>{METHOD_LABEL[m]}</span>
@@ -134,18 +138,24 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
             </ul>
           )}
 
-          <label className="field">Nominal yang dibayar sekarang
-            <input inputMode="numeric" value={part} onChange={(e) => setPart(e.target.value.replace(/\D/g, ''))} placeholder={String(due)} />
-          </label>
-          <div className="quick" aria-label="Bagi rata">
-            <button type="button" className="secondary" onClick={() => setPart('')}>Penuh</button>
-            {[2, 3, 4].map((n) => (
-              <button key={n} type="button" className="secondary" onClick={() => setPart(String(Math.min(due, Math.ceil(due / n))))}>Bagi {n}</button>
-            ))}
-          </div>
-          {partial && <p className="notice">Pembayaran sebagian. Sisa {rp(due - amount)} dibayar kemudian (metode boleh berbeda).</p>}
+          {online ? (
+            <p className="notice">Pesanan {CHANNEL_LABEL[order.channel!.channel]} nomor <b>{order.channel!.ref}</b> dibayar oleh platform sebesar seluruh tagihan. Pastikan pesanan ini memang ada di aplikasi {CHANNEL_LABEL[order.channel!.channel]}: pesanan fiktif ditandai saat rekonsiliasi.</p>
+          ) : (
+            <>
+              <label className="field">Nominal yang dibayar sekarang
+                <input inputMode="numeric" value={part} onChange={(e) => setPart(e.target.value.replace(/\D/g, ''))} placeholder={String(due)} />
+              </label>
+              <div className="quick" aria-label="Bagi rata">
+                <button type="button" className="secondary" onClick={() => setPart('')}>Penuh</button>
+                {[2, 3, 4].map((n) => (
+                  <button key={n} type="button" className="secondary" onClick={() => setPart(String(Math.min(due, Math.ceil(due / n))))}>Bagi {n}</button>
+                ))}
+              </div>
+              {partial && <p className="notice">Pembayaran sebagian. Sisa {rp(due - amount)} dibayar kemudian (metode boleh berbeda).</p>}
+            </>
+          )}
 
-          {method === 'CASH' ? (
+          {method === 'PLATFORM' ? null : method === 'CASH' ? (
             <>
               {needReason && (
                 <fieldset className="opt-group">
@@ -203,7 +213,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
           disabled={busy || !amountOk || (needReason && !holdReason) || (method === 'CASH' && cash > 0 && cash < amount)}
           onClick={submit}
         >
-          Pakai {METHOD_LABEL[method]} · {rp(amountOk ? amount : 0)}
+          {method === 'PLATFORM' ? 'Catat dibayar platform' : `Pakai ${METHOD_LABEL[method]}`} · {rp(amountOk ? amount : 0)}
         </button>
       </div>
     </Modal>

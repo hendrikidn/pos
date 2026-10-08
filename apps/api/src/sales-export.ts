@@ -16,7 +16,7 @@ export interface ExportTable {
   rows: (string | number)[][];
 }
 
-const METHOD = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit' } as const;
+const METHOD = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Platform online' } as const;
 const TYPE = { DINE_IN: 'Dine-in', TAKE_AWAY: 'Take-away', EMPLOYEE: 'Karyawan' } as const;
 
 /**

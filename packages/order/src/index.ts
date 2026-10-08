@@ -3,7 +3,7 @@ export * from './consumption';
 export * from './receipt';
 export * from './kds';
 export * from './modifiers';
-import type { EventBody, KitchenStatus, OrderType, PosEvent } from '@pos/events';
+import type { EventBody, KitchenStatus, OrderType, PaymentMethod, PosEvent } from '@pos/events';
 
 export type Role = 'CASHIER' | 'SUPERVISOR' | 'MANAGER' | 'OWNER';
 const RANK: Record<Role, number> = { CASHIER: 0, SUPERVISOR: 1, MANAGER: 2, OWNER: 3 };
@@ -222,7 +222,7 @@ export interface RefundCommand {
   refundId: string;
   approverId: string;
   amount: number;
-  method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT';
+  method: PaymentMethod;
 }
 
 /**

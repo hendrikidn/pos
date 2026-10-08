@@ -57,6 +57,7 @@ describe('laporan penjualan: satu hari', () => {
       { method: 'QRIS', payments: 1, amount: 30_000 },
       { method: 'EDC_DEBIT', payments: 0, amount: 0 },
       { method: 'EDC_CREDIT', payments: 0, amount: 0 },
+      { method: 'PLATFORM', payments: 0, amount: 0 },
     ]);
   });
 

@@ -28,6 +28,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
   const [taxOnService, setTaxOnService] = useState(s.tax_on_service ?? true);
   const [rounding, setRounding] = useState(String(s.rounding_unit ?? 0));
   const [edcs, setEdcs] = useState(s.edcs);
+  const [channels, setChannels] = useState<Record<string, string | null>>(() => Object.fromEntries((s.online_channels ?? []).map((c) => [c.channel, String(c.commissionPercent)])));
   const [perPoint, setPerPoint] = useState(String(s.loyalty_rupiah_per_point ?? 0));
   const [pointValue, setPointValue] = useState(String(s.loyalty_point_value ?? 0));
   const [maxRedeem, setMaxRedeem] = useState(String(s.loyalty_max_redeem_percent ?? 50));
@@ -58,6 +59,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
     }
     const r = await manage('PUT', `/v1/outlets/${s.id}/settings`, {
       merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs, tables,
+      onlineChannels: Object.entries(channels).filter(([, v]) => v !== null).map(([channel, v]) => ({ channel, commissionPercent: Number(v || 0) })),
       loyalty: { rupiahPerPoint: Number(perPoint || 0), pointValue: Number(pointValue || 0), maxRedeemPercent: Number(maxRedeem || 50) },
       policy: { secondApprovalAbove: Number(threshold), manualDiscountMaxPercent: Number(discount), employeeMealQuota: Number(mealQuota), holdBillMinutes: Number(hold) },
       cctvRetentionDays: Number(retention), cctvClockOffsetSec: Number(offset),
@@ -106,6 +108,21 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
         </div>
       ))}
       <p><button type="button" className="secondary" onClick={() => setEdcs([...edcs, { tid: '', bank: '', label: '' }])}>+ Tambah EDC</button></p>
+
+      <h3>Pesanan online</h3>
+      <p className="muted small">Aktifkan platform yang dipakai outlet ini. Kasir lalu bisa membuat pesanan online (dibayar platform, tanpa diskon) dan laporan platform dicocokkan dengan POS di menu Pesanan Online. Komisi dipakai untuk perkiraan, angka sebenarnya dari laporan platform.</p>
+      <div className="form-grid">
+        {([['GOFOOD', 'GoFood'], ['GRABFOOD', 'GrabFood'], ['SHOPEEFOOD', 'ShopeeFood']] as const).map(([k, label]) => (
+          <div key={k} className="check-label">
+            <label>
+              <input type="checkbox" checked={channels[k] !== undefined && channels[k] !== null} onChange={(e) => setChannels({ ...channels, [k]: e.target.checked ? (channels[k] ?? '20') : null })} /> {label}
+            </label>
+            {channels[k] !== undefined && channels[k] !== null && (
+              <input aria-label={`Komisi ${label} (%)`} inputMode="numeric" style={{ width: 90 }} value={channels[k] ?? ''} onChange={(e) => setChannels({ ...channels, [k]: e.target.value.replace(/\D/g, '') })} />
+            )}
+          </div>
+        ))}
+      </div>
 
       <h3>Loyalty</h3>
       <p className="muted small">Member mendapat poin dari pembayaran. Isi 0 pada belanja per poin untuk mematikan loyalty. Nilai tukar per poin tidak boleh melebihi belanja per poin, agar poin tidak bisa dicetak jadi uang.</p>

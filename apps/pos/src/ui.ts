@@ -10,7 +10,7 @@ export const STATUS_LABEL: Record<string, string> = {
 export const TYPE_LABEL: Record<string, string> = { DINE_IN: 'Dine-in', TAKE_AWAY: 'Take-away', EMPLOYEE: 'Karyawan' };
 
 export const METHOD_LABEL: Record<string, string> = {
-  CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit',
+  CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit', PLATFORM: 'Dibayar platform',
 };
 
 export interface Ctx {
@@ -51,7 +51,10 @@ export function approvalHint(code: string): string {
 }
 
 /** Teks jenis order: "Dine-in · Meja 5", atau "Karyawan · Sari" untuk makan karyawan. */
+export const CHANNEL_LABEL: Record<string, string> = { GOFOOD: 'GoFood', GRABFOOD: 'GrabFood', SHOPEEFOOD: 'ShopeeFood' };
+
 export function orderLabel(o: OrderRecord, staff: { id: string; name: string }[]): string {
+  if (o.channel) return `${CHANNEL_LABEL[o.channel.channel] ?? o.channel.channel} · ${o.channel.ref}`;
   const who = o.employeeId ? ` · ${staff.find((s) => s.id === o.employeeId)?.name ?? o.employeeId}` : '';
   return `${TYPE_LABEL[o.type]}${who}${o.tableNo ? ` · Meja ${o.tableNo}` : ''}`;
 }

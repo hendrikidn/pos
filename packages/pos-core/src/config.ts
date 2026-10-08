@@ -1,3 +1,4 @@
+import type { OnlineChannel } from '@pos/events';
 import type { Policy, Promo } from '@pos/order';
 import { DEFAULT_POLICY } from '@pos/order';
 import type { KeyValueStore } from './store';
@@ -22,6 +23,7 @@ export interface DeviceConfig {
     tables?: { no: string; area: string; seats: number }[];
     utcOffsetMinutes?: number;
     loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
+    channels?: { channel: OnlineChannel; commissionPercent: number }[];
     edcs: { tid: string; bank: string; label: string }[];
     policy: Partial<Policy> | null;
   };
@@ -43,6 +45,7 @@ export function toPosConfig(c: DeviceConfig): PosConfig {
     edcs: c.outlet.edcs,
     ...(c.outlet.tables?.length ? { tables: c.outlet.tables } : {}),
     ...(c.outlet.loyalty ? { loyalty: c.outlet.loyalty } : {}),
+    ...(c.outlet.channels?.length ? { channels: c.outlet.channels } : {}),
     ...(c.promos?.length ? { promos: c.promos, ...(c.outlet.utcOffsetMinutes !== undefined ? { utcOffsetMinutes: c.outlet.utcOffsetMinutes } : {}) } : {}),
     staff: c.staff,
     menu: c.menu,

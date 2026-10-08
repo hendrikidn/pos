@@ -1,7 +1,10 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
-export type PaymentMethod = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT';
+/** PLATFORM: dibayar oleh platform pesan-antar (GoFood dan sejenisnya) dan diselesaikan ke outlet kemudian; hanya untuk order yang dikaitkan ke kanal online. */
+export type PaymentMethod = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM';
+export const ONLINE_CHANNELS = ['GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'] as const;
+export type OnlineChannel = (typeof ONLINE_CHANNELS)[number];
 export type OrderType = 'DINE_IN' | 'TAKE_AWAY' | 'EMPLOYEE';
 export type KitchenStatus = 'COOKING' | 'READY' | 'SERVED';
 export type PrinterState =
@@ -61,6 +64,11 @@ export type EventBody =
        * membawa `sentQty`); terminal penerima mengklaimnya ke server lalu mencatat `order.items_moved` (MERGE) dari order ini ke order barunya.
        */
       payload: { orderId: string; orderType: Exclude<OrderType, 'EMPLOYEE'>; tableNo?: string; items: LineItem[] };
+    }
+  | {
+      type: 'order.channel_linked';
+      /** Order ini berasal dari platform pesan-antar; `ref` = nomor pesanan di platform (dasar rekonsiliasi dengan laporan platform). */
+      payload: { orderId: string; channel: OnlineChannel; ref: string };
     }
   | {
       type: 'order.member_linked';
@@ -160,7 +168,7 @@ export type EventBody =
 export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
-  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
+  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'order.channel_linked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
   'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.digital', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',
@@ -340,6 +348,7 @@ export function orderIdOf(e: PosEvent): string | undefined {
     case 'order.handed_off':
     case 'order.handoff_reclaimed':
     case 'order.member_linked':
+    case 'order.channel_linked':
     case 'bill.hold_reason':
     case 'kitchen.status_changed':
     case 'bill.printed':

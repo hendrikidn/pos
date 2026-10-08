@@ -490,6 +490,47 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
     }
   }
 
+  // ---- R35 dan R36: pesanan online (GoFood, GrabFood, ShopeeFood) ----
+  // Pembayaran "Platform" tidak masuk laci dan tidak diperiksa lewat EDC/bank, jadi ia jalan pintas yang menggoda untuk menyembunyikan uang tunai:
+  // R35 = pembayaran Platform pada order yang bukan pesanan online, atau pembayaran biasa pada order yang dikaitkan ke platform.
+  // R36 = satu nomor pesanan platform dipakai lebih dari satu order (penggandaan penjualan atau pesanan fiktif).
+  {
+    const links = new Map<string, EventOf<'order.channel_linked'>>();
+    const voidedIds = new Set<string>();
+    for (const e of events) {
+      if (e.type === 'order.channel_linked' && !links.has(e.payload.orderId)) links.set(e.payload.orderId, e);
+      else if (e.type === 'void.approved') voidedIds.add(e.payload.orderId);
+    }
+    for (const e of events) {
+      if (e.type !== 'payment.received') continue;
+      const linked = links.has(e.payload.orderId);
+      const platform = e.payload.method === 'PLATFORM';
+      if (platform === linked) continue;
+      hit({
+        rule: 'R35', key: `R35:${e.deviceId}:${e.seq}`, weight: w('R35'), modalities: POS_ONLY, terminalId: e.deviceId, orderId: e.payload.orderId,
+        actorIds: e.actorId ? [e.actorId] : [], at: t(e), windowStart: t(e), windowEnd: t(e),
+        note: platform ? `pembayaran Platform Rp ${e.payload.amount.toLocaleString('id-ID')} pada order yang bukan pesanan online` : `order pesanan online (${links.get(e.payload.orderId)!.payload.channel}) dibayar dengan ${e.payload.method}, bukan Platform`,
+      });
+    }
+    const byRef = new Map<string, EventOf<'order.channel_linked'>[]>();
+    for (const l of links.values()) {
+      if (voidedIds.has(l.payload.orderId)) continue;
+      const key = `${l.payload.channel}:${l.payload.ref.toLowerCase()}`;
+      (byRef.get(key) ?? byRef.set(key, []).get(key)!).push(l);
+    }
+    for (const [key, list] of byRef) {
+      if (list.length < 2) continue;
+      const sortedLinks = [...list].sort((a, b) => t(a) - t(b) || a.deviceId.localeCompare(b.deviceId) || a.seq - b.seq);
+      for (const dup of sortedLinks.slice(1)) {
+        hit({
+          rule: 'R36', key: `R36:${key}:${dup.payload.orderId}`, weight: w('R36'), modalities: POS_ONLY, terminalId: dup.deviceId, orderId: dup.payload.orderId,
+          actorIds: dup.actorId ? [dup.actorId] : [], at: t(dup), windowStart: t(dup), windowEnd: t(dup),
+          note: `nomor pesanan ${dup.payload.ref} (${dup.payload.channel}) sudah dipakai order ${sortedLinks[0]!.payload.orderId}`,
+        });
+      }
+    }
+  }
+
   // ---- R24: integritas event ----
   for (const [deviceId, list] of byDevice) {
     for (const issue of verifyChain(list)) {

@@ -160,3 +160,37 @@ describe('checkJournalLines', () => {
     [Array.from({ length: 31 }, (_, i) => ({ account: '6-2000', debit: i % 2 ? 0 : 1, credit: i % 2 ? 1 : 0 })), 'maksimal 30'],
   ])('menolak %j', (lines, msg) => expect(checkJournalLines(lines, accs)).toContain(msg));
 });
+
+import { buildChannelJournal } from '../src/accounting';
+
+describe('jurnal penyelesaian platform', () => {
+  it('piutang platform dilunasi dana bank dan beban komisi; seimbang per hari', () => {
+    const j = buildChannelJournal([
+      { date: D1, gross: 45_000, commission: 9_000, net: 36_000 }, { date: D1, gross: 30_000, commission: 6_000, net: 24_000 }, { date: D2, gross: 50_000, commission: 12_500, net: 37_500 },
+    ], 'o1');
+    expect(j.map((e) => e.ref)).toEqual(['JU-PLT-o1-20261001', 'JU-PLT-o1-20261002']);
+    expect(j[0]!.lines).toEqual([{ account: '1-1210', debit: 0, credit: 75_000 }, { account: '1-1300', debit: 60_000, credit: 0 }, { account: '6-5100', debit: 15_000, credit: 0 }]);
+    expect(j[0]!.memo).toContain('2 pesanan');
+    for (const e of j) expect(sumDebit(e.lines)).toBe(sumCredit(e.lines));
+    expect(j[0]!.notes).toBeUndefined();
+  });
+
+  it('potongan lain di luar komisi tercatat tetap seimbang dengan catatan', () => {
+    const [e] = buildChannelJournal([{ date: D1, gross: 50_000, commission: 5_000, net: 40_000 }], 'o1');
+    expect(line(e!, '6-5100')).toEqual({ account: '6-5100', debit: 10_000, credit: 0 });
+    expect(sumDebit(e!.lines)).toBe(sumCredit(e!.lines));
+    expect(e!.notes).toHaveLength(1);
+  });
+
+  it('pembayaran Platform di POS masuk Piutang Platform, bukan kas', () => {
+    const s = new Sim('o1', D1, 'term-1', 'sensor-1');
+    s.pos({ type: 'order.created', payload: { orderId: 'g', orderType: 'TAKE_AWAY' } }, at(D1, '10:00:00'), 'budi');
+    s.pos({ type: 'order.channel_linked', payload: { orderId: 'g', channel: 'GOFOOD', ref: 'GF-1' } }, at(D1, '10:00:10'), 'budi');
+    s.pos({ type: 'bill.printed', payload: { orderId: 'g', total: 49_500, breakdown: { subtotal: 45_000, discount: 0, service: 0, tax: 4_500, rounding: 0 } } }, at(D1, '10:01:00'), 'budi');
+    s.pos({ type: 'payment.received', payload: { orderId: 'g', method: 'PLATFORM', amount: 49_500 } }, at(D1, '10:02:00'), 'budi');
+    const [e] = journal(s, D1, D1);
+    expect(line(e!, '1-1210')).toEqual({ account: '1-1210', debit: 49_500, credit: 0 });
+    expect(line(e!, '1-1100')).toBeUndefined();
+    expect(sumDebit(e!.lines)).toBe(sumCredit(e!.lines));
+  });
+});

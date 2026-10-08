@@ -656,3 +656,49 @@ describe('R34: satu member dikaitkan ke terlalu banyak order dalam sehari', () =
     expect(hits[0]!.actorIds).toEqual(['budi', 'sari']);
   });
 });
+
+describe('R35 dan R36: pesanan online', () => {
+  const hits = (s: Sim, rule: string) => run(s, '20:00:00', NO_SENSOR).filter((h) => h.rule === rule);
+  const online = (s: Sim, id: string, hms: string, channel: 'GOFOOD' | 'GRABFOOD' | 'SHOPEEFOOD', ref: string, method: 'PLATFORM' | 'CASH' = 'PLATFORM') => {
+    s.pos({ type: 'order.created', payload: { orderId: id, orderType: 'TAKE_AWAY' } }, hms, 'budi');
+    s.pos({ type: 'order.channel_linked', payload: { orderId: id, channel, ref } }, hms, 'budi');
+    s.pos({ type: 'payment.received', payload: { orderId: id, method, amount: 45_000 } }, hms, 'budi');
+  };
+
+  it('pesanan online dibayar Platform dan order biasa dibayar biasa tidak memicu apa pun', () => {
+    const s = new Sim();
+    online(s, 'o1', '12:00:00', 'GOFOOD', 'GF-1001');
+    s.cashOrder('o2', '12:10:00', '12:11:00', 30_000);
+    expect(hits(s, 'R35')).toEqual([]);
+    expect(hits(s, 'R36')).toEqual([]);
+  });
+
+  it('pembayaran Platform pada order biasa memicu R35 (jalan pintas menyembunyikan tunai)', () => {
+    const s = new Sim();
+    s.pos({ type: 'order.created', payload: { orderId: 'x', orderType: 'TAKE_AWAY' } }, '12:00:00', 'budi');
+    s.pos({ type: 'payment.received', payload: { orderId: 'x', method: 'PLATFORM', amount: 80_000 } }, '12:01:00', 'budi');
+    const h = hits(s, 'R35');
+    expect(h).toHaveLength(1);
+    expect(h[0]).toMatchObject({ orderId: 'x', actorIds: ['budi'], weight: 50 });
+    expect(h[0]!.note).toContain('bukan pesanan online');
+  });
+
+  it('order yang dikaitkan ke platform tetapi dibayar tunai memicu R35', () => {
+    const s = new Sim();
+    online(s, 'o1', '12:00:00', 'GRABFOOD', 'GR-77', 'CASH');
+    expect(hits(s, 'R35')[0]!.note).toContain('GRABFOOD');
+  });
+
+  it('nomor pesanan yang sama dipakai dua order memicu R36 pada order berikutnya; kanal berbeda, huruf besar-kecil, dan order yang di-void dihitung dengan benar', () => {
+    const s = new Sim();
+    online(s, 'a', '12:00:00', 'GOFOOD', 'GF-9');
+    online(s, 'b', '12:30:00', 'GOFOOD', 'gf-9'); // sama (tanpa peduli huruf)
+    online(s, 'c', '13:00:00', 'GRABFOOD', 'GF-9'); // kanal lain: sah
+    online(s, 'd', '13:30:00', 'GOFOOD', 'GF-10');
+    online(s, 'e', '14:00:00', 'GOFOOD', 'GF-10');
+    s.pos({ type: 'void.approved', payload: { orderId: 'e', reasonCode: 'WRONG_ORDER', approverIds: ['hendra'], amount: 45_000 } }, '14:05:00', 'budi'); // yang di-void tidak dihitung ganda
+    const h = hits(s, 'R36');
+    expect(h.map((x) => x.orderId)).toEqual(['b']);
+    expect(h[0]!.note).toContain('sudah dipakai order a');
+  });
+});

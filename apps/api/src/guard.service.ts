@@ -4,6 +4,7 @@ import {
   buildIncidents, DEFAULT_CONFIG, evaluateCashMismatch, evaluatePatternRules, evaluateRules, type Capabilities, type Incident, type RuleHit,
 } from '@pos/rules';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
+import { channelHits } from './channel.service';
 import { Database } from './db/database';
 import { shadowState } from './shadow';
 import type { Queryable } from './db/driver';
@@ -110,6 +111,7 @@ export class GuardService {
 
       const hits = [
         ...loyaltyHits,
+        ...(await channelHits(q, outletId, events, outlet.utc_offset_minutes, from, now)),
         ...evaluateRules({
           events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity, promos,
           utcOffsetMinutes: outlet.utc_offset_minutes,

@@ -5,6 +5,7 @@ import { AdminService } from './admin.service';
 import type { ApiAuth } from './auth';
 import { ConfigService } from './config.service';
 import { BillingService } from './billing.service';
+import { ChannelService } from './channel.service';
 import { MemberService } from './member.service';
 import { StockService } from './stock.service';
 import { createApp } from './bootstrap';
@@ -112,6 +113,7 @@ async function main() {
   const seeder: ApiAuth = { kind: 'api', tenantId: 'demo', userId: 'demo-seed', role: 'OWNER' };
   await config.updateSettings(seeder, 'senopati', {
     loyalty: { rupiahPerPoint: 10_000, pointValue: 100, maxRedeemPercent: 50 },
+    onlineChannels: [{ channel: 'GOFOOD', commissionPercent: 20 }, { channel: 'GRABFOOD', commissionPercent: 25 }],
     merchantName: 'Kopi Senopati', taxPercent: 10, edcs: [{ tid: '12345678', bank: 'Mandiri', label: 'EDC Mandiri' }],
     // Denah meja: meja 4 dan 9 dipakai terminal term-sen (order hidup di bawah), jadi terminal pos-1 melihatnya terisi.
     tables: [
@@ -247,7 +249,25 @@ async function main() {
     for (let i = 0; i < events.length; i += 500) await call('/v1/events', token, { events: events.slice(i, i + 500) });
   };
   await send('sensor-sen', sensor);
+  // Pesanan online (GoFood) kemarin dan hari ini: dua cocok dengan laporan platform, satu fiktif (tidak ada di platform), satu nilainya berbeda,
+  // dan satu pesanan platform yang tidak diketik di POS. Dipakai untuk mencoba halaman Pesanan Online dan temuan R37–R39.
+  const online = (id: string, ref: string, minutesAgo: number, subtotal: number, actor: string) => {
+    s.pos({ type: 'order.created', payload: { orderId: id, orderType: 'TAKE_AWAY' } }, at(minutesAgo), actor);
+    s.pos({ type: 'order.channel_linked', payload: { orderId: id, channel: 'GOFOOD', ref } }, at(minutesAgo), actor);
+    s.pos({ type: 'bill.printed', payload: { orderId: id, total: Math.round(subtotal * 1.1), breakdown: { subtotal, discount: 0, service: 0, tax: Math.round(subtotal * 0.1), rounding: 0 } } }, at(minutesAgo, 20), actor);
+    s.pos({ type: 'payment.received', payload: { orderId: id, method: 'PLATFORM', amount: Math.round(subtotal * 1.1) } }, at(minutesAgo, 30), actor);
+  };
+  online('GF-D1', 'GF-240101', 26 * 60, 54_000, 'budi');
+  online('GF-D2', 'GF-240102', 24 * 60, 38_000, 'sari');
+  online('GF-D3', 'GF-240103', 22 * 60, 62_000, 'budi'); // platform mencatat 80.000
+  online('GF-D4', 'GF-240199', 20 * 60, 47_000, 'sari'); // tidak ada di laporan platform
+  const dayOf = (minutesAgo: number) => new Date(at(minutesAgo) + 7 * 3_600_000).toISOString().slice(0, 10);
   await send('term-sen', term);
+  await app.get(ChannelService).importReport(seeder, 'senopati', {
+    channel: 'GOFOOD',
+    csv: ['No Pesanan,Tanggal,Harga,Komisi,Diterima', `GF-240101,${dayOf(26 * 60)},54000,10800,43200`, `GF-240102,${dayOf(24 * 60)},38000,7600,30400`, `GF-240103,${dayOf(22 * 60)},80000,16000,64000`, `GF-240150,${dayOf(21 * 60)},45000,9000,36000`].join('\n'),
+    filename: 'gofood-contoh.csv',
+  });
 
   // Kopi Kemang (shadow): beberapa kasus dalam tiga hari terakhir, tidak ada notifikasi dan tidak masuk antrean review.
   const k = new Sim('kemang', '2026-01-01', 'term-kem', 'sensor-kem');

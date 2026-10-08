@@ -21,6 +21,10 @@ export function NavLinks({ role }: { role: string }) {
       href: '/settlements', label: 'Settlement', icon: <IconCard />, on: path.startsWith('/settlements'),
       show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
     },
+    {
+      href: '/online', label: 'Online', icon: <IconBox />, on: path.startsWith('/online'),
+      show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
+    },
     { href: '/accounting', label: 'Akuntansi', icon: <IconBook />, on: path.startsWith('/accounting'), show: role === 'OWNER' || role === 'MANAGER' },
     { href: '/settings', label: 'Pengaturan', icon: <IconSliders />, on: path.startsWith('/settings'), show: role === 'OWNER' || role === 'OPS' },
   ];

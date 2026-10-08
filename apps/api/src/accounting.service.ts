@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { ApiAuth } from './auth';
 import {
-  buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
+  buildChannelJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
   type Account, type AccountType, type JournalEntry,
 } from './accounting';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
@@ -31,6 +31,13 @@ export class AccountingService {
       for (const a of DEFAULT_ACCOUNTS) {
         await q.query('insert into account (tenant_id, code, name, type, normal) values ($1, $2, $3, $4, $5) on conflict do nothing', [tenantId, a.code, a.name, a.type, a.normal]);
       }
+      rows = await read();
+    }
+    // Akun sistem yang ditambahkan setelah bagan akun tenant dibuat (mis. piutang platform) dilengkapi otomatis.
+    const have = new Set(rows.map((r) => r.code));
+    const missing = DEFAULT_ACCOUNTS.filter((a) => SYSTEM_CODES.has(a.code) && !have.has(a.code));
+    if (missing.length > 0) {
+      for (const a of missing) await q.query('insert into account (tenant_id, code, name, type, normal) values ($1, $2, $3, $4, $5) on conflict do nothing', [tenantId, a.code, a.name, a.type, a.normal]);
       rows = await read();
     }
     return rows;
@@ -143,7 +150,10 @@ export class AccountingService {
       e.lines.push({ account: m.account, debit: Number(m.debit), credit: Number(m.credit) });
       byId.set(m.id, e);
     }
-    return [...auto, ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
+    const platform = (
+      await q.query<{ date: string; gross: number; commission: number; net: number }>('select date, gross, commission, net from channel_order where outlet_id = $1 and date >= $2 and date <= $3', [outletId, r.from, r.to])
+    ).rows;
+    return [...auto, ...buildChannelJournal(platform, outletId), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
   }
 
   /** Jurnal outlet pada rentang, ditambah daftar jurnal manual (termasuk yang dibatalkan) untuk pengelolaan. */

@@ -169,7 +169,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
             <button className="pay" disabled={order.items.length === 0} onClick={() => void startPay()}>Bayar {rp(engine.outstanding(order) || totals.total)}</button>
             <div className="sub">
               <button className="secondary" disabled={order.items.every((l) => l.qty <= l.sentQty)} onClick={() => void run(ctx, () => engine.sendToKitchen(order.id))}>Ke dapur</button>
-              <button className="secondary" disabled={order.items.length === 0} onClick={() => setDlg('discount')}>Diskon</button>
+              <button className="secondary" disabled={order.items.length === 0 || !!order.channel} title={order.channel ? 'Order online memakai harga platform' : undefined} onClick={() => setDlg('discount')}>Diskon</button>
               <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
             </div>
             {(order.type === 'DINE_IN' || splittable) && (
@@ -179,12 +179,12 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
                 {splittable && <button className="secondary" disabled={mergeable.length === 0} onClick={() => setDlg('merge')}>Gabung</button>}
               </div>
             )}
-            {config.loyalty && ctx.rt.handoffs().available && order.type !== 'EMPLOYEE' && !order.member && (
+            {config.loyalty && ctx.rt.handoffs().available && order.type !== 'EMPLOYEE' && !order.channel && !order.member && (
               <div className="sub">
                 <button className="secondary" onClick={() => setDlg('member')}>Member</button>
               </div>
             )}
-            {splittable && ctx.rt.handoffs().available && (
+            {splittable && !order.channel && ctx.rt.handoffs().available && (
               <div className="sub">
                 <button className="secondary" disabled={itemCount === 0 || order.discount > 0} title={order.discount > 0 ? 'Order yang sudah diberi diskon tidak bisa diserahkan' : undefined} onClick={() => setDlg('handoff')}>Serahkan ke terminal lain</button>
               </div>

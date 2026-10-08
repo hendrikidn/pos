@@ -7,6 +7,7 @@ import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { checkModifierGroups, checkPromo, type ModifierGroup, type Promo } from '@pos/order';
 import { DEFAULT_SHADOW_DAYS, shadowState } from './shadow';
+import { ONLINE_CHANNELS } from '@pos/events';
 import { parseMenuCsv, type ImportError } from './menu-import';
 
 const pbkdf2Async = promisify(pbkdf2);
@@ -75,6 +76,8 @@ export interface SettingsInput {
    * `maxRedeemPercent` batas potongan dari subtotal (1–100).
    */
   loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
+  /** Kanal pesan-antar yang aktif beserta persen komisinya; `[]` mematikan semua. */
+  onlineChannels?: { channel: string; commissionPercent: number }[];
   /** Denah meja; `[]` menghapusnya (kasir kembali mengetik nomor meja bebas). */
   tables?: { no: string; area: string; seats: number }[];
   policy?: {
@@ -159,6 +162,8 @@ export interface DeviceConfig {
     taxOnService?: boolean;
     roundingUnit?: number;
     edcs: { tid: string; bank: string; label: string }[];
+    /** Hanya bila outlet punya kanal pesan-antar. */
+    channels?: { channel: string; commissionPercent: number }[];
     /** Hanya bila loyalty aktif di outlet ini. */
     loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
     /** Zona waktu outlet (menit dari UTC); hanya dikirim bersama promo karena jadwal promo memakainya. */
@@ -450,7 +455,7 @@ export class ConfigService {
 
   async getSettings(auth: ApiAuth, outletId: string, now = Date.now()) {
     const row = await this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, loyalty_rupiah_per_point, loyalty_point_value, loyalty_max_redeem_percent, edcs, tables, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
+      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, loyalty_rupiah_per_point, loyalty_point_value, loyalty_max_redeem_percent, online_channels, edcs, tables, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
     );
     if (!row) throw new NotFoundException('outlet tidak ditemukan');
     const { shadow_started_ms, ...rest } = row;
@@ -476,6 +481,14 @@ export class ConfigService {
       need(Number.isInteger(l.maxRedeemPercent) && l.maxRedeemPercent >= 1 && l.maxRedeemPercent <= 100, 'maxRedeemPercent 1–100');
       // Menukar poin lebih bernilai daripada memperolehnya = poin bisa dicetak jadi uang. Dicegah di sini, bukan hanya diingatkan.
       need(l.rupiahPerPoint === 0 || l.pointValue <= l.rupiahPerPoint, 'nilai tukar per poin tidak boleh melebihi belanja per poin (rugi pada setiap putaran)');
+    }
+    if (s.onlineChannels !== undefined) {
+      need(Array.isArray(s.onlineChannels) && s.onlineChannels.length <= ONLINE_CHANNELS.length, 'onlineChannels harus berupa daftar kanal');
+      for (const c of s.onlineChannels) {
+        need((ONLINE_CHANNELS as readonly string[]).includes(c?.channel), `kanal harus salah satu dari ${ONLINE_CHANNELS.join(', ')}`);
+        need(Number.isInteger(c.commissionPercent) && c.commissionPercent >= 0 && c.commissionPercent <= 50, 'komisi 0–50%');
+      }
+      need(new Set(s.onlineChannels.map((c) => c.channel)).size === s.onlineChannels.length, 'kanal tidak boleh ganda');
     }
     if (s.tables !== undefined) {
       need(Array.isArray(s.tables) && s.tables.length <= 200, 'tables maksimal 200');
@@ -508,7 +521,7 @@ export class ConfigService {
                 service_charge_percent = coalesce($12, service_charge_percent), tax_on_service = coalesce($13, tax_on_service),
                 rounding_unit = coalesce($14, rounding_unit), tables = coalesce($15::jsonb, tables),
                 loyalty_rupiah_per_point = coalesce($16, loyalty_rupiah_per_point), loyalty_point_value = coalesce($17, loyalty_point_value),
-                loyalty_max_redeem_percent = coalesce($18, loyalty_max_redeem_percent)
+                loyalty_max_redeem_percent = coalesce($18, loyalty_max_redeem_percent), online_channels = coalesce($19::jsonb, online_channels)
          where id = $1`,
         [
           outletId, s.merchantName?.trim() ?? null, s.taxPercent ?? null, s.edcs ? JSON.stringify(s.edcs) : null,
@@ -517,6 +530,7 @@ export class ConfigService {
           s.serviceChargePercent ?? null, s.taxOnService ?? null, s.roundingUnit ?? null,
           s.tables ? JSON.stringify(s.tables.map((t) => ({ no: t.no, area: t.area.trim(), seats: t.seats }))) : null,
           s.loyalty?.rupiahPerPoint ?? null, s.loyalty?.pointValue ?? null, s.loyalty?.maxRedeemPercent ?? null,
+          s.onlineChannels ? JSON.stringify(s.onlineChannels.map((c) => ({ channel: c.channel, commissionPercent: c.commissionPercent }))) : null,
         ],
       );
       if (r.rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
@@ -586,8 +600,8 @@ export class ConfigService {
   async deviceConfig(device: DeviceAuth): Promise<DeviceConfig> {
     return this.db.tenantTx(device.tenantId, async (q) => {
       const o = (
-        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; tables: NonNullable<DeviceConfig['outlet']['tables']>; utc_offset_minutes: number; loyalty_rupiah_per_point: number; loyalty_point_value: number; loyalty_max_redeem_percent: number; policy: Record<string, number> | null }>(
-          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, loyalty_rupiah_per_point, loyalty_point_value, loyalty_max_redeem_percent, edcs, tables, policy, utc_offset_minutes from outlet where id = $1',
+        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; tables: NonNullable<DeviceConfig['outlet']['tables']>; utc_offset_minutes: number; loyalty_rupiah_per_point: number; loyalty_point_value: number; loyalty_max_redeem_percent: number; online_channels: { channel: string; commissionPercent: number }[]; policy: Record<string, number> | null }>(
+          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, loyalty_rupiah_per_point, loyalty_point_value, loyalty_max_redeem_percent, online_channels, edcs, tables, policy, utc_offset_minutes from outlet where id = $1',
           [device.outletId],
         )
       ).rows[0];
@@ -625,6 +639,7 @@ export class ConfigService {
           ...(o.tax_on_service === false ? { taxOnService: false } : {}),
           ...(o.rounding_unit > 0 ? { roundingUnit: o.rounding_unit } : {}),
           ...(promos.length > 0 ? { utcOffsetMinutes: o.utc_offset_minutes } : {}),
+          ...(o.online_channels.length > 0 && !isKds ? { channels: o.online_channels } : {}),
           ...(o.loyalty_rupiah_per_point > 0 && !isKds ? { loyalty: { rupiahPerPoint: o.loyalty_rupiah_per_point, pointValue: o.loyalty_point_value, maxRedeemPercent: o.loyalty_max_redeem_percent } } : {}),
           edcs: o.edcs, ...(o.tables.length > 0 ? { tables: o.tables } : {}), policy: o.policy,
         },

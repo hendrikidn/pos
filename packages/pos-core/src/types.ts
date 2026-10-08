@@ -1,4 +1,4 @@
-import type { KitchenStatus, LineItem, OrderType, PaymentMethod } from '@pos/events';
+import type { KitchenStatus, LineItem, OnlineChannel, OrderType, PaymentMethod } from '@pos/events';
 import type { ChosenOption, ModifierGroup, OrderState, Policy, Promo, Role, TableDef } from '@pos/order';
 
 export interface MenuItem {
@@ -44,6 +44,8 @@ export interface PosConfig {
   taxOnService?: boolean;
   roundingUnit?: number;
   edcs: Edc[];
+  /** Kanal pesan-antar yang diaktifkan outlet beserta komisinya (dari server); kosong = tidak ada pesanan online. */
+  channels?: { channel: OnlineChannel; commissionPercent: number }[];
   /** Loyalty outlet (dari server); tidak ada = loyalty mati. */
   loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
   /** Promo aktif outlet (dari server). Kasir hanya memilih dari sini; kosong = tidak ada promo. */
@@ -116,6 +118,8 @@ export interface OrderRecord {
   mergedInto?: string;
   /** Order ini diserahkan ke terminal lain dan belum selesai diurus: terkunci (status MERGED) sampai diambil atau ditarik kembali. */
   handedOff?: boolean;
+  /** Order dari platform pesan-antar: kanal dan nomor pesanan di platform. Dibayar platform; tanpa diskon. */
+  channel?: { channel: OnlineChannel; ref: string };
   /** Member yang dikaitkan ke order ini beserta saldo poin yang diketahui saat dicari (saldo resmi ada di server). */
   member?: { id: string; name: string; points: number };
   /** Poin yang ditukar pada order ini (satu kali per order; tidak digabung dengan diskon lain). */

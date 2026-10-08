@@ -202,6 +202,7 @@ export interface OutletSettings {
   loyalty_rupiah_per_point: number;
   loyalty_point_value: number;
   loyalty_max_redeem_percent: number;
+  online_channels: { channel: 'GOFOOD' | 'GRABFOOD' | 'SHOPEEFOOD'; commissionPercent: number }[];
   edcs: { tid: string; bank: string; label: string }[];
   tables: { no: string; area: string; seats: number }[];
   policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number; holdBillMinutes?: number } | null;
@@ -289,7 +290,7 @@ export interface SalesReport {
   };
   byDay: { date: string; orders: number; net: number }[];
   byHour: { hour: number; orders: number; net: number }[];
-  byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT'; payments: number; amount: number }[];
+  byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM'; payments: number; amount: number }[];
   byCashier: CashierRow[];
   byProduct: { itemId: string; name: string; qty: number; amount: number }[];
   byOption: { group: string; name: string; qty: number; amount: number }[];
@@ -384,4 +385,12 @@ export interface AccountingReports {
   range: { from: string; to: string };
   trialBalance: { rows: TrialRow[]; totalDebit: number; totalCredit: number };
   incomeStatement: { revenue: TrialRow[]; expenses: TrialRow[]; totalRevenue: number; totalExpenses: number; netIncome: number };
+}
+
+export type OnlineChannelId = 'GOFOOD' | 'GRABFOOD' | 'SHOPEEFOOD';
+export interface OnlineReconciliation {
+  range: { from: string; to: string };
+  rows: { channel: OnlineChannelId; ref: string; date: string; gross: number; commission: number; net: number; status: 'OK' | 'AMOUNT' | 'UNRECORDED'; pos: { orderId: string; amount: number; actorId: string | null } | null }[];
+  missing: { channel: OnlineChannelId; ref: string; date: string; amount: number; orderId: string; actorId: string | null; status: 'MISSING' | 'NO_REPORT' }[];
+  totals: { orders: number; gross: number; commission: number; net: number };
 }

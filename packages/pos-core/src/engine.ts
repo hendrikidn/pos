@@ -1,4 +1,4 @@
-import { MAX_EVENT_LINES, MAX_LINE_QTY, type KitchenStatus, type LineItem, type OrderType, type PaymentMethod, type PosEvent, type PrinterState } from '@pos/events';
+import { MAX_EVENT_LINES, MAX_LINE_QTY, type OnlineChannel, type KitchenStatus, type LineItem, type OrderType, type PaymentMethod, type PosEvent, type PrinterState } from '@pos/events';
 import { DEFAULT_POLICY, decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, isHoldReason, MAX_NOTE_LENGTH, promoApplicable, promoDiscount, reduceOrder, resolveSelection, type Ctx } from '@pos/order';
 import { Directory } from './directory';
 import type { Printer } from './printer';
@@ -340,6 +340,29 @@ export class PosEngine {
   }
 
   /**
+   * Membuat order dari platform pesan-antar (GoFood dan sejenisnya): order take-away yang dikaitkan ke kanal dan nomor pesanan di platform.
+   * Kanal harus diaktifkan di outlet, dan satu nomor pesanan hanya boleh dipakai satu order (yang belum di-void) di terminal ini; pengecekan
+   * lintas terminal dilakukan server (aturan R36). Order online dibayar platform, jadi tanpa diskon dan hanya dengan metode PLATFORM.
+   */
+  async createOnlineOrder(channel: OnlineChannel, ref: string): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    if (!this.shift) return fail('NO_SHIFT', 'Buka shift terlebih dahulu.');
+    if (!(this.cfg.channels ?? []).some((c) => c.channel === channel)) return fail('CHANNEL_OFF', 'Kanal ini belum diaktifkan untuk outlet ini.');
+    const clean = ref.trim();
+    if (!/^[A-Za-z0-9._-]{3,30}$/.test(clean)) return fail('REF_INVALID', 'Nomor pesanan platform 3–30 karakter (huruf, angka, titik, - atau _).');
+    const dup = this.listOrders().find((o) => o.channel?.channel === channel && o.channel.ref.toLowerCase() === clean.toLowerCase() && o.state.status !== 'VOIDED');
+    if (dup) return fail('REF_DUPLICATE', `Nomor pesanan ${clean} sudah dipakai order #${dup.number}.`);
+    const created = await this.createOrder('TAKE_AWAY');
+    if (!created.ok) return created;
+    const o = created.value;
+    await this.emit({ type: 'order.channel_linked', payload: { orderId: o.id, channel, ref: clean } });
+    o.channel = { channel, ref: clean };
+    await this.save(o);
+    return ok(o);
+  }
+
+  /**
    * Menambah menu ke order. Menu dengan varian/tambahan memerlukan `options` (id opsi) sesuai batas tiap grup; harga satuan
    * akhir = harga menu + harga opsi. Baris dengan menu, opsi, dan catatan yang sama digabung; selain itu menjadi baris baru.
    */
@@ -552,6 +575,7 @@ export class PosEngine {
     if (!r.ok) return r;
     const o = r.value;
     if (o.type === 'EMPLOYEE') return fail('HANDOFF_EMPLOYEE', 'Order makan karyawan tidak bisa diserahkan.');
+    if (o.channel) return fail('HANDOFF_ONLINE', 'Order online tidak bisa diserahkan ke terminal lain (kaitannya ke platform tidak ikut berpindah).');
     if (o.handedOff) return fail('HANDOFF_ALREADY', 'Order ini sudah diserahkan.');
     if (o.state.status !== 'DRAFT' && o.state.status !== 'SENT') return fail('HANDOFF_LOCKED', 'Order sudah ditagih atau selesai; hanya order yang belum ditagih bisa diserahkan.');
     if (o.items.length === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
@@ -649,6 +673,7 @@ export class PosEngine {
     if (!r.ok) return r;
     const o = r.value;
     if (o.type === 'EMPLOYEE') return fail('MEMBER_EMPLOYEE', 'Order makan karyawan tidak bisa dikaitkan ke member.');
+    if (o.channel) return fail('MEMBER_ONLINE', 'Order online tidak memakai member (pelanggannya milik platform).');
     if (o.state.status === 'PAID' || o.state.status === 'VOIDED' || o.state.status === 'MERGED') return fail('ORDER_LOCKED', 'Order sudah selesai atau terkunci.');
     if (o.member) return fail('MEMBER_ALREADY', 'Order ini sudah dikaitkan ke member.');
     if (!m.id || m.id.length > 40) return fail('MEMBER_INVALID', 'Member tidak valid.');
@@ -802,6 +827,7 @@ export class PosEngine {
     if (!r.ok) return r;
     const o = r.value;
     if (o.state.status === 'MERGED') return fail('ORDER_LOCKED', o.handedOff ? 'Order ini sedang diserahkan ke terminal lain.' : 'Order ini sudah digabung ke order lain.');
+    if (o.channel) return fail('DISCOUNT_ONLINE', 'Order online memakai harga platform; diskon tidak bisa diberikan di kasir.');
     const subtotal = this.totals(o).subtotal;
     if (subtotal === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
 
@@ -851,6 +877,8 @@ export class PosEngine {
     if (o.state.status === 'VOIDED' || o.state.status === 'PAID') return fail('ORDER_LOCKED', 'Order sudah selesai.');
     if (o.state.status === 'MERGED') return fail('ORDER_LOCKED', o.handedOff ? 'Order ini sedang diserahkan ke terminal lain.' : 'Order ini sudah digabung ke order lain.');
     if (!o.state.billPrinted) return fail('BILL_REQUIRED', 'Tagihan harus dicetak atau ditampilkan sebelum pembayaran.');
+    if (o.channel && p.method !== 'PLATFORM') return fail('CHANNEL_PLATFORM_ONLY', 'Order online dibayar platform: pakai metode Platform.');
+    if (!o.channel && p.method === 'PLATFORM') return fail('PLATFORM_NOT_ONLINE', 'Metode Platform hanya untuk order yang dibuat dari pesanan online.');
 
     const due = this.outstanding(o);
     let amount = p.amount ?? due;
@@ -862,11 +890,13 @@ export class PosEngine {
       change = Math.max(0, tendered - amount);
     } else if (amount > due) {
       return fail('AMOUNT_INVALID', 'Nominal melebihi sisa tagihan.');
+    } else if (p.method === 'PLATFORM' && amount !== due) {
+      return fail('PLATFORM_FULL', 'Pembayaran platform selalu sebesar seluruh tagihan.');
     }
     if (!Number.isInteger(amount) || amount <= 0) return fail('AMOUNT_INVALID', 'Nominal tidak valid.');
 
     let tid = p.tid;
-    if (p.method !== 'CASH') {
+    if (p.method !== 'CASH' && p.method !== 'PLATFORM') {
       tid ??= this.cfg.edcs.length === 1 ? this.cfg.edcs[0]!.tid : undefined;
       if (!tid) return fail('EDC_REQUIRED', 'Pilih mesin EDC yang dipakai.');
       if (!this.cfg.edcs.some((x) => x.tid === tid)) return fail('EDC_UNKNOWN', 'Mesin EDC tidak terdaftar di outlet ini.');

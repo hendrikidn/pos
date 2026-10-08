@@ -15,6 +15,8 @@ export interface Account {
 export const SYSTEM = {
   cash: '1-1100',
   digital: '1-1200',
+  platform: '1-1210',
+  commission: '6-5100',
   sales: '4-1000',
   service: '4-1100',
   discount: '4-2000',
@@ -27,6 +29,7 @@ export const SYSTEM = {
 export const DEFAULT_ACCOUNTS: Account[] = [
   { code: '1-1100', name: 'Kas', type: 'ASSET', normal: 'DEBIT' },
   { code: '1-1200', name: 'Piutang Pembayaran Digital (QRIS dan kartu)', type: 'ASSET', normal: 'DEBIT' },
+  { code: '1-1210', name: 'Piutang Platform Pesan-Antar', type: 'ASSET', normal: 'DEBIT' },
   { code: '1-1300', name: 'Bank', type: 'ASSET', normal: 'DEBIT' },
   { code: '1-1400', name: 'Persediaan Bahan Baku', type: 'ASSET', normal: 'DEBIT' },
   { code: '2-1100', name: 'Utang Usaha', type: 'LIABILITY', normal: 'CREDIT' },
@@ -43,6 +46,7 @@ export const DEFAULT_ACCOUNTS: Account[] = [
   { code: '6-2000', name: 'Beban Sewa', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-3000', name: 'Beban Listrik, Air, dan Gas', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-4000', name: 'Beban Operasional Lain', type: 'EXPENSE', normal: 'DEBIT' },
+  { code: '6-5100', name: 'Beban Komisi Platform Pesan-Antar', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-9000', name: 'Selisih Kas', type: 'EXPENSE', normal: 'DEBIT' },
 ];
 
@@ -89,7 +93,7 @@ export function checkJournalLines(lines: unknown, accounts: Map<string, { active
   return null;
 }
 
-const METHOD_ACCOUNT = { CASH: SYSTEM.cash, QRIS: SYSTEM.digital, EDC_DEBIT: SYSTEM.digital, EDC_CREDIT: SYSTEM.digital } as const;
+const METHOD_ACCOUNT = { CASH: SYSTEM.cash, QRIS: SYSTEM.digital, EDC_DEBIT: SYSTEM.digital, EDC_CREDIT: SYSTEM.digital, PLATFORM: SYSTEM.platform } as const;
 
 /** Jenis event yang dibutuhkan jurnal penjualan. */
 export const JOURNAL_EVENT_TYPES = ['payment.received', 'refund.created', 'order.created', 'bill.printed', 'cash.counted'];
@@ -186,6 +190,29 @@ export function buildSalesJournal(input: SalesReportInput & { outletId: string }
     out.push({ ref: `JU-POS-${input.outletId}-${d.replace(/-/g, '')}`, date: d, memo: `Penjualan POS ${d}`, source: 'POS', lines: nonZero, ...(x.notes.size > 0 ? { notes: [...x.notes] } : {}) });
   }
   return out;
+}
+
+/**
+ * Jurnal penyelesaian platform pesan-antar dari laporan platform yang diunggah, per hari pesanan: piutang platform dilunasi (Cr) oleh dana
+ * bersih yang diterima di bank (Dr) dan komisi (Dr beban). Pesanan online di POS sudah menambah piutang platform lewat pembayaran "Platform".
+ */
+export function buildChannelJournal(rows: { date: string; gross: number; commission: number; net: number }[], outletId: string): JournalEntry[] {
+  const byDay = new Map<string, { gross: number; commission: number; net: number; n: number }>();
+  for (const r of rows) {
+    const d = byDay.get(r.date) ?? { gross: 0, commission: 0, net: 0, n: 0 };
+    d.gross += r.gross; d.commission += r.commission; d.net += r.net; d.n++;
+    byDay.set(r.date, d);
+  }
+  return [...byDay].sort((a, b) => a[0].localeCompare(b[0])).map(([date, d]) => {
+    // Bila gross ≠ net + komisi (potongan lain dari platform), selisihnya ikut sebagai beban komisi agar jurnal tetap seimbang.
+    const fee = d.gross - d.net;
+    const lines: JournalLine[] = [
+      { account: SYSTEM.platform, debit: 0, credit: d.gross },
+      { account: '1-1300', debit: d.net, credit: 0 },
+      { account: SYSTEM.commission, debit: fee, credit: 0 },
+    ].filter((l) => l.debit !== 0 || l.credit !== 0);
+    return { ref: `JU-PLT-${outletId}-${date.replace(/-/g, '')}`, date, memo: `Penyelesaian platform pesan-antar ${date} (${d.n} pesanan)`, source: 'POS' as const, lines, ...(fee !== d.commission ? { notes: ['potongan platform tidak sama dengan komisi yang tercantum; selisihnya dibukukan sebagai beban komisi'] } : {}) };
+  });
 }
 
 export interface TrialRow {

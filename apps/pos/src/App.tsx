@@ -362,6 +362,7 @@ function Setup({ settings, error }: { settings: ReturnType<typeof import('./runt
   const [token, setToken] = useState(settings.token);
   return (
     <div className="login">
+      <Logo size={56} />
       <h1>Hubungkan terminal</h1>
       <p className="muted">Terminal ini belum punya konfigurasi. Masukkan alamat server dan token perangkat dari administrator. Staf, PIN, menu, dan pajak diunduh dari server.</p>
       <div className="panel" style={{ textAlign: 'left' }}>

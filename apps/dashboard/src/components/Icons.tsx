@@ -40,13 +40,8 @@ export const IconInfo = () => (
   <Svg size={18}><circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8h.01" /></Svg>
 );
 
-/** Logo Anatta POS: perisai dengan tanda centang. */
+/** Logo Anatta POS (berkas `public/logo.png`, tile bersudut membulat). */
 export function Logo({ size = 40 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true" focusable="false">
-      <rect width="40" height="40" rx="12" fill="var(--primary)" />
-      <path d="M20 8.5l9 3.6v6.4c0 5.6-3.8 10-9 12.5-5.2-2.5-9-6.9-9-12.5v-6.4l9-3.6z" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinejoin="round" />
-      <path d="M15.8 20.2l3 3 5.6-5.8" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src="/logo.png" width={size} height={size} alt="" aria-hidden="true" className="logo" />;
 }

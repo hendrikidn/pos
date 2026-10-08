@@ -8,6 +8,10 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['POST'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/(suspend|reactivate|owner-tokens)$/ },
   { methods: ['POST'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/tokens\/[0-9]+\/revoke$/ },
   { methods: ['POST'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/users$/ },
+  { methods: ['PUT'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/subscription$/ },
+  { methods: ['POST'], path: /^\/v1\/admin\/billing\/run$/ },
+  { methods: ['POST'], path: /^\/v1\/admin\/billing\/invoices\/INV-[0-9]{6}-[0-9]{4}\/(pay|void)$/ },
+  { methods: ['PUT'], path: /^\/v1\/admin\/plans\/[a-z0-9_-]+$/ },
   { methods: ['PUT'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/users\/[0-9]+$/ },
 ];
 

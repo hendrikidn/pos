@@ -164,6 +164,7 @@ export default function LoginPage() {
           <p className="sub">{link('Lupa password / atur password', 'forgot')}</p>
           <p className="sub muted small">Pengguna baru: pilih &quot;Lupa password / atur password&quot; untuk membuat password pertama kali.</p>
           <p className="sub small">{link('Masuk dengan kode email', 'otp')} · {link('Masuk dengan token', 'token')}</p>
+          <p className="sub">Belum punya akun? <a href="/signup">Coba gratis 14 hari</a></p>
         </>
       )}
 

@@ -8,6 +8,7 @@ const ITEMS = [
   { href: '/settings/ingredients', label: 'Bahan & resep', key: 'ingredients' },
   { href: '/settings/outlet', label: 'Outlet', key: 'outlet' },
   { href: '/settings/users', label: 'Pengguna', key: 'users' },
+  { href: '/settings/billing', label: 'Langganan', key: 'billing' },
   { href: '/settings/devices', label: 'Perangkat', key: 'devices' },
 ] as const;
 

@@ -1,10 +1,21 @@
 import { Body, Controller, Inject, Post, Req } from '@nestjs/common';
 import { Public, requireApi, type AuthedRequest } from './auth';
 import { LoginService } from './login.service';
+import { SignupService } from './signup.service';
 
 @Controller('v1/auth')
 export class LoginController {
-  constructor(@Inject(LoginService) private readonly login_: LoginService) {}
+  constructor(
+    @Inject(LoginService) private readonly login_: LoginService,
+    @Inject(SignupService) private readonly signup_: SignupService,
+  ) {}
+
+  /** Pendaftaran mandiri (uji coba 14 hari). Respons selalu sama; kode untuk mengatur password dikirim ke email. */
+  @Public()
+  @Post('signup')
+  signup(@Req() req: AuthedRequest & { ip?: string }, @Body() body: { businessName?: unknown; outletName?: unknown; ownerName?: unknown; email?: unknown; website?: unknown }) {
+    return this.signup_.signup(body ?? {}, req.ip ?? 'unknown');
+  }
 
   /** Meminta kode masuk. Respons sama untuk email yang terdaftar maupun tidak. */
   @Public()

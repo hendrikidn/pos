@@ -4,6 +4,7 @@ import { Sim } from '@pos/sim';
 import { AdminService } from './admin.service';
 import type { ApiAuth } from './auth';
 import { ConfigService } from './config.service';
+import { BillingService } from './billing.service';
 import { MemberService } from './member.service';
 import { StockService } from './stock.service';
 import { createApp } from './bootstrap';
@@ -100,6 +101,11 @@ async function main() {
   const manager = await admin.createApiToken('demo', 'rina', 'MANAGER', 'demo manager');
   await db.admin.query("insert into dashboard_user (tenant_id, user_id, email, role) values ('demo', 'owner-demo', 'owner@demo.local', 'OWNER'), ('demo', 'rina', 'rina@demo.local', 'MANAGER')");
   await db.admin.query("update dashboard_user set password_hash = $1, password_set_at = now() where tenant_id = 'demo'", [await hashPassword('demo-password-2026')]);
+
+  // Langganan contoh: uji coba tinggal 5 hari, supaya pengingat dan tagihan pertama terlihat di dashboard.
+  const billing = app.get(BillingService);
+  await billing.startTrial('demo');
+  await db.admin.query("update subscription set trial_end = $1 where tenant_id = 'demo'", [new Date(Date.now() + 7 * 3_600_000 + 4 * 86_400_000).toISOString().slice(0, 10)]);
 
   // Konfigurasi terminal: pengaturan outlet, staf (PIN disimpan sebagai hash), dan menu, lewat layanan yang sama dengan API.
   const config = app.get(ConfigService);

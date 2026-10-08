@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { Me } from '@/lib/api';
 import { Logo } from './Icons';
 import { LogoutButton } from './LogoutButton';
+import { BillingBanner } from './BillingBanner';
 import { NavLinks } from './NavLinks';
 
 const ROLE_LABEL: Record<string, string> = { OWNER: 'Owner', OPS: 'Ops', MANAGER: 'Manager', SUPERVISOR: 'Supervisor' };
@@ -38,7 +39,10 @@ export function Shell({ me, children }: { me: Me; children: ReactNode }) {
         </div>
       </aside>
 
-      <main className="main">{children}</main>
+      <main className="main">
+        <BillingBanner role={me.role} />
+        {children}
+      </main>
     </div>
   );
 }

@@ -167,3 +167,9 @@ export function sameOrigin(req: Request): boolean {
     return false;
   }
 }
+
+export interface BillingOverview {
+  plans: { id: string; name: string; pricePerOutlet: number; active: boolean }[];
+  tenants: { tenantId: string; tenantName: string; planId: string; trialEnd: string; status: 'TRIAL' | 'ACTIVE' | 'DUE' | 'OVERDUE' | 'CANCELED'; outstanding: number; openInvoices: number }[];
+  openInvoices: { id: string; tenantId: string; periodStart: string; periodEnd: string; outlets: number; unitPrice: number; amount: number; status: string; dueDate: string }[];
+}

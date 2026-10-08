@@ -25,6 +25,9 @@ import { TablesService } from './tables.service';
 import { HandoffService } from './handoff.service';
 import { MemberController } from './member.controller';
 import { MemberService } from './member.service';
+import { BillingService } from './billing.service';
+import { SignupService } from './signup.service';
+import { BillingController } from './billing.controller';
 import { ReceiptService } from './receipt.service';
 import { channelFromEnv, NotificationService, type Channel } from './notification.service';
 import { ReportService } from './report.service';
@@ -45,6 +48,8 @@ export interface AppOptions {
   clock?: Clock;
   /** Pengirim email kode masuk. Bila kosong dipilih dari environment (SMTP_*). */
   mailer?: Mailer;
+  /** Petunjuk pembayaran yang tampil di tagihan (rekening, QRIS). Bila kosong dipakai BILLING_PAYMENT_INFO atau teks bawaan. */
+  billingPaymentInfo?: string;
 }
 
 @Module({})
@@ -52,19 +57,20 @@ export class AppModule {
   static forRoot(db: Database, opts: AppOptions = {}): DynamicModule {
     return {
       module: AppModule,
-      controllers: [ApiController, ConfigController, DeviceController, StockController, MemberController, PlatformController, LoginController, TenantUsersController],
+      controllers: [ApiController, ConfigController, DeviceController, StockController, MemberController, BillingController, PlatformController, LoginController, TenantUsersController],
       providers: [
         // useFactory, bukan useValue: Nest menyerialisasi metadata modul dinamis untuk membuat token modul,
         // dan objek database (memori WASM) membuat serialisasi itu gagal.
         { provide: Database, useFactory: () => db },
         { provide: 'CHANNEL', useFactory: () => opts.channel ?? channelFromEnv() },
         { provide: 'PIN_ITERATIONS', useFactory: () => opts.pinIterations ?? Number(process.env['PIN_ITERATIONS'] ?? PIN_ITERATIONS) },
+        { provide: 'BILLING_PAYMENT_INFO', useFactory: () => opts.billingPaymentInfo ?? process.env['BILLING_PAYMENT_INFO'] ?? 'Transfer ke rekening yang tertera pada faktur dari tim kami, lalu kirim bukti ke email dukungan.' },
         { provide: 'DASHBOARD_URL', useFactory: () => opts.dashboardUrl ?? process.env['DASHBOARD_URL'] },
         { provide: NOTIFIER, useFactory: (svc: NotificationService) => opts.notifier ?? svc, inject: [NotificationService] },
         { provide: MAILER, useFactory: () => opts.mailer ?? mailerFromEnv() },
         { provide: CLOCK, useFactory: () => opts.clock ?? Date.now },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, IngestService, GuardService, TablesService, HandoffService, MemberService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
+        AdminService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
       ],
       exports: [AdminService, ConfigService],
     };

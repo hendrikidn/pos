@@ -341,3 +341,36 @@ export interface CountRow extends StockMovement { name: string; unit: Ingredient
 
 /** GET /v1/recipes: `{ [menuId]: { base: {bahan: qty}, options: {[optionId]: {bahan: qty}} } }`. */
 export type Recipes = Record<string, { base: Record<string, number>; options: Record<string, Record<string, number>> }>;
+
+export interface InvoiceRow {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  outlets: number;
+  unitPrice: number;
+  amount: number;
+  status: 'ISSUED' | 'PAID' | 'VOID';
+  issuedAt: string;
+  dueDate: string;
+  paidAt: string | null;
+  payMethod: string | null;
+  payRef: string | null;
+}
+
+export type SubscriptionStatus = 'TRIAL' | 'ACTIVE' | 'DUE' | 'OVERDUE' | 'CANCELED';
+
+export interface Billing {
+  subscription: null | {
+    planId: string;
+    planName: string;
+    pricePerOutlet: number;
+    status: SubscriptionStatus;
+    trialEnd: string;
+    trialDaysLeft: number;
+    outlets: number;
+    monthlyAmount: number;
+    paidThrough: string | null;
+  };
+  invoices: InvoiceRow[];
+  paymentInfo: string;
+}

@@ -98,6 +98,8 @@ export interface DeviceConfig {
   version: string;
   serverTime: number;
   deviceId: string;
+  /** Jenis perangkat: layar dapur tidak menerima staf dan menu. */
+  deviceKind: DeviceAuth['deviceKind'];
   outlet: {
     id: string;
     merchantName: string;
@@ -342,14 +344,16 @@ export class ConfigService {
         )
       ).rows[0];
       if (!o) throw new NotFoundException('outlet tidak ditemukan');
-      const staff = (
+      // Layar dapur tidak perlu (dan tidak boleh memegang) hash PIN staf maupun menu.
+      const isKds = device.deviceKind === 'kds';
+      const staff = isKds ? [] : (
         await q.query<{ id: string; name: string; role: StaffRole; pin_salt: string; pin_hash: string; pin_iterations: number }>(
           `select id, name, role, pin_salt, pin_hash, pin_iterations from staff
            where active and (outlet_ids is null or jsonb_exists(outlet_ids, $1)) order by id`,
           [device.outletId],
         )
       ).rows;
-      const menu = (
+      const menu = isKds ? [] : (
         await q.query<{ id: string; name: string; price: number; category: string; modifier_groups: ModifierGroup[] }>(
           `select id, name, price, category, modifier_groups from menu_item
            where active and (outlet_id is null or outlet_id = $1) order by category, sort, name`,
@@ -362,7 +366,7 @@ export class ConfigService {
         menu,
       };
       const version = createHash('sha256').update(JSON.stringify(body)).digest('hex').slice(0, 16);
-      return { version, serverTime: Date.now(), deviceId: device.deviceId, ...body };
+      return { version, serverTime: Date.now(), deviceId: device.deviceId, deviceKind: device.deviceKind, ...body };
     });
   }
 }

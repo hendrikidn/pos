@@ -12,11 +12,11 @@ export class ConfigController {
 
   // ----- terminal POS -----
 
-  /** Terminal mengunduh konfigurasi. Hanya terminal (bukan sensor) yang boleh, karena memuat hash PIN. */
+  /** Terminal mengunduh konfigurasi (memuat hash PIN, jadi sensor ditolak). Layar dapur boleh, tetapi hanya menerima data outlet. */
   @Get('device/config')
   async deviceConfig(@Req() req: AuthedRequest, @Query('version') version?: string) {
     const device = requireDevice(req);
-    if (device.deviceKind !== 'terminal') throw new ForbiddenException('hanya terminal POS yang dapat mengunduh konfigurasi');
+    if (device.deviceKind === 'sensor') throw new ForbiddenException('sensor tidak dapat mengunduh konfigurasi');
     const cfg = await this.config.deviceConfig(device);
     return version && version === cfg.version ? { unchanged: true, version: cfg.version, serverTime: cfg.serverTime } : cfg;
   }

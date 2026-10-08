@@ -18,14 +18,19 @@ export interface LineItem {
   options?: { group: string; name: string; price: number }[];
   /** Catatan kasir untuk dapur. */
   note?: string;
+  /** Hanya pada `order.items_moved`: berapa dari `qty` yang sudah dikirim ke dapur (sisanya belum). */
+  sentQty?: number;
 }
 
 /** Isi event menurut tipe. Menambah tipe event = menambah satu baris di sini. */
 export type EventBody =
   | {
       type: 'order.created';
-      /** `approverId`: supervisor ke atas yang menyetujui makan karyawan di luar kuota atau untuk diri sendiri (hanya order EMPLOYEE). */
-      payload: { orderId: string; orderType: OrderType; employeeId?: string; approverId?: string };
+      /**
+       * `approverId`: supervisor ke atas yang menyetujui makan karyawan di luar kuota atau untuk diri sendiri (hanya order EMPLOYEE).
+       * `tableNo`: nomor meja order dine-in (untuk layar dapur); perubahannya tercatat di `order.table_changed`.
+       */
+      payload: { orderId: string; orderType: OrderType; employeeId?: string; approverId?: string; tableNo?: string };
     }
   | {
       type: 'order.sent_to_kitchen';
@@ -87,7 +92,7 @@ export type EventBody =
   | {
       type: 'device.heartbeat';
       /** `status` hanya dikirim sensor: kondisi radar menurut firmware (ok, tidak ada frame, atau tertutup). */
-      payload: { kind: 'sensor' | 'printer' | 'terminal'; status?: 'ok' | 'no_radar' | 'blocked' };
+      payload: { kind: 'sensor' | 'printer' | 'terminal' | 'kds'; status?: 'ok' | 'no_radar' | 'blocked' };
     }
   | {
       type: 'device.posture';

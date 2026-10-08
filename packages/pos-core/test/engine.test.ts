@@ -613,8 +613,10 @@ describe('pindah meja, pisah bill, gabung order, bayar sebagian', () => {
       const [m] = await evs('order.items_moved');
       expect(m!.payload).toEqual({
         fromOrderId: id, toOrderId: dest.id, kind: 'SPLIT', sent: false,
-        items: [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 22_000 }],
+        items: [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 22_000, sentQty: 0 }],
       });
+      const created = (await evs('order.created')).map((e) => e.payload);
+      expect(created).toEqual([{ orderId: id, orderType: 'DINE_IN', tableNo: '5' }, { orderId: dest.id, orderType: 'DINE_IN', tableNo: '5' }]);
       expect(verifyChain(await c.events())).toEqual([]);
     });
 

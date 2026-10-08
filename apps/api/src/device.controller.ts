@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, ForbiddenException, Get, Inject, Param, Post, Req } from '@nestjs/common';
 import { Public, requireApi, requireDevice, type AuthedRequest } from './auth';
 import { DeviceService } from './device.service';
+import { KdsService } from './kds.service';
 import { PairingService, type PairingInput } from './pairing.service';
 
 @Controller('v1')
@@ -8,6 +9,7 @@ export class DeviceController {
   constructor(
     @Inject(DeviceService) private readonly devices: DeviceService,
     @Inject(PairingService) private readonly pairing: PairingService,
+    @Inject(KdsService) private readonly kds: KdsService,
   ) {}
 
   /** Owner/ops membuat kode pairing sekali pakai (berlaku 15 menit) untuk perangkat baru. */
@@ -46,6 +48,14 @@ export class DeviceController {
     const device = requireDevice(req);
     if (device.deviceKind === 'kds') throw new ForbiddenException('jenis perangkat ini tidak menandatangani event');
     return this.devices.enrollKey(device, body?.publicKey);
+  }
+
+  /** Tiket dapur outlet ini, untuk layar dapur (perangkat KDS) dan terminal. */
+  @Get('kds/board')
+  kdsBoard(@Req() req: AuthedRequest) {
+    const device = requireDevice(req);
+    if (device.deviceKind === 'sensor') throw new ForbiddenException('jenis perangkat ini tidak membaca tiket dapur');
+    return this.kds.board(device);
   }
 
   @Get('devices')

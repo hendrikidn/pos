@@ -4,6 +4,7 @@ import {
 } from '@nestjs/common';
 import { newToken, sha256, SUSPENDED_MESSAGE, type ApiAuth } from './auth';
 import { Database } from './db/database';
+import type { Queryable } from './db/driver';
 import { CLOCK, type Clock } from './pipeline.service';
 
 export const PAIRING_TTL_MS = 15 * 60 * 1000;
@@ -43,6 +44,24 @@ function generateCode(): string {
   return s;
 }
 const display = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
+
+/**
+ * Kapabilitas `kds` outlet mengikuti perangkat layar dapur yang masih aktif: aturan R2 versi KDS (status dapur) hanya dipakai bila
+ * dapur benar-benar punya layar, selain itu dipakai versi proksi (waktu sejak dikirim). Perubahan dicatat di audit.
+ */
+async function followKdsCapability(q: Queryable, tenantId: string, outletId: string, actor: string): Promise<void> {
+  const active = (await q.query<{ n: number }>("select count(*)::int as n from device where outlet_id = $1 and kind = 'kds' and revoked_at is null", [outletId])).rows[0]!.n > 0;
+  const r = await q.query(
+    `update outlet set capabilities = jsonb_set(capabilities, '{kds}', $2::jsonb)
+     where id = $1 and coalesce((capabilities->>'kds')::boolean, false) <> $3::boolean`,
+    [outletId, JSON.stringify(active), active],
+  );
+  if (r.rowCount) {
+    await q.query('insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, $3, $4::jsonb)', [
+      tenantId, actor, 'outlet.capability.kds', JSON.stringify({ outletId, kds: active }),
+    ]);
+  }
+}
 
 @Injectable()
 export class PairingService {
@@ -157,6 +176,7 @@ export class PairingService {
           [row.device_id, row.tenant_id, row.outlet_id, row.kind, sha256(token), row.terminal_id],
         );
         await q.query('update pairing_code set used_at = to_timestamp($2 / 1000.0) where code_hash = $1', [hashCode(code), now]);
+        if (row.kind === 'kds') await followKdsCapability(q, row.tenant_id, row.outlet_id, `device:${row.device_id}`);
         await q.query('insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, $3, $4::jsonb)', [
           row.tenant_id, `device:${row.device_id}`, 'device.pairing.redeem', JSON.stringify({ deviceId: row.device_id, hardwareId: hw }),
         ]);
@@ -171,8 +191,12 @@ export class PairingService {
   /** Owner mencabut token perangkat (hilang, dicuri, atau diganti). Event yang sudah ada tetap tersimpan. */
   async revoke(auth: ApiAuth, deviceId: string): Promise<void> {
     await this.db.tenantTx(auth.tenantId, async (q) => {
-      const r = await q.query('update device set revoked_at = now() where id = $1 and revoked_at is null', [deviceId]);
+      const r = await q.query<{ kind: Kind; outlet_id: string }>(
+        'update device set revoked_at = now() where id = $1 and revoked_at is null returning kind, outlet_id',
+        [deviceId],
+      );
       if (!r.rowCount) throw new NotFoundException('perangkat tidak ditemukan atau sudah dicabut');
+      if (r.rows[0]!.kind === 'kds') await followKdsCapability(q, auth.tenantId, r.rows[0]!.outlet_id, auth.userId);
       await q.query('insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, $3, $4::jsonb)', [
         auth.tenantId, auth.userId, 'device.revoke', JSON.stringify({ deviceId }),
       ]);

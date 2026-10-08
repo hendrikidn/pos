@@ -57,8 +57,9 @@ const furthest = (a: KitchenStatus | null, b: KitchenStatus | null): KitchenStat
   !a ? b : !b ? a : KITCHEN_RANK[a] >= KITCHEN_RANK[b] ? a : b;
 
 /** Baris pesanan untuk payload event: nama dan harga disalin saat kejadian. */
-const eventLine = (l: CartLine, qty: number): LineItem => ({
+const eventLine = (l: CartLine, qty: number, sentQty?: number): LineItem => ({
   itemId: l.itemId, name: l.name, qty, unitPrice: l.unitPrice,
+  ...(sentQty !== undefined ? { sentQty } : {}),
   ...(l.options ? { options: l.options.map((x) => ({ group: x.group, name: x.name, price: x.price })) } : {}),
   ...(l.note ? { note: l.note } : {}),
 });
@@ -282,6 +283,7 @@ export class PosEngine {
       type: 'order.created',
       payload: {
         orderId: id, orderType: type,
+        ...(type === 'DINE_IN' && opts.tableNo ? { tableNo: opts.tableNo } : {}),
         ...(opts.employeeId ? { employeeId: opts.employeeId } : {}),
         ...(approverId ? { approverId } : {}),
       },
@@ -409,7 +411,7 @@ export class PosEngine {
     this.counter += 1;
     await this.d.store.write({ counter: this.counter });
     const id = `${this.cfg.deviceId}-${this.counter}`;
-    const created = await this.emit({ type: 'order.created', payload: { orderId: id, orderType: o.type } });
+    const created = await this.emit({ type: 'order.created', payload: { orderId: id, orderType: o.type, ...(o.tableNo ? { tableNo: o.tableNo } : {}) } });
     const dest: OrderRecord = {
       id, number: this.counter, type: o.type, tableNo: o.tableNo, creatorId: w.value, createdAt: this.d.now(), shiftId: this.shift.id,
       items: [], discount: 0, payments: [], refunds: [], receipt: 'NONE', kitchen: null, splitFrom: o.id,
@@ -423,7 +425,7 @@ export class PosEngine {
       const movedSent = Math.max(0, p.qty - unsent);
       sent ||= movedSent > 0;
       placeLine(dest, { itemId: l.itemId, name: l.name, qty: p.qty, unitPrice: l.unitPrice, sentQty: movedSent, ...(l.options ? { options: l.options } : {}), ...(l.note ? { note: l.note } : {}) });
-      moved.push(eventLine(l, p.qty));
+      moved.push(eventLine(l, p.qty, movedSent));
       l.qty -= p.qty;
       l.sentQty -= movedSent;
     }
@@ -466,7 +468,7 @@ export class PosEngine {
     }
     if (from.items.length === 0) return fail('EMPTY_ORDER', `Order #${from.number} masih kosong.`);
 
-    const moved = from.items.map((l) => eventLine(l, l.qty));
+    const moved = from.items.map((l) => eventLine(l, l.qty, l.sentQty));
     const sent = from.items.some((l) => l.sentQty > 0);
     const kitchen = furthest(into.kitchen, from.kitchen);
     for (const l of from.items) placeLine(into, { ...l });

@@ -51,6 +51,7 @@ async function main() {
   const termKem = await admin.createDevice('demo', 'kemang', 'term-kem', 'terminal');
   const sensorKem = await admin.createDevice('demo', 'kemang', 'sensor-kem', 'sensor');
   const posToken = await admin.createDevice('demo', 'senopati', 'pos-1', 'terminal'); // terminal POS yang bisa Anda pakai langsung
+  const kdsToken = await admin.createDevice('demo', 'senopati', 'kds-sen', 'kds'); // layar dapur: buka POS dengan token ini
   const liveSensorToken = await admin.createDevice('demo', 'senopati', 'sensor-pos1', 'sensor'); // sensor ESP32 sungguhan untuk terminal pos-1
   const owner = await admin.createApiToken('demo', 'owner-demo', 'OWNER', 'demo owner');
   const manager = await admin.createApiToken('demo', 'rina', 'MANAGER', 'demo manager');
@@ -130,6 +131,24 @@ async function main() {
   }
   s.heartbeat('terminal', at(2));
 
+  // Layar dapur (KDS): pesanan lama sudah disajikan; tiga tiket hidup dengan umur berbeda (normal, perhatian, terlambat + item susulan).
+  for (const e of [...s.events]) {
+    if (e.type === 'order.sent_to_kitchen' && e.deviceId === 'term-sen') {
+      s.pos({ type: 'kitchen.status_changed', payload: { orderId: e.payload.orderId, status: 'SERVED' } }, e.deviceTime + 8 * MIN, 'dapur');
+    }
+  }
+  const liveOrder = (id: string, type: 'DINE_IN' | 'TAKE_AWAY', table: string | undefined, minutesAgo: number, items: ReturnType<typeof line>[]) => {
+    s.presence(at(minutesAgo + 1), at(minutesAgo - 1));
+    s.pos({ type: 'order.created', payload: { orderId: id, orderType: type, ...(table ? { tableNo: table } : {}) } }, at(minutesAgo, 5), 'budi');
+    s.pos({ type: 'order.sent_to_kitchen', payload: { orderId: id, items } }, at(minutesAgo, 10), 'budi');
+  };
+  liveOrder('term-sen-L1', 'DINE_IN', '4', 6, [line('matcha', 'Matcha Latte', 1, 40_000, [LARGE, BOBA]), line('croissant', 'Croissant', 2, 24_000)]);
+  s.pos({ type: 'kitchen.status_changed', payload: { orderId: 'term-sen-L1', status: 'COOKING' } }, at(4), 'dapur');
+  liveOrder('term-sen-L2', 'TAKE_AWAY', undefined, 1, [line('americano', 'Americano', 2, 20_000)]);
+  liveOrder('term-sen-L3', 'DINE_IN', '9', 13, [line('nasi-goreng', 'Nasi Goreng', 1, 43_000, [{ group: 'Level pedas', name: 'Pedas', price: 0 }, { group: 'Tambahan', name: 'Telur', price: 5_000 }])]);
+  s.pos({ type: 'kitchen.status_changed', payload: { orderId: 'term-sen-L3', status: 'COOKING' } }, at(11), 'dapur');
+  s.pos({ type: 'order.sent_to_kitchen', payload: { orderId: 'term-sen-L3', items: [line('teh', 'Teh Tarik', 2, 18_000)] } }, at(2), 'budi');
+
   const send = async (deviceId: string, token: string) => {
     const events = s.events.filter((e) => e.deviceId === deviceId).sort((a, b) => a.seq - b.seq);
     for (let i = 0; i < events.length; i += 500) await call('/v1/events', token, { events: events.slice(i, i + 500) });
@@ -196,6 +215,9 @@ lalu buka http://localhost:3001
 Terminal POS demo (Pengaturan di aplikasi POS, npm run pos lalu buka http://localhost:3002):
   API     http://localhost:${port}
   TOKEN   ${posToken}
+Layar dapur (KDS): sama dengan terminal POS, tetapi tempel token ini di layar "Hubungkan terminal":
+  API     http://localhost:${port}
+  TOKEN   ${kdsToken}
 Sensor ESP32 (isi di firmware/sensor-node/app/secrets.h):
   SERVER_URL   http://<IP-komputer-ini>:${port}
   DEVICE_ID    sensor-pos1

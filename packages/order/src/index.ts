@@ -1,3 +1,4 @@
+export * from './kds';
 export * from './modifiers';
 import type { EventBody, KitchenStatus, OrderType, PosEvent } from '@pos/events';
 

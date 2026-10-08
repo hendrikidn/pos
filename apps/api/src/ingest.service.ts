@@ -30,6 +30,9 @@ const bool = (p: Payload, k: string) => typeof p[k] === 'boolean';
 const oneOf = (p: Payload, k: string, values: readonly string[]) => typeof p[k] === 'string' && values.includes(p[k] as string);
 const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const;
 
+/** Layar dapur hanya mengubah status tiket (dan heartbeat); token yang bocor tidak boleh bisa memalsukan pembayaran. */
+const KDS_EVENT_TYPES: readonly EventType[] = ['kitchen.status_changed', 'device.heartbeat'];
+
 const MAX_LINE_ITEMS = 100;
 
 /** Item pesanan opsional: dibatasi jumlah dan panjangnya agar satu event tidak bisa membengkak. */
@@ -44,6 +47,7 @@ function badItems(p: Payload): string | null {
     if (!str(l, 'name') || (l['name'] as string).length > 120) return 'nama item tidak valid';
     if (!Number.isInteger(l['qty']) || (l['qty'] as number) < 1 || (l['qty'] as number) > 999) return 'qty harus bilangan bulat 1–999';
     if (!Number.isInteger(l['unitPrice']) || (l['unitPrice'] as number) < 0) return 'unitPrice harus bilangan bulat ≥ 0';
+    if (l['sentQty'] !== undefined && (!Number.isInteger(l['sentQty']) || (l['sentQty'] as number) < 0 || (l['sentQty'] as number) > (l['qty'] as number))) return 'sentQty harus bilangan bulat 0..qty';
     if (l['note'] !== undefined && (typeof l['note'] !== 'string' || l['note'].length > 140)) return 'note harus teks maks. 140';
     if (l['options'] !== undefined) {
       if (!Array.isArray(l['options']) || l['options'].length > 40) return 'options harus berisi maks. 40 baris';
@@ -67,6 +71,7 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     if (!str(p, 'orderId') || !oneOf(p, 'orderType', ['DINE_IN', 'TAKE_AWAY', 'EMPLOYEE'])) return 'orderId/orderType tidak valid';
     if (p['employeeId'] !== undefined && !str(p, 'employeeId')) return 'employeeId tidak valid';
     if (p['approverId'] !== undefined && (!str(p, 'approverId') || p['orderType'] !== 'EMPLOYEE')) return 'approverId hanya untuk order karyawan';
+    if (p['tableNo'] !== undefined && (!str(p, 'tableNo') || (p['tableNo'] as string).length > 10)) return 'tableNo tidak valid';
     return null;
   },
   'order.sent_to_kitchen': (p) => (str(p, 'orderId') ? badItems(p) : 'orderId wajib'),
@@ -98,7 +103,7 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
       ? null : 'state/source tidak valid',
   'printer.paper_claim': (p) => (bool(p, 'active') ? null : 'active wajib boolean'),
   'device.heartbeat': (p) =>
-    oneOf(p, 'kind', ['sensor', 'printer', 'terminal']) && (p['status'] === undefined || oneOf(p, 'status', ['ok', 'no_radar', 'blocked']))
+    oneOf(p, 'kind', ['sensor', 'printer', 'terminal', 'kds']) && (p['status'] === undefined || oneOf(p, 'status', ['ok', 'no_radar', 'blocked']))
       ? null
       : 'kind/status tidak valid',
   'device.posture': (p) =>
@@ -171,6 +176,9 @@ export class IngestService {
       if (typeof parsed === 'string') throw new BadRequestException(`event[${i}]: ${parsed}`);
       if (parsed.deviceId !== auth.deviceId) throw new BadRequestException(`event[${i}]: deviceId tidak sesuai token`);
       if (parsed.outletId !== auth.outletId) throw new BadRequestException(`event[${i}]: outletId tidak sesuai token`);
+      if (auth.deviceKind === 'kds' && !KDS_EVENT_TYPES.includes(parsed.type)) {
+        throw new BadRequestException(`event[${i}]: layar dapur hanya boleh mengirim ${KDS_EVENT_TYPES.join(', ')}`);
+      }
       events.push(parsed);
     }
     events.sort((a, b) => a.seq - b.seq);
@@ -277,7 +285,7 @@ export class IngestService {
         ]);
       }
 
-      const serverTime = Date.now();
+      const serverTime = now;
       await q.query('update device set last_seq = $2, last_hash = $3, last_seen_ms = $4 where id = $1', [
         auth.deviceId, lastSeq, lastHash, serverTime,
       ]);

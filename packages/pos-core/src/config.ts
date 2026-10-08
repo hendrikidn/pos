@@ -8,6 +8,8 @@ export interface DeviceConfig {
   version: string;
   serverTime: number;
   deviceId: string;
+  /** Tidak ada pada konfigurasi lama: dianggap terminal. Layar dapur menerima staf dan menu kosong. */
+  deviceKind?: 'terminal' | 'sensor' | 'kds';
   outlet: {
     id: string;
     merchantName: string;

@@ -235,3 +235,42 @@ main { flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch
 .split-list .qty b { min-width: 22px; text-align: center; font-size: 17px; }
 .split-list .qty button { min-height: 44px; width: 44px; padding: 0; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 22px; line-height: 1; }
 .pill.s-MERGED { background: var(--surface-2); color: var(--muted); }
+
+/* Layar dapur (KDS) */
+.kds { min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); }
+.kds-top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.kds-top .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; }
+.kds-counts { display: flex; gap: 16px; font-size: 16px; color: var(--muted); } .kds-counts b { color: var(--text); font-size: 20px; }
+.kds-link { margin-left: auto; font-size: 14px; font-weight: 700; } .kds-link.ok { color: var(--ok); } .kds-link.bad { color: var(--danger); }
+.kds-voids { display: grid; gap: 8px; padding: 10px 16px 0; }
+.kds-void { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--danger-soft); color: var(--danger); border: 2px solid var(--danger); font-size: 17px; }
+.kds-tabs { display: none; gap: 8px; padding: 10px 16px 0; }
+.kds-tabs button { flex: 1; min-height: 52px; background: var(--surface); color: var(--text); border: 1.5px solid var(--line); font-weight: 700; }
+.kds-tabs button.on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.kds-board { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 14px 16px 24px; align-items: start; }
+.kds-col h2 { margin: 0 0 10px; font-size: 18px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.kds-empty { color: var(--muted); padding: 18px 0; }
+.kds-card { background: var(--surface); border: 2px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 12px; box-shadow: var(--shadow, 0 2px 8px rgba(0,0,0,.06)); }
+.kds-card.warn { border-color: var(--warn-line); background: var(--warn-bg); }
+.kds-card.late { border-color: var(--danger); background: var(--danger-soft); }
+.kds-card.has-new { outline: 3px solid var(--primary); }
+.kds-card header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.kds-card h3 { margin: 0; font-size: 22px; }
+.kds-card time { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.kds-card.late time { color: var(--danger); } .kds-card.warn time { color: var(--warn); }
+.kds-banner { margin: 8px 0 0; padding: 6px 10px; border-radius: 8px; background: var(--primary); color: var(--on-primary); font-weight: 800; text-align: center; letter-spacing: .04em; }
+.kds-lines { list-style: none; margin: 10px 0 12px; padding: 0; display: grid; gap: 8px; }
+.kds-lines li { display: grid; grid-template-columns: auto 1fr; gap: 10px; font-size: 21px; line-height: 1.25; }
+.kds-lines li.fresh { background: var(--primary-soft); border-radius: 8px; padding: 4px 6px; margin: 0 -6px; }
+.kds-qty { min-width: 2.2ch; font-size: 26px; }
+.kds-lines small { display: block; font-size: 16px; color: var(--muted); }
+.kds-lines small.kds-note { color: var(--text); font-weight: 700; font-style: italic; }
+.kds-tag { margin-left: 8px; padding: 1px 7px; border-radius: 6px; background: var(--primary); color: var(--on-primary); font-size: 12px; font-style: normal; font-weight: 800; vertical-align: middle; }
+.kds-act { width: 100%; min-height: 64px; font-size: 20px; font-weight: 800; border-radius: 14px; }
+.kds-act.s-READY { background: var(--ok); } .kds-act.s-SERVED { background: var(--text); color: var(--surface); }
+@media (max-width: 899px) {
+  .kds-tabs { display: flex; }
+  .kds-board { grid-template-columns: 1fr; }
+  .kds-col { display: none; } .kds-col.show { display: block; } .kds-col h2 { display: none; }
+  .kds-counts { display: none; }
+}

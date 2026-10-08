@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { lineKey, lineLabel, type OrderRecord, type StaffPublic } from '@pos/pos-core';
 import { ApprovalDialog, Modal, PinPad } from './dialogs';
 import { CustomerDisplay, DISPLAY_CHANNEL, type DisplayView } from './CustomerDisplay';
+import { Kds } from './Kds';
 import { Logo } from './Logo';
 import { OrderPanel } from './OrderPanel';
 import { hardware, isNative, kioskWanted, loadPrinterSetting, savePrinterSetting, setKioskWanted, type PrinterKind } from './native';
@@ -70,6 +71,7 @@ function Pos() {
   });
 
   if (!boot) return <div className="boot">Memuat…</div>;
+  if (boot.kind === 'kds') return <Kds runtime={boot.runtime} />;
   if (boot.kind === 'setup') return <Setup settings={boot.settings} error={boot.error} />;
   if (!rt || !ctx) return <div className="boot">Memuat…</div>;
   const { engine } = rt;

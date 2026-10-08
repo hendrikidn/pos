@@ -4,6 +4,7 @@ import {
 } from '@pos/pos-core';
 import type { PrinterState } from '@pos/events';
 import { IdbStore } from './idb-store';
+import { createKdsRuntime, type KdsRuntime } from './kds-runtime';
 import {
   hardware, isNative, kioskWanted, loadPrinterSetting, NativeSigner, TcpTransport, UsbTransport, type Posture,
 } from './native';
@@ -95,7 +96,10 @@ export interface Runtime {
   syncNow(): Promise<SyncResult | null>;
 }
 
-export type Boot = { kind: 'setup'; settings: Settings; error: string | null } | { kind: 'ready'; runtime: Runtime };
+export type Boot =
+  | { kind: 'setup'; settings: Settings; error: string | null }
+  | { kind: 'ready'; runtime: Runtime }
+  | { kind: 'kds'; runtime: KdsRuntime };
 
 export const isDemo = () => localStorage.getItem('pos.demo') === '1';
 export const setDemo = (on: boolean) => (on ? localStorage.setItem('pos.demo', '1') : localStorage.removeItem('pos.demo'));
@@ -125,6 +129,8 @@ export async function createRuntime(): Promise<Boot> {
       if (r.status === 'updated') cached = await cc.cached();
       else configError = r.status === 'unchanged' ? null : r.message;
     }
+    // Perangkat layar dapur: bukan terminal kasir, tidak ada engine, staf, atau printer.
+    if (cached?.config.deviceKind === 'kds') return { kind: 'kds', runtime: await createKdsRuntime(settings, store, cached.config) };
     if (cached) {
       config = toPosConfig(cached.config);
       version = cached.config.version;

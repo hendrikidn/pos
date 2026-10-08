@@ -1,4 +1,4 @@
-import type { KitchenStatus, OrderType, PaymentMethod } from '@pos/events';
+import type { KitchenStatus, LineItem, OrderType, PaymentMethod } from '@pos/events';
 import type { ChosenOption, ModifierGroup, OrderState, Policy, Role, TableDef } from '@pos/order';
 
 export interface MenuItem {
@@ -106,6 +106,21 @@ export interface OrderRecord {
   splitFrom?: string;
   /** Seluruh item order ini sudah digabung ke order lain (status MERGED). */
   mergedInto?: string;
+  /** Order ini diserahkan ke terminal lain dan belum selesai diurus: terkunci (status MERGED) sampai diambil atau ditarik kembali. */
+  handedOff?: boolean;
+  /** Order ini dibuat dari order terminal lain yang diserahkan kepadanya. */
+  takenFrom?: { deviceId: string; orderId: string };
+}
+
+/** Order milik terminal lain yang menunggu diambil (dari server). Isinya salinan `order.handed_off` dari rantai terminal asal. */
+export interface Handoff {
+  orderId: string;
+  fromDeviceId: string;
+  orderType: 'DINE_IN' | 'TAKE_AWAY';
+  tableNo?: string;
+  items: LineItem[];
+  /** Kapan diserahkan (jam server, ms). */
+  at: number;
 }
 
 export interface ShiftRecord {

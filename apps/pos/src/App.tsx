@@ -185,8 +185,9 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
 
 function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   const { engine } = ctx.rt;
-  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | null>(null);
+  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | null>(null);
   const [table, setTable] = useState('');
+  const incoming = ctx.rt.handoffs().incoming;
   const shift = engine.currentShift();
   const orders = engine.listOrders().filter((o) => o.shiftId === shift?.id);
   const current = selected ? engine.getOrder(selected) : undefined;
@@ -215,14 +216,15 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           <button onClick={() => void create('TAKE_AWAY')}>+ Take-away</button>
           <button className="secondary" onClick={() => setAsking(engine.config.tables?.length ? 'tables' : 'table')}>+ Dine-in</button>
           <button className="secondary" onClick={() => setAsking('employee')}>+ Karyawan</button>
+          {incoming.length > 0 && <button className="incoming" onClick={() => setAsking('incoming')}>Order masuk · {incoming.length}</button>}
         </div>
         <ul className="strip-list" aria-label="Order di shift ini">
           {orders.length === 0 && <li className="strip-empty">Belum ada order di shift ini.</li>}
-          {orders.filter((o) => o.state.status !== 'MERGED').map((o) => (
+          {orders.filter((o) => o.state.status !== 'MERGED' || o.handedOff).map((o) => (
             <li key={o.id}>
               <button className={`order-card ${selected === o.id ? 'on' : ''}`} onClick={() => ctx.selectOrder(o.id)}>
                 <span><b>#{o.number}</b> {orderLabel(o, engine.staff())}</span>
-                <span className={`pill s-${o.state.status}`}>{STATUS_LABEL[o.state.status]}</span>
+                <span className={`pill s-${o.state.status}`}>{o.handedOff ? 'Diserahkan' : STATUS_LABEL[o.state.status]}</span>
                 <span className="amt">{rp(engine.totals(o).total)}</span>
               </button>
             </li>
@@ -245,6 +247,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           <div className="actions"><button disabled={!table} onClick={() => void create('DINE_IN', { tableNo: table })}>Buat order</button></div>
         </Modal>
       )}
+      {asking === 'incoming' && <IncomingDialog ctx={ctx} onClose={() => setAsking(null)} />}
       {asking === 'employee' && (
         <Modal title="Order karyawan" onClose={() => setAsking(null)}>
           <p className="muted">Pilih karyawan penerima. Order karyawan dipantau: makan kedua hari ini, atau untuk diri sendiri, memerlukan persetujuan supervisor.</p>
@@ -256,6 +259,44 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Order yang diserahkan terminal lain (mis. dari ponsel pelayan): diambil di sini lalu ditagih seperti order biasa. */
+function IncomingDialog({ ctx, onClose }: { ctx: Ctx; onClose: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const list = ctx.rt.handoffs().incoming;
+  const take = async (orderId: string) => {
+    setBusy(orderId);
+    const r = await ctx.rt.takeHandoff(orderId);
+    setBusy(null);
+    ctx.bump();
+    if (!r.ok) return ctx.toast(r.message, 'error');
+    ctx.selectOrder(r.value.id);
+    onClose();
+  };
+  return (
+    <Modal title="Order masuk dari terminal lain" onClose={onClose}>
+      {list.length === 0 && <p className="muted">Tidak ada order yang menunggu.</p>}
+      <ul className="incoming-list">
+        {list.map((h) => {
+          const total = h.items.reduce((s, l) => s + l.qty * l.unitPrice, 0);
+          return (
+            <li key={h.orderId}>
+              <div>
+                <b>{h.orderType === 'DINE_IN' ? `Dine-in${h.tableNo ? ` · Meja ${h.tableNo}` : ''}` : 'Take-away'}</b>
+                <small> dari {h.fromDeviceId}</small>
+                <ul className="muted">
+                  {h.items.map((l, i) => <li key={i}>{l.qty}× {l.name}{l.options?.length ? ` (${l.options.map((o) => o.name).join(', ')})` : ''}{(l.sentQty ?? 0) > 0 ? ' · sudah ke dapur' : ''}</li>)}
+                </ul>
+                <small>Subtotal {rp(total)}</small>
+              </div>
+              <button disabled={busy !== null} onClick={() => void take(h.orderId)}>{busy === h.orderId ? 'Mengambil…' : 'Ambil'}</button>
+            </li>
+          );
+        })}
+      </ul>
+    </Modal>
   );
 }
 

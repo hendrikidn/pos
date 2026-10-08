@@ -3,6 +3,7 @@ import { Public, requireApi, requireDevice, type AuthedRequest } from './auth';
 import { DeviceService } from './device.service';
 import { KdsService } from './kds.service';
 import { TablesService } from './tables.service';
+import { HandoffService } from './handoff.service';
 import { ReceiptService } from './receipt.service';
 import { PairingService, type PairingInput } from './pairing.service';
 
@@ -13,6 +14,7 @@ export class DeviceController {
     @Inject(PairingService) private readonly pairing: PairingService,
     @Inject(KdsService) private readonly kds: KdsService,
     @Inject(TablesService) private readonly tables: TablesService,
+    @Inject(HandoffService) private readonly handoffs: HandoffService,
     @Inject(ReceiptService) private readonly receipts: ReceiptService,
   ) {}
 
@@ -68,6 +70,22 @@ export class DeviceController {
     const device = requireDevice(req);
     if (device.deviceKind !== 'terminal') throw new ForbiddenException('hanya terminal yang membaca denah meja');
     return this.tables.board(device);
+  }
+
+  /** Order yang diserahkan terminal lain dan menunggu diambil, serta nasib order yang diserahkan terminal ini. Hanya terminal. */
+  @Get('handoffs')
+  listHandoffs(@Req() req: AuthedRequest) {
+    const device = requireDevice(req);
+    if (device.deviceKind !== 'terminal') throw new ForbiddenException('hanya terminal yang menangani serah-terima order');
+    return this.handoffs.list(device);
+  }
+
+  /** Klaim atomik atas order yang diserahkan (mengambil, atau menarik kembali oleh terminal asal). 409 bila sudah diambil atau sedang diklaim terminal lain. */
+  @Post('handoffs/:orderId/claim')
+  claimHandoff(@Req() req: AuthedRequest, @Param('orderId') orderId: string) {
+    const device = requireDevice(req);
+    if (device.deviceKind !== 'terminal') throw new ForbiddenException('hanya terminal yang menangani serah-terima order');
+    return this.handoffs.claim(device, orderId);
   }
 
   /** Struk digital untuk customer (halaman /r/<token> di dashboard memanggil ini). Publik: tokennya sendiri yang menjadi kredensial. */

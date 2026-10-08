@@ -55,6 +55,19 @@ export type EventBody =
     }
   | { type: 'order.table_changed'; payload: { orderId: string; from?: string; to: string } }
   | {
+      type: 'order.handed_off';
+      /**
+       * Order diserahkan ke terminal lain (mis. dari ponsel pelayan ke kasir). `items` = isi order saat diserahkan (yang sudah dikirim ke dapur
+       * membawa `sentQty`); terminal penerima mengklaimnya ke server lalu mencatat `order.items_moved` (MERGE) dari order ini ke order barunya.
+       */
+      payload: { orderId: string; orderType: Exclude<OrderType, 'EMPLOYEE'>; tableNo?: string; items: LineItem[] };
+    }
+  | {
+      type: 'order.handoff_reclaimed';
+      /** Terminal asal menarik kembali order yang belum diambil terminal lain (setelah klaim ke server berhasil). */
+      payload: { orderId: string };
+    }
+  | {
       type: 'order.items_moved';
       payload: {
         fromOrderId: string;
@@ -137,7 +150,7 @@ export type EventBody =
 export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
-  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
+  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
   'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.digital', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',
@@ -314,6 +327,8 @@ export function orderIdOf(e: PosEvent): string | undefined {
     case 'order.created':
     case 'order.sent_to_kitchen':
     case 'order.table_changed':
+    case 'order.handed_off':
+    case 'order.handoff_reclaimed':
     case 'bill.hold_reason':
     case 'kitchen.status_changed':
     case 'bill.printed':

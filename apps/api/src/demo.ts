@@ -44,7 +44,7 @@ async function main() {
 
   await admin.createTenant('demo', 'Demo F&B');
   const caps = { sensor: true, kds: false, printerReportsStatus: true };
-  await admin.createOutlet('demo', 'senopati', 'Kopi Senopati', { terminals: ['term-sen', 'pos-1'], capabilities: caps, cctvRetentionDays: 7 });
+  await admin.createOutlet('demo', 'senopati', 'Kopi Senopati', { terminals: ['term-sen', 'pos-1', 'pos-2'], capabilities: caps, cctvRetentionDays: 7 });
   // Kemang = outlet baru yang masih dalam mode shadow (insiden dicatat tetapi tidak dikirim); Senopati sudah aktif penuh.
   await admin.createOutlet('demo', 'kemang', 'Kopi Kemang', { terminals: ['term-kem'], capabilities: caps, cctvRetentionDays: 14, shadowDays: 14 });
   const term = await admin.createDevice('demo', 'senopati', 'term-sen', 'terminal');
@@ -52,6 +52,7 @@ async function main() {
   const termKem = await admin.createDevice('demo', 'kemang', 'term-kem', 'terminal');
   const sensorKem = await admin.createDevice('demo', 'kemang', 'sensor-kem', 'sensor');
   const posToken = await admin.createDevice('demo', 'senopati', 'pos-1', 'terminal'); // terminal POS yang bisa Anda pakai langsung
+  const pos2Token = await admin.createDevice('demo', 'senopati', 'pos-2', 'terminal'); // terminal kedua: coba serah-terima order dan denah meja bersama
   const kdsToken = await admin.createDevice('demo', 'senopati', 'kds-sen', 'kds'); // layar dapur: buka POS dengan token ini
   const liveSensorToken = await admin.createDevice('demo', 'senopati', 'sensor-pos1', 'sensor'); // sensor ESP32 sungguhan untuk terminal pos-1
   const owner = await admin.createApiToken('demo', 'owner-demo', 'OWNER', 'demo owner');
@@ -252,6 +253,9 @@ lalu buka http://localhost:3001
 Terminal POS demo (Pengaturan di aplikasi POS, npm run pos lalu buka http://localhost:3002):
   API     http://localhost:${port}
   TOKEN   ${posToken}
+Terminal POS kedua (buka di peramban/profil lain untuk mencoba serah-terima order antar-terminal):
+  API     http://localhost:${port}
+  TOKEN   ${pos2Token}
 Layar dapur (KDS): sama dengan terminal POS, tetapi tempel token ini di layar "Hubungkan terminal":
   API     http://localhost:${port}
   TOKEN   ${kdsToken}

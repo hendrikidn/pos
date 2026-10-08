@@ -1,6 +1,6 @@
 import {
   ConfigClient, demoConfig, EscPosPrinter, PosEngine, Recorder, STALE_AFTER_MS, SyncClient, toPosConfig, WebCryptoSigner,
-  type KeyPairHolder, type Printer, type PosConfig, type Signer, type SyncResult,
+  type Handoff, type KeyPairHolder, type OrderRecord, type Printer, type PosConfig, type Result, type Signer, type SyncResult,
 } from '@pos/pos-core';
 import type { KitchenStatus, PrinterState } from '@pos/events';
 import type { KdsBoard, TableBoard } from '@pos/order';
@@ -95,6 +95,14 @@ export interface Runtime {
    * `at` = kapan terakhir berhasil, agar UI bisa menandai data usang.
    */
   tableBoard(): { board: TableBoard; at: number } | null;
+  /** Serah-terima order antar-terminal. Tidak tersedia di mode demo (perlu server). */
+  handoffs(): { available: boolean; incoming: Handoff[] };
+  /** Menyerahkan order ke terminal lain; event disinkronkan segera supaya terminal lain bisa melihatnya. */
+  handOff(orderId: string): Promise<Result<OrderRecord>>;
+  /** Mengambil order yang diserahkan: klaim atomik ke server dulu, baru order dibuat di terminal ini. */
+  takeHandoff(orderId: string): Promise<Result<OrderRecord>>;
+  /** Menarik kembali order yang diserahkan, selama belum diambil terminal lain (klaim ke server dulu). */
+  reclaimHandoff(orderId: string): Promise<Result<OrderRecord>>;
   /**
    * Alamat struk digital untuk QR; null bila server belum memberi alamat dasarnya (`DASHBOARD_URL` belum diatur) atau terminal
    * dalam mode demo. API sendiri tidak menyajikan halaman struk, jadi alamat tebakan hanya akan menghasilkan 404 bagi customer.
@@ -246,6 +254,33 @@ export async function createRuntime(): Promise<Boot> {
     }
   };
 
+  // Serah-terima order: daftar order terminal lain yang bisa diambil, dan hasil order yang diserahkan terminal ini.
+  let incoming: Handoff[] = [];
+  const pollHandoffs = async () => {
+    if (demo || !settings.token) return;
+    try {
+      const res = await fetch(`${baseUrl}/v1/handoffs`, { headers: { authorization: `Bearer ${settings.token}` } });
+      if (!res.ok) return;
+      const body = (await res.json()) as { incoming: Handoff[]; outgoing: { orderId: string; state: string; by?: string }[] };
+      incoming = body.incoming;
+      for (const o of body.outgoing) if (o.state === 'ACCEPTED' && o.by) await engine.finishHandoff(o.orderId, o.by);
+      notify();
+    } catch {
+      /* offline: daftar terakhir tetap ditampilkan */
+    }
+  };
+  const claim = async (orderId: string): Promise<Result<Handoff>> => {
+    if (demo || !settings.token) return { ok: false, code: 'NO_SERVER', message: 'Serah-terima order memerlukan koneksi ke server.' };
+    try {
+      const res = await fetch(`${baseUrl}/v1/handoffs/${encodeURIComponent(orderId)}/claim`, { method: 'POST', headers: { authorization: `Bearer ${settings.token}` } });
+      const body = (await res.json().catch(() => ({}))) as Partial<Handoff> & { message?: string };
+      if (!res.ok) return { ok: false, code: `HANDOFF_${res.status}`, message: body.message ?? `Server menjawab ${res.status}.` };
+      return { ok: true, value: body as Handoff };
+    } catch {
+      return { ok: false, code: 'OFFLINE', message: 'Tidak terhubung ke server. Serah-terima order perlu koneksi.' };
+    }
+  };
+
   let printerState: PrinterState | null = null;
   const poll = async () => {
     printerState = await engine.pollPrinter();
@@ -275,6 +310,8 @@ export async function createRuntime(): Promise<Boot> {
   setInterval(() => void poll(), 10_000);
   setInterval(() => void pollKitchen(), 10_000);
   setInterval(() => void pollTables(), 10_000);
+  setInterval(() => void pollHandoffs(), 8_000);
+  void pollHandoffs();
   void pollTables();
   setInterval(() => void reportPosture(), 10 * 60_000);
   void poll();
@@ -290,6 +327,33 @@ export async function createRuntime(): Promise<Boot> {
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,
     tableBoard: () => tableBoard,
+    handoffs: () => ({ available: !demo && !!settings.token, incoming }),
+    handOff: async (orderId) => {
+      const r = await engine.handOff(orderId);
+      if (r.ok) void syncNow().then(() => pollHandoffs());
+      notify();
+      return r;
+    },
+    takeHandoff: async (orderId) => {
+      if (!engine.currentShift()) return { ok: false, code: 'NO_SHIFT', message: 'Buka shift terlebih dahulu.' };
+      const c = await claim(orderId);
+      if (!c.ok) return c;
+      const r = await engine.acceptHandoff(c.value);
+      if (r.ok) {
+        incoming = incoming.filter((h) => h.orderId !== orderId);
+        void syncNow();
+      }
+      notify();
+      return r;
+    },
+    reclaimHandoff: async (orderId) => {
+      const c = await claim(orderId);
+      if (!c.ok) return { ...c, message: c.code === 'HANDOFF_409' ? 'Order ini sudah diambil terminal lain.' : c.message };
+      const r = await engine.reclaimHandoff(orderId);
+      if (r.ok) void syncNow();
+      notify();
+      return r;
+    },
     syncStatus: () => ({ ...status }),
     configStatus: () => ({
       mode: demo ? 'demo' : 'server', version, fetchedAt,

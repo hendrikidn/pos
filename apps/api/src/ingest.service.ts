@@ -89,6 +89,13 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
   'order.table_changed': (p) =>
     str(p, 'orderId') && str(p, 'to') && (p['to'] as string).length <= 10 && (p['from'] === undefined || (str(p, 'from') && (p['from'] as string).length <= 10))
       ? null : 'orderId/to/from tidak valid',
+  'order.handed_off': (p) => {
+    if (!str(p, 'orderId') || !oneOf(p, 'orderType', ['DINE_IN', 'TAKE_AWAY'])) return 'orderId/orderType tidak valid (order karyawan tidak bisa diserahkan)';
+    if (p['tableNo'] !== undefined && (!str(p, 'tableNo') || (p['tableNo'] as string).length > 10)) return 'tableNo tidak valid';
+    if (p['items'] === undefined) return 'items wajib';
+    return badItems(p);
+  },
+  'order.handoff_reclaimed': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
   'bill.hold_reason': (p) =>
     str(p, 'orderId') && str(p, 'reason') && (p['reason'] as string).length <= 40 && Number.isInteger(p['heldMinutes']) && (p['heldMinutes'] as number) >= 0
       ? null : 'orderId/reason/heldMinutes tidak valid',

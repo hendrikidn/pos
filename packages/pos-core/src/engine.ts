@@ -6,7 +6,7 @@ import type { Recorder } from './recorder';
 import type { KeyValueStore } from './store';
 import { computeTotals, lineLabel, pricingOf, paidTotal, renderBill, renderKitchenTicket, renderReceipt, type Totals } from './totals';
 import {
-  fail, lineKey, ok, type CartLine, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic,
+  fail, lineKey, ok, type CartLine, type Handoff, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic,
 } from './types';
 
 export interface EngineDeps {
@@ -239,6 +239,8 @@ export class PosEngine {
     if (!Number.isInteger(counted) || counted < 0) return fail('AMOUNT_INVALID', 'Jumlah uang tidak valid.');
     const open = this.listOrders().filter((o) => o.shiftId === this.shift!.id && ACTIVE.has(o.state.status));
     if (open.length > 0) return fail('OPEN_ORDERS', `Masih ada ${open.length} order yang belum selesai atau dibatalkan.`);
+    const handed = this.listOrders().filter((o) => o.shiftId === this.shift!.id && o.handedOff);
+    if (handed.length > 0) return fail('OPEN_HANDOFFS', `Masih ada ${handed.length} order yang diserahkan ke terminal lain dan belum diambil. Tarik kembali atau tunggu sampai diambil.`);
 
     // Shift baru melacak kas sendiri (sama dengan hitungan ulang server); shift lama (sebelum pelacakan) dihitung dari order-nya.
     let { cashIn, cashOut } = this.shift;
@@ -536,6 +538,102 @@ export class PosEngine {
     return ok(into);
   }
 
+  // ---------- serah-terima order antar-terminal ----------
+
+  /**
+   * Menyerahkan order ke terminal lain (mis. dari ponsel pelayan ke kasir). Order dibekukan di sini (status MERGED, `handedOff`) dan isinya
+   * dicatat utuh di event agar terminal penerima bisa mengambilnya; selama belum diambil, pemiliknya masih bisa menariknya kembali.
+   * Hanya order yang belum ditagih dan tanpa diskon: diskon terikat pada order asal dan tidak ikut berpindah.
+   */
+  async handOff(orderId: string): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    if (o.type === 'EMPLOYEE') return fail('HANDOFF_EMPLOYEE', 'Order makan karyawan tidak bisa diserahkan.');
+    if (o.handedOff) return fail('HANDOFF_ALREADY', 'Order ini sudah diserahkan.');
+    if (o.state.status !== 'DRAFT' && o.state.status !== 'SENT') return fail('HANDOFF_LOCKED', 'Order sudah ditagih atau selesai; hanya order yang belum ditagih bisa diserahkan.');
+    if (o.items.length === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
+    if (o.discount > 0) return fail('HANDOFF_DISCOUNT', 'Order ini sudah diberi diskon. Diskon tidak ikut berpindah; serahkan sebelum diberi diskon.');
+    await this.emit({
+      type: 'order.handed_off',
+      payload: { orderId, orderType: o.type, ...(o.tableNo ? { tableNo: o.tableNo } : {}), items: o.items.map((l) => eventLine(l, l.qty, l.sentQty)) },
+    });
+    o.handedOff = true;
+    o.state = { ...o.state, status: 'MERGED' };
+    await this.save(o);
+    return ok(o);
+  }
+
+  /** Menarik kembali order yang diserahkan. Hanya dipanggil setelah server mengakui klaim terminal ini (belum diambil terminal lain). */
+  async reclaimHandoff(orderId: string): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    if (!o.handedOff) return fail('HANDOFF_NONE', 'Order ini tidak sedang diserahkan.');
+    await this.emit({ type: 'order.handoff_reclaimed', payload: { orderId } });
+    o.handedOff = false;
+    o.state = { ...o.state, status: o.items.some((l) => l.sentQty > 0) ? 'SENT' : 'DRAFT' };
+    await this.save(o);
+    return ok(o);
+  }
+
+  /** Server melaporkan order yang diserahkan sudah diambil terminal lain: order ini selesai di sini (tetap MERGED, tidak lagi menahan tutup shift). */
+  async finishHandoff(orderId: string, byDevice: string): Promise<void> {
+    const o = this.orders.get(orderId);
+    if (!o?.handedOff) return;
+    o.handedOff = false;
+    o.mergedInto = byDevice;
+    await this.save(o);
+  }
+
+  /**
+   * Mengambil order yang diserahkan terminal lain, setelah server mengakui klaim terminal ini. Order baru dibuat di sini dan isinya
+   * dipindahkan dari order asal lewat `order.items_moved` (MERGE), jadi item yang sudah dikirim ke dapur tidak dikirim lagi dan jejaknya
+   * tetap satu rantai. Idempoten: mengambil order yang sama dua kali mengembalikan order yang sudah dibuat.
+   */
+  async acceptHandoff(h: Handoff): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    if (!this.shift) return fail('NO_SHIFT', 'Buka shift terlebih dahulu.');
+    if (h.fromDeviceId === this.cfg.deviceId) return fail('HANDOFF_OWN', 'Order ini milik terminal ini; gunakan tarik kembali.');
+    const existing = this.listOrders().find((o) => o.takenFrom?.orderId === h.orderId && o.takenFrom.deviceId === h.fromDeviceId);
+    if (existing) return ok(existing);
+    if (h.items.length === 0 || h.items.length > MAX_EVENT_LINES) return fail('HANDOFF_INVALID', 'Isi order yang diserahkan tidak valid.');
+
+    this.counter += 1;
+    await this.d.store.write({ counter: this.counter });
+    const id = `${this.cfg.deviceId}-${this.counter}`;
+    const created = await this.emit({
+      type: 'order.created',
+      payload: { orderId: id, orderType: h.orderType, ...(h.orderType === 'DINE_IN' && h.tableNo ? { tableNo: h.tableNo } : {}) },
+    });
+    const o: OrderRecord = {
+      id, number: this.counter, type: h.orderType, tableNo: h.orderType === 'DINE_IN' ? h.tableNo : undefined, creatorId: w.value,
+      createdAt: this.d.now(), shiftId: this.shift.id, items: [], discount: 0, payments: [], refunds: [], receipt: 'NONE', kitchen: null,
+      takenFrom: { deviceId: h.fromDeviceId, orderId: h.orderId }, state: reduceOrder(undefined, created)!,
+    };
+    for (const l of h.items) {
+      placeLine(o, {
+        itemId: l.itemId, name: l.name, qty: l.qty, unitPrice: l.unitPrice, sentQty: l.sentQty ?? 0,
+        ...(l.options ? { options: l.options.map((x) => ({ groupId: x.group, group: x.group, optionId: x.id ?? x.name, name: x.name, price: x.price })) } : {}),
+        ...(l.note ? { note: l.note } : {}),
+      });
+    }
+    const sent = h.items.some((l) => (l.sentQty ?? 0) > 0);
+    const e = await this.emit({
+      type: 'order.items_moved',
+      payload: { fromOrderId: h.orderId, toOrderId: id, kind: 'MERGE', items: h.items.map((l) => ({ ...l, sentQty: l.sentQty ?? 0 })), sent },
+    });
+    o.state = reduceOrder(o.state, e) ?? o.state;
+    o.kitchen = o.state.kitchen;
+    await this.save(o);
+    return ok(o);
+  }
+
   async sendToKitchen(orderId: string): Promise<Result<OrderRecord>> {
     const r = this.order(orderId);
     if (!r.ok) return r;
@@ -560,6 +658,7 @@ export class PosEngine {
     if (!r.ok) return r;
     const o = r.value;
     if (o.state.status === 'DRAFT') return fail('NOT_SENT', 'Order belum dikirim ke dapur.');
+    if (o.state.status === 'MERGED') return fail('ORDER_LOCKED', o.handedOff ? 'Order ini sedang diserahkan ke terminal lain.' : 'Order ini sudah digabung ke order lain.');
     const e = await this.emit({ type: 'kitchen.status_changed', payload: { orderId, status } });
     o.kitchen = status;
     await this.apply(o, e);
@@ -575,6 +674,7 @@ export class PosEngine {
     if (!r.ok) return r;
     const o = r.value;
     if (o.state.status === 'VOIDED' || o.state.status === 'PAID') return fail('ORDER_LOCKED', 'Order sudah selesai.');
+    if (o.state.status === 'MERGED') return fail('ORDER_LOCKED', o.handedOff ? 'Order ini sedang diserahkan ke terminal lain.' : 'Order ini sudah digabung ke order lain.');
     if (o.items.length === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
     const printed = await this.d.printer.print(renderBill(o, this.cfg));
     if (!printed && !opts.onScreen) return fail('PRINT_FAILED', 'Bill gagal dicetak. Tampilkan di layar customer atau periksa printer.');
@@ -600,6 +700,7 @@ export class PosEngine {
     const r = this.order(orderId);
     if (!r.ok) return r;
     const o = r.value;
+    if (o.state.status === 'MERGED') return fail('ORDER_LOCKED', o.handedOff ? 'Order ini sedang diserahkan ke terminal lain.' : 'Order ini sudah digabung ke order lain.');
     const subtotal = this.totals(o).subtotal;
     if (subtotal === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
 
@@ -647,6 +748,7 @@ export class PosEngine {
     if (!r.ok) return r;
     const o = r.value;
     if (o.state.status === 'VOIDED' || o.state.status === 'PAID') return fail('ORDER_LOCKED', 'Order sudah selesai.');
+    if (o.state.status === 'MERGED') return fail('ORDER_LOCKED', o.handedOff ? 'Order ini sedang diserahkan ke terminal lain.' : 'Order ini sudah digabung ke order lain.');
     if (!o.state.billPrinted) return fail('BILL_REQUIRED', 'Tagihan harus dicetak atau ditampilkan sebelum pembayaran.');
 
     const due = this.outstanding(o);
@@ -755,6 +857,7 @@ export class PosEngine {
     const r = this.order(orderId);
     if (!r.ok) return r;
     const o = r.value;
+    if (o.state.status === 'MERGED') return fail('ORDER_LOCKED', o.handedOff ? 'Order ini sedang diserahkan ke terminal lain.' : 'Order ini sudah digabung ke order lain.');
     const a = await this.checkApprovers(approvers);
     if (!a.ok) return a;
     const amount = paidTotal(o) > 0 ? paidTotal(o) : this.totals(o).total;

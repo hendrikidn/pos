@@ -6,7 +6,7 @@ import { MergeDialog, Modal, ModifierDialog, MoveTableDialog, NoteDialog, PinPad
 import { PayDialog } from './PayDialog';
 import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, type Ctx } from './ui';
 
-type Dialog = 'qr' | 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null;
+type Dialog = 'qr' | 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null | 'handoff';
 
 export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
   const { engine, config } = ctx.rt;
@@ -90,7 +90,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
         <header className="order-head">
           <div>
             <h2>#{order.number} · {orderLabel(order, engine.staff())}</h2>
-            <span className={`pill s-${order.state.status}`}>{STATUS_LABEL[order.state.status]}</span>
+            <span className={`pill s-${order.state.status}`}>{order.handedOff ? 'Diserahkan' : STATUS_LABEL[order.state.status]}</span>
             {engine.holdRequiredMinutes(order) !== null && !final && <span className="pill s-HOLD" title="Pembayaran tunai memerlukan alasan">Ditahan {engine.holdRequiredMinutes(order)} mnt</span>}
             {order.kitchen && <span className="pill">Dapur: {order.kitchen === 'COOKING' ? 'dimasak' : order.kitchen === 'READY' ? 'siap' : 'disajikan'}</span>}
           </div>
@@ -138,6 +138,17 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
           )}
         </dl>
 
+        {order.handedOff && (
+          <div className="order-actions">
+            <p className="notice">Order ini diserahkan ke terminal lain dan menunggu diambil. Di sini order terkunci; tarik kembali bila tidak jadi.</p>
+            <button className="secondary" onClick={async () => {
+              const r = await ctx.rt.reclaimHandoff(order.id);
+              if (!r.ok) ctx.toast(r.message, 'error');
+              ctx.bump();
+            }}>Tarik kembali</button>
+          </div>
+        )}
+
         {!final && (
           <div className="order-actions">
             <button className="pay" disabled={order.items.length === 0} onClick={() => void startPay()}>Bayar {rp(engine.outstanding(order) || totals.total)}</button>
@@ -151,6 +162,11 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
                 {order.type === 'DINE_IN' && <button className="secondary" onClick={() => setDlg('table')}>Pindah meja</button>}
                 {splittable && <button className="secondary" disabled={itemCount < 2} onClick={() => setDlg('split')}>Pisah bill</button>}
                 {splittable && <button className="secondary" disabled={mergeable.length === 0} onClick={() => setDlg('merge')}>Gabung</button>}
+              </div>
+            )}
+            {splittable && ctx.rt.handoffs().available && (
+              <div className="sub">
+                <button className="secondary" disabled={itemCount === 0 || order.discount > 0} title={order.discount > 0 ? 'Order yang sudah diberi diskon tidak bisa diserahkan' : undefined} onClick={() => setDlg('handoff')}>Serahkan ke terminal lain</button>
               </div>
             )}
           </div>
@@ -288,6 +304,21 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
                 {r.label}
               </button>
             ))}
+          </div>
+        </Modal>
+      )}
+      {dlg === 'handoff' && (
+        <Modal title="Serahkan ke terminal lain" onClose={() => setDlg(null)}>
+          <p className="muted">Order dikunci di terminal ini dan muncul di terminal lain di outlet ini (mis. kasir) untuk diambil dan ditagih. Selama belum diambil, Anda bisa menariknya kembali. Item yang sudah dikirim ke dapur tidak dikirim ulang.</p>
+          <div className="actions">
+            <button className="secondary" onClick={() => setDlg(null)}>Batal</button>
+            <button onClick={async () => {
+              const r = await ctx.rt.handOff(order.id);
+              if (!r.ok) return ctx.toast(r.message, 'error');
+              setDlg(null);
+              ctx.toast('Order diserahkan. Terminal lain akan melihatnya dalam beberapa detik.', 'info');
+              ctx.bump();
+            }}>Serahkan</button>
           </div>
         </Modal>
       )}

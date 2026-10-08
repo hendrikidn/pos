@@ -10,7 +10,7 @@ export { computeTotals, lineLabel, pricingOf, type PricingRules, paidTotal, rend
 export { DEMO_MENU, demoConfig, type DemoPins } from './demo-config';
 export { fail, ok, lineKey } from './types';
 export type {
-  CartLine, Edc, MenuItem, OrderRecord, PaymentRecord, PosConfig, ReceiptStatus, Result, ShiftRecord, Staff, StaffPublic,
+  CartLine, Edc, Handoff, MenuItem, OrderRecord, PaymentRecord, PosConfig, ReceiptStatus, Result, ShiftRecord, Staff, StaffPublic,
 } from './types';
 export { WebCryptoSigner, toBase64, fromBase64, toBase64Url, type Signer, type KeyPairHolder } from './signer';
 export {

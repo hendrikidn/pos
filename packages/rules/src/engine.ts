@@ -408,6 +408,42 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
     }
   }
 
+  // ---- R31: order berpindah antar-terminal di luar serah-terima ----
+  // Satu-satunya jalan sah memindahkan order milik terminal lain adalah `order.handed_off` dari terminal asal lalu `order.items_moved` (MERGE)
+  // oleh penerima. Selain itu (tanpa penyerahan, isi berbeda dari yang diserahkan, atau diambil dua kali) isi order bisa dimanipulasi.
+  {
+    const creator = new Map<string, string>();
+    const handed = new Map<string, { deviceId: string; at: number; qty: number; value: number; reclaimed: boolean }>();
+    const taken = new Set<string>();
+    const worth = (items: { qty: number; unitPrice: number }[]) => items.reduce((a, l) => a + l.qty * l.unitPrice, 0);
+    for (const e of events) {
+      if (e.type === 'order.created') creator.set(e.payload.orderId, e.deviceId);
+      else if (e.type === 'order.handed_off') {
+        handed.set(e.payload.orderId, { deviceId: e.deviceId, at: t(e), qty: e.payload.items.reduce((a, l) => a + l.qty, 0), value: worth(e.payload.items), reclaimed: false });
+        taken.delete(e.payload.orderId);
+      } else if (e.type === 'order.handoff_reclaimed') {
+        const h = handed.get(e.payload.orderId);
+        if (h && h.deviceId === e.deviceId) h.reclaimed = true;
+      } else if (e.type === 'order.items_moved' && e.payload.kind === 'MERGE') {
+        const from = e.payload.fromOrderId;
+        const origin = creator.get(from);
+        if (origin === undefined || origin === e.deviceId) continue; // gabung order sendiri, atau asal order tidak terlihat di jendela ini
+        const h = handed.get(from);
+        const why =
+          !h || h.deviceId !== origin || h.reclaimed ? `order ${from} milik ${origin} dipindahkan oleh ${e.deviceId} tanpa diserahkan oleh ${origin}`
+          : taken.has(from) ? `order ${from} yang diserahkan diambil lebih dari sekali`
+          : h.qty !== e.payload.items.reduce((a, l) => a + l.qty, 0) || h.value !== worth(e.payload.items) ? `isi order ${from} berbeda dari yang diserahkan ${origin}`
+          : null;
+        taken.add(from);
+        if (!why) continue;
+        hit({
+          rule: 'R31', key: `R31:${e.deviceId}:${e.seq}`, weight: w('R31'), modalities: POS_ONLY, terminalId: e.deviceId, orderId: e.payload.toOrderId,
+          actorIds: e.actorId ? [e.actorId] : [], at: t(e), windowStart: t(e), windowEnd: t(e), note: why,
+        });
+      }
+    }
+  }
+
   // ---- R24: integritas event ----
   for (const [deviceId, list] of byDevice) {
     for (const issue of verifyChain(list)) {

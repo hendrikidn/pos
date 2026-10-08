@@ -518,3 +518,65 @@ describe('R6 dengan persetujuan', () => {
     expect(r6(run(s, '12:00:00'))).toEqual([]);
   });
 });
+
+describe('R31: order berpindah antar-terminal di luar serah-terima', () => {
+  const it1: import('@pos/events').LineItem[] = [{ itemId: 'kopi', name: 'Kopi', qty: 2, unitPrice: 20_000, sentQty: 2 }];
+  const r31 = (hits: RuleHit[]) => hits.filter((h) => h.rule === 'R31');
+  /** Terminal asal (term-1) membuat order; terminal kedua (term-2) menggabungkannya ke order barunya. */
+  function base(): Sim {
+    const s = new Sim('o1', '2026-01-01', 'term-1', 'sensor-1');
+    s.pos({ type: 'order.created', payload: { orderId: 'term-1-1', orderType: 'DINE_IN', tableNo: '3' } }, '12:00:00', 'sari');
+    s.pos({ type: 'order.sent_to_kitchen', payload: { orderId: 'term-1-1', items: it1 } }, '12:01:00', 'sari');
+    s.emit('term-2', { type: 'order.created', payload: { orderId: 'term-2-1', orderType: 'DINE_IN', tableNo: '3' } }, '12:05:00', 'budi');
+    return s;
+  }
+  const merge = (s: Sim, items = it1, hms = '12:05:01') =>
+    s.emit('term-2', { type: 'order.items_moved', payload: { fromOrderId: 'term-1-1', toOrderId: 'term-2-1', kind: 'MERGE', items, sent: true } }, hms, 'budi');
+  const handOff = (s: Sim, items = it1) =>
+    s.pos({ type: 'order.handed_off', payload: { orderId: 'term-1-1', orderType: 'DINE_IN', tableNo: '3', items } }, '12:04:00', 'sari');
+
+  it('serah-terima sah (diserahkan lalu diambil dengan isi yang sama) tidak memicu apa pun', () => {
+    const s = base(); handOff(s); merge(s);
+    expect(r31(run(s, '13:00:00', NO_SENSOR))).toEqual([]);
+  });
+
+  it('memindahkan order terminal lain tanpa diserahkan memicu R31', () => {
+    const s = base(); merge(s);
+    const hits = r31(run(s, '13:00:00', NO_SENSOR));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ terminalId: 'term-2', orderId: 'term-2-1', actorIds: ['budi'], weight: 50 });
+    expect(hits[0]!.note).toContain('tanpa diserahkan oleh term-1');
+  });
+
+  it('isi yang diambil berbeda dari yang diserahkan memicu R31 (item dikurangi atau harga diubah)', () => {
+    const fewer = base(); handOff(fewer); merge(fewer, [{ ...it1[0]!, qty: 1 }]);
+    expect(r31(run(fewer, '13:00:00', NO_SENSOR))[0]!.note).toContain('berbeda dari yang diserahkan');
+    const cheaper = base(); handOff(cheaper); merge(cheaper, [{ ...it1[0]!, unitPrice: 1_000 }]);
+    expect(r31(run(cheaper, '13:00:00', NO_SENSOR))).toHaveLength(1);
+  });
+
+  it('diambil dua kali memicu R31 pada pengambilan kedua; order yang sudah ditarik kembali tidak boleh diambil', () => {
+    const twice = base(); handOff(twice); merge(twice);
+    twice.emit('term-3', { type: 'order.created', payload: { orderId: 'term-3-1', orderType: 'DINE_IN', tableNo: '3' } }, '12:06:00', 'dewi');
+    twice.emit('term-3', { type: 'order.items_moved', payload: { fromOrderId: 'term-1-1', toOrderId: 'term-3-1', kind: 'MERGE', items: it1, sent: true } }, '12:06:01', 'dewi');
+    const hits = r31(run(twice, '13:00:00', NO_SENSOR));
+    expect(hits.map((h) => [h.terminalId, h.note.includes('lebih dari sekali')])).toEqual([['term-3', true]]);
+
+    const reclaimed = base(); handOff(reclaimed);
+    reclaimed.pos({ type: 'order.handoff_reclaimed', payload: { orderId: 'term-1-1' } }, '12:04:30', 'sari');
+    merge(reclaimed);
+    expect(r31(run(reclaimed, '13:00:00', NO_SENSOR))).toHaveLength(1);
+  });
+
+  it('menggabung order milik terminal sendiri, atau order yang asalnya tidak terlihat, tidak memicu R31', () => {
+    const own = new Sim('o1', '2026-01-01', 'term-1', 'sensor-1');
+    own.pos({ type: 'order.created', payload: { orderId: 'a', orderType: 'DINE_IN' } }, '12:00:00', 'sari');
+    own.pos({ type: 'order.created', payload: { orderId: 'b', orderType: 'DINE_IN' } }, '12:00:10', 'sari');
+    own.pos({ type: 'order.items_moved', payload: { fromOrderId: 'a', toOrderId: 'b', kind: 'MERGE', items: it1, sent: false } }, '12:01:00', 'sari');
+    expect(r31(run(own, '13:00:00', NO_SENSOR))).toEqual([]);
+    const unseen = new Sim('o1', '2026-01-01', 'term-1', 'sensor-1');
+    unseen.pos({ type: 'order.created', payload: { orderId: 'b', orderType: 'DINE_IN' } }, '12:00:10', 'sari');
+    unseen.pos({ type: 'order.items_moved', payload: { fromOrderId: 'lama', toOrderId: 'b', kind: 'MERGE', items: it1, sent: false } }, '12:01:00', 'sari');
+    expect(r31(run(unseen, '13:00:00', NO_SENSOR))).toEqual([]);
+  });
+});

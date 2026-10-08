@@ -277,3 +277,4 @@ export function decideEmployeeMeal(cmd: EmployeeMealCommand, ctx: Ctx): Employee
   return { ok: true, approverId: cmd.approverId };
 }
 export * from './tables';
+export * from './handoff';

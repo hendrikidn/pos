@@ -16,7 +16,7 @@ Internet ──HTTPS──► web server yang SUDAH ada (80/443)
 
 > **Deploy dan update: satu perintah, `~/pos/deploy/deploy.sh`** (langkah 5 dan 10). Sebelum yang pertama, selesaikan langkah 1–4 (DNS, pengguna, Docker, kode, `.env`).
 
-> **Status:** konfigurasi ini **belum dijalankan di VPS sungguhan** dan Docker tidak tersedia di mesin pengembangan. Yang sudah diuji: instalasi dependensi yang difilter, API start dari hasil instalasi itu (migrasi otomatis, `/healthz`), build dan start dashboard produksi, serta alur API terhadap PostgreSQL 18 asli. **Belum terbukti:** build image, Compose, `deploy.sh` (logikanya diuji dengan Docker tiruan: jalur sukses, layanan gagal, cadangan gagal, konfigurasi salah), konfigurasi nginx/Caddy di bawah, `backup.sh`, dan prosedur pemulihan. Bila ada langkah yang gagal, salin pesan errornya.
+> **Status:** konfigurasi ini **belum dijalankan di VPS sungguhan** dan Docker tidak tersedia di mesin pengembangan. Yang sudah diuji: instalasi dependensi yang difilter, API start dari hasil instalasi itu (migrasi otomatis, `/healthz`), build dan start dashboard produksi, **seluruh suite tes (709) terhadap PostgreSQL 18.4 asli**, jalur pembaruan skema pada data lama (lihat bagian 10), dan mundur kode terhadap skema baru. **Belum terbukti:** build image, Compose, `deploy.sh` (logikanya diuji dengan Docker tiruan: jalur sukses, layanan gagal, cadangan gagal, konfigurasi salah), konfigurasi nginx/Caddy di bawah, `backup.sh`, dan prosedur pulih dari cadangan (`pg_dump`/`pg_restore` tidak tersedia di mesin pengembangan). Bila ada langkah yang gagal, salin pesan errornya.
 
 ## Apa yang bisa bentrok, dan apa yang tidak
 
@@ -365,13 +365,53 @@ Token hanya tampil sekali. Bila muncul "admin sudah ada", ID itu sudah terdaftar
 ```
 Skrip yang sama dengan langkah 5, dan aman dijalankan berulang: mencadangkan database dulu (deploy dibatalkan bila cadangan gagal), menarik kode, membangun ulang, dan memeriksa kesehatan. Migrasi baru diterapkan otomatis; data di volume tidak tersentuh. Web server lama tidak perlu diubah.
 
-**Kembali ke versi sebelumnya** (kode saja; migrasi database hanya maju, jadi bila versi lama tidak cocok dengan skema yang sudah berubah, pulihkan database dari cadangan di langkah 9):
+**Kembali ke versi sebelumnya** (kode saja; migrasi database hanya maju). Untuk migrasi 013–017 ini aman: semuanya hanya MENAMBAH (kolom dengan nilai bawaan, indeks, tabel baru), dan suite tes versi lama dibuktikan lolos di atas skema baru di PostgreSQL asli (kode `ad790d7`: 428 tes; kode `2527c72`: 556 tes). Pulihkan database dari cadangan (langkah 9) hanya bila datanya rusak, bukan karena versi kode lama:
 ```
 cd ~/pos && git log --oneline | head     # pilih commit
 git checkout <commit>
 ~/pos/deploy/deploy.sh --no-pull --no-backup
 ```
 Kembali ke versi terbaru: `git checkout main && ~/pos/deploy/deploy.sh`.
+
+### Checklist pembaruan besar: migrasi 013–017 (Okt 2026)
+
+Versi ini membawa lima migrasi, dan fitur yang butuh tindakan Anda sesudahnya. Lakukan di jam sepi; seluruhnya sekitar 30 menit.
+
+**A. Sebelum (5 menit)**
+1. Catat commit yang sedang berjalan (untuk jalan kembali): `cd ~/pos && git log --oneline | head -1` (catat untuk jalan kembali).
+2. Cadangan manual dan **salin ke luar server** (bukan hanya di VPS): `BACKUP_DIR=$HOME/backups ~/pos/deploy/backup.sh`, lalu `rsync`/unduh berkasnya (langkah 9). `deploy.sh` juga mencadangkan sendiri, tetapi salinan di luar server tidak.
+3. Cek ruang disk dan ukuran tabel event: `df -h /` dan `cd ~/pos/deploy && docker compose exec -T db psql -U posguard -d posguard -tAc "select count(*) from event"`. Migrasi 015 membuat dua indeks pada tabel `event` dan **mengunci penulisan ke tabel itu selama pembuatannya** (pada 200.000 event seluruh lima migrasi selesai dalam 0,5 detik; jangka waktunya tumbuh kira-kira lurus dengan jumlah event). Terminal tetap menyimpan event di perangkat dan mengirim ulang, jadi tidak ada data hilang, tetapi hindari jam ramai.
+4. **Tutup semua shift terbuka dulu** (kasir menutup shift) dan rencanakan memperbarui aplikasi kasir di semua terminal setelah server naik. Server baru menghitung ulang kas laci dari catatan transaksi dan membandingkannya dengan angka terminal; shift yang dibuka di aplikasi lama lalu ditutup di aplikasi baru (atau sebaliknya) bisa memicu satu temuan R30 yang tidak berarti.
+
+**B. Jalankan**
+```
+~/pos/deploy/deploy.sh
+```
+
+**C. Verifikasi (5 menit)**
+```
+cd ~/pos/deploy
+docker compose logs api | grep -i migrasi          # migrasi diterapkan: 013_… sampai 017_…
+docker compose exec -T db psql -U posguard -d posguard -tAc "select name from schema_migration order by name desc limit 5"
+docker compose exec -T db psql -U posguard -d posguard -tAc "select count(*) from event"     # sama dengan sebelum deploy
+```
+Lalu di browser: masuk dashboard, buka **Insiden**, **Laporan**, **Stok** (menu baru), dan **Pengaturan → Bahan & resep**. Semuanya harus terbuka tanpa galat. Data lama (insiden, menu, staf, perangkat) harus utuh. Outlet yang sudah ada tetap aktif penuh (tidak masuk mode shadow); hanya outlet BARU yang masuk shadow 14 hari.
+
+**D. Konfigurasi sesudah deploy (satu kali)**
+| Apa | Di mana | Catatan |
+|---|---|---|
+| Alamat QR struk digital | otomatis dari `DOMAIN` di `deploy/.env` | Tidak perlu diisi terpisah: `DASHBOARD_URL` diturunkan dari `DOMAIN` oleh Compose. Uji: bayar satu order di POS, tekan "Struk digital (QR)", pindai dengan ponsel; halaman struk harus terbuka. Nginx tidak perlu diubah (selain `/v1/*` dan `/healthz` sudah diteruskan ke dashboard) |
+| Registri EDC (aturan R9) | Pengaturan → Outlet | Tanpa ini setiap TID dianggap tidak terdaftar |
+| Kuota makan karyawan | Pengaturan → Outlet | Bawaan 1 per orang per hari |
+| Batas tahan bill tunai | Pengaturan → Outlet | Bawaan 60 menit (0 = nonaktif) |
+| Stok | **Pengaturan → Bahan & resep**, lalu **Stok → Hitung** | Buat bahan, isi resep per menu (dan per opsi), lalu hitung stok awal setiap bahan. Tanpa hitung awal tidak ada perkiraan stok |
+| Layar dapur (opsional) | Pengaturan → Perangkat → kode pairing jenis "Layar dapur" | **Memasang layar dapur mengaktifkan R2 versi KDS** untuk outlet itu (butuh status dapur). Jangan dipasang bila dapur tidak akan memakainya |
+
+**E. Terminal**
+Pasang APK baru di semua terminal (dan copot yang lama bila ID aplikasinya berubah). Terminal lama tetap dapat mengirim event ke server baru (field baru bersifat opsional), tetapi tidak membawa rincian item, varian, atau pelacakan kas baru, jadi laporan produk dan stok tidak mencakup order dari terminal lama. Firmware sensor tidak berubah.
+
+**F. Jalan kembali bila ada masalah**
+Hanya kode: `cd ~/pos && git checkout <commit-yang-dicatat> && ./deploy/deploy.sh --no-pull --no-backup`. Data dan skema baru tetap di tempatnya dan kode lama berjalan di atasnya (terbukti, lihat di atas). Pulihkan dari cadangan hanya bila datanya rusak.
 
 ## 11. Perintah sehari-hari (sebagai `posguard`, dari `~/pos/deploy`)
 

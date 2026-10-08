@@ -182,6 +182,14 @@ async function main() {
     s.cashOrder(`N-${i}`, t0, t0 + 20_000, m.total, 'budi', m.items);
   }
   s.heartbeat('terminal', at(2));
+  // Riwayat penjualan 4–14 hari lalu (di luar jendela deteksi 72 jam) agar laporan punya periode pembanding.
+  for (let d = 4; d <= 14; d++) {
+    for (let i = 0; i < 2 + ((d * 7) % 4); i++) {
+      const t0 = at(d * 1440 - 9 * 60 + i * 47);
+      const m = MIXES[(d + i) % MIXES.length]!;
+      s.cashOrder(`H-${d}-${i}`, t0, t0 + 20_000, m.total, i % 2 ? 'sari' : 'budi', m.items);
+    }
+  }
 
   // Layar dapur (KDS): pesanan lama sudah disajikan; tiga tiket hidup dengan umur berbeda (normal, perhatian, terlambat + item susulan).
   for (const e of [...s.events]) {

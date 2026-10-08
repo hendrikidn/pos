@@ -161,3 +161,6 @@ export const RANGE_OPTIONS = [
   { value: 'month', label: 'Bulan ini' },
 ] as const;
 export type RangeValue = (typeof RANGE_OPTIONS)[number]['value'];
+
+/** Persen perubahan untuk tampilan: "+14,3%", "−28,6%", "0%". */
+export const pctText = (pct: number): string => `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct).toLocaleString('id-ID', { maximumFractionDigits: 1 })}%`;

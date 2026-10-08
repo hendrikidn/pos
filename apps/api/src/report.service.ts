@@ -3,7 +3,8 @@ import type { ApiAuth } from './auth';
 import { Database } from './db/database';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
-import { addDays, buildSalesReport, DAY_MS, localDate, startOfLocalDay, type SalesReport } from './sales-report';
+import { addDays, buildSalesReport, compareSales, DAY_MS, localDate, startOfLocalDay, type Comparison, type SalesReport } from './sales-report';
+import type { Queryable } from './db/driver';
 
 export const MAX_REPORT_DAYS = 31;
 const DEFAULT_DAYS = 7;
@@ -32,7 +33,10 @@ export class ReportService {
    * atau preset `range` yang dihitung dengan zona waktu outlet (today, yesterday, 7d, 30d, month = awal bulan sampai
    * hari ini). Tanpa parameter: 7 hari terakhir. Rentang dibatasi 31 hari agar jumlah event yang dibaca tetap kecil.
    */
-  async sales(auth: ApiAuth, outletId: string, params: { from?: string; to?: string; range?: string }, now = Date.now()): Promise<SalesReport> {
+  async sales(
+    auth: ApiAuth, outletId: string, params: { from?: string; to?: string; range?: string; compare?: string }, now = Date.now(),
+  ): Promise<SalesReport & { comparison?: Comparison }> {
+    if (params.compare !== undefined && params.compare !== '1' && params.compare !== 'prev') throw new BadRequestException('compare harus 1 atau prev');
     return this.db.tenantTx(auth.tenantId, async (q) => {
       const outlet = (await q.query<{ utc_offset_minutes: number }>('select utc_offset_minutes from outlet where id = $1', [outletId])).rows[0];
       if (!outlet) throw new BadRequestException('outlet tidak ditemukan');
@@ -53,34 +57,43 @@ export class ReportService {
       const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
       if (days > MAX_REPORT_DAYS) throw new BadRequestException(`rentang maksimal ${MAX_REPORT_DAYS} hari`);
 
-      const fromMs = startOfLocalDay(from, off);
-      const toMs = startOfLocalDay(to, off) + DAY_MS;
+      const report = await this.compute(q, auth, outletId, from, to, off, now);
+      if (params.compare === undefined) return report;
+      // Periode sebelumnya: sama panjang, tepat sebelum periode ini.
+      const prev = await this.compute(q, auth, outletId, addDays(from, -days), addDays(from, -1), off, now);
+      return { ...report, comparison: compareSales(report, prev, today) };
+    });
+  }
 
-      // Jendela dilebarkan: jam perangkat bisa bergeser, dan order bisa dibuat sehari sebelum dibayar.
-      const rows = (
-        await q.query<EventRow>(
-          `select ${EVENT_COLUMNS} from event
-           where outlet_id = $1 and device_time_ms >= $2 and device_time_ms < $3
-             and type in ('payment.received', 'refund.created', 'discount.applied', 'cash.counted', 'order.created', 'bill.printed', 'bill.hold_reason')
-           order by device_id, seq`,
-          [outletId, fromMs - 2 * DAY_MS, toMs + DAY_MS],
-        )
-      ).rows;
-      // Void bisa terjadi lama setelah pembayaran, jadi dibaca sampai sekarang agar order yang sudah di-void tidak terhitung.
-      const voids = (
-        await q.query<EventRow>(
-          `select ${EVENT_COLUMNS} from event
-           where outlet_id = $1 and type = 'void.approved' and device_time_ms >= $2 and device_time_ms < $3
-           order by device_id, seq`,
-          [outletId, fromMs - DAY_MS, Math.max(toMs, now) + DAY_MS],
-        )
-      ).rows;
+  /** Laporan satu rentang tanggal lokal yang sudah divalidasi. */
+  private async compute(q: Queryable, auth: ApiAuth, outletId: string, from: string, to: string, off: number, now: number): Promise<SalesReport> {
+    const fromMs = startOfLocalDay(from, off);
+    const toMs = startOfLocalDay(to, off) + DAY_MS;
 
-      // Hitung ulang kas yang belum diperiksa agar laporan selalu memakai angka server (idempoten).
-      await verifyPendingCashCounts(q, auth.tenantId, outletId, fromMs - 2 * DAY_MS, now);
-      return buildSalesReport({
-        events: [...rows, ...voids].map(rowToEvent), fromMs, toMs, from, to, utcOffsetMinutes: off, now, cashChecks: await loadCashChecks(q, outletId),
-      });
+    // Jendela dilebarkan: jam perangkat bisa bergeser, dan order bisa dibuat sehari sebelum dibayar.
+    const rows = (
+      await q.query<EventRow>(
+        `select ${EVENT_COLUMNS} from event
+         where outlet_id = $1 and device_time_ms >= $2 and device_time_ms < $3
+           and type in ('payment.received', 'refund.created', 'discount.applied', 'cash.counted', 'order.created', 'bill.printed', 'bill.hold_reason')
+         order by device_id, seq`,
+        [outletId, fromMs - 2 * DAY_MS, toMs + DAY_MS],
+      )
+    ).rows;
+    // Void bisa terjadi lama setelah pembayaran, jadi dibaca sampai sekarang agar order yang sudah di-void tidak terhitung.
+    const voids = (
+      await q.query<EventRow>(
+        `select ${EVENT_COLUMNS} from event
+         where outlet_id = $1 and type = 'void.approved' and device_time_ms >= $2 and device_time_ms < $3
+         order by device_id, seq`,
+        [outletId, fromMs - DAY_MS, Math.max(toMs, now) + DAY_MS],
+      )
+    ).rows;
+
+    // Hitung ulang kas yang belum diperiksa agar laporan selalu memakai angka server (idempoten).
+    await verifyPendingCashCounts(q, auth.tenantId, outletId, fromMs - 2 * DAY_MS, now);
+    return buildSalesReport({
+      events: [...rows, ...voids].map(rowToEvent), fromMs, toMs, from, to, utcOffsetMinutes: off, now, cashChecks: await loadCashChecks(q, outletId),
     });
   }
 }

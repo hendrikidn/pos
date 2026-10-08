@@ -74,7 +74,7 @@ export class ApiController {
     return this.settlements.list(auth, outletId);
   }
 
-  /** Laporan penjualan outlet. `from`/`to` = tanggal lokal outlet (YYYY-MM-DD, inklusif, maks. 31 hari), atau `range` = today|yesterday|7d|30d|month. */
+  /** Laporan penjualan outlet. `from`/`to` = tanggal lokal outlet (YYYY-MM-DD, inklusif, maks. 31 hari), atau `range` = today|yesterday|7d|30d|month. `compare=1` menambahkan `comparison` terhadap periode sebelumnya yang sama panjang. */
   @Get('v1/outlets/:outletId/reports/sales')
   async salesReport(
     @Req() req: AuthedRequest,
@@ -82,10 +82,11 @@ export class ApiController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('range') range?: string,
+    @Query('compare') compare?: string,
   ) {
     const auth = requireApi(req, ['OWNER', 'OPS', 'MANAGER']);
     await this.assertOutlet(auth.tenantId, outletId);
-    return this.reports.sales(auth, outletId, { from, to, range }, this.clock());
+    return this.reports.sales(auth, outletId, { from, to, range, compare }, this.clock());
   }
 
   @Post('v1/outlets/:outletId/evaluate')

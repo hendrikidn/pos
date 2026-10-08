@@ -322,3 +322,73 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
     notes,
   };
 }
+
+/** Selisih satu angka terhadap periode sebelumnya. `pct` kosong bila periode sebelumnya nol (persen tidak terdefinisi). */
+export interface Change {
+  delta: number;
+  pct: number | null;
+}
+
+export interface ProductMover {
+  itemId: string;
+  name: string;
+  current: number;
+  previous: number;
+  delta: number;
+}
+
+export interface Comparison {
+  previous: { range: SalesReport['range']; totals: SalesReport['totals']; byDay: SalesReport['byDay'] };
+  /** Periode ini masih berjalan (memuat hari ini), jadi angkanya belum penuh dibanding periode sebelumnya. */
+  partial: boolean;
+  change: {
+    net: Change;
+    gross: Change;
+    orders: Change;
+    avgOrder: Change;
+    refunds: Change;
+    discount: Change;
+    voids: Change;
+    voidsAfterPayment: Change;
+  };
+  /** Produk yang nilai penjualannya paling naik dan paling turun (maks. 5 masing-masing); yang tidak berubah tidak ikut. */
+  movers: { up: ProductMover[]; down: ProductMover[] };
+}
+
+export const changeOf = (current: number, previous: number): Change => ({
+  delta: current - previous,
+  pct: previous === 0 ? null : Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10,
+});
+
+/**
+ * Membandingkan laporan periode ini dengan periode sebelumnya yang sama panjang. Murni.
+ * Produk dicocokkan menurut `itemId`; produk yang hanya ada di salah satu periode dihitung nol di periode lainnya.
+ */
+export function compareSales(current: SalesReport, previous: SalesReport, today: string): Comparison {
+  const c = current.totals;
+  const p = previous.totals;
+  const prevAmount = new Map(previous.byProduct.map((x) => [x.itemId, x]));
+  const rows = new Map<string, ProductMover>();
+  for (const x of current.byProduct) rows.set(x.itemId, { itemId: x.itemId, name: x.name, current: x.amount, previous: prevAmount.get(x.itemId)?.amount ?? 0, delta: 0 });
+  for (const x of previous.byProduct) if (!rows.has(x.itemId)) rows.set(x.itemId, { itemId: x.itemId, name: x.name, current: 0, previous: x.amount, delta: 0 });
+  const movers = [...rows.values()].map((m) => ({ ...m, delta: m.current - m.previous }));
+  const byDelta = (a: ProductMover, b: ProductMover) => b.delta - a.delta || a.name.localeCompare(b.name);
+  return {
+    previous: { range: previous.range, totals: p, byDay: previous.byDay },
+    partial: current.range.to >= today,
+    change: {
+      net: changeOf(c.net, p.net),
+      gross: changeOf(c.gross, p.gross),
+      orders: changeOf(c.orders, p.orders),
+      avgOrder: changeOf(c.avgOrder, p.avgOrder),
+      refunds: changeOf(c.refunds, p.refunds),
+      discount: changeOf(c.discount.amount, p.discount.amount),
+      voids: changeOf(c.voids.count, p.voids.count),
+      voidsAfterPayment: changeOf(c.voids.afterPayment.count, p.voids.afterPayment.count),
+    },
+    movers: {
+      up: movers.filter((m) => m.delta > 0).sort(byDelta).slice(0, 5),
+      down: movers.filter((m) => m.delta < 0).sort((a, b) => byDelta(b, a)).slice(0, 5),
+    },
+  };
+}

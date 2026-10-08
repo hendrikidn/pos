@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { BarChart, type Bar } from '@/components/BarChart';
+import { Delta } from '@/components/Delta';
 import { IconAlert } from '@/components/Icons';
 import { Shell } from '@/components/Shell';
 import { api, authed, type Me, type Outlet, type SalesReport } from '@/lib/api';
@@ -26,8 +27,10 @@ function activeHours<T extends { hour: number; orders: number; net: number }>(ro
   return rows.filter((r) => r.hour >= lo && r.hour <= hi);
 }
 
-export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ outlet?: string; range?: string }> }) {
+export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ outlet?: string; range?: string; compare?: string }> }) {
   const sp = await searchParams;
+  // Perbandingan dengan periode sebelumnya menyala bawaan; `compare=0` mematikannya.
+  const compare = sp.compare !== '0';
   const range: RangeValue = RANGE_OPTIONS.some((o) => o.value === sp.range) ? (sp.range as RangeValue) : '7d';
   const { me, outlets } = await authed(async () => ({ me: await api<Me>('/v1/me'), outlets: await api<Outlet[]>('/v1/outlets') }));
 
@@ -37,8 +40,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const outlet = outlets.find((o) => o.id === sp.outlet) ?? outlets[0];
   if (!outlet) return <Shell me={me}><div className="empty">Belum ada outlet.</div></Shell>;
 
-  const r = await authed(() => api<SalesReport>(`/v1/outlets/${encodeURIComponent(outlet.id)}/reports/sales?range=${range}`));
-  const href = (o: string, rg: string) => `/reports?outlet=${encodeURIComponent(o)}&range=${rg}`;
+  const r = await authed(() => api<SalesReport>(`/v1/outlets/${encodeURIComponent(outlet.id)}/reports/sales?range=${range}${compare ? '&compare=1' : ''}`));
+  const href = (o: string, rg: string, cmp = compare) => `/reports?outlet=${encodeURIComponent(o)}&range=${rg}${cmp ? '' : '&compare=0'}`;
+  const cmp = r.comparison;
   const t = r.totals;
   const single = r.range.days === 1;
   const after = t.voids.afterPayment;
@@ -50,6 +54,8 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const dayBars: Bar[] = r.byDay.map((d) => ({
     axis: r.byDay.length <= 8 || d.date === r.range.from || d.date === r.range.to || r.byDay.indexOf(d) % Math.ceil(r.byDay.length / 6) === 0 ? shortDate(d.date) : '',
     label: weekdayDate(d.date), value: d.net, detail: `${d.orders} order`,
+    // Hari ke-n periode ini dibanding hari ke-n periode sebelumnya (panjangnya sama).
+    ...(cmp?.previous.byDay[r.byDay.indexOf(d)] ? { ghost: cmp.previous.byDay[r.byDay.indexOf(d)]!.net } : {}),
   }));
   const hours = activeHours(r.byHour);
   const hourLabel = (h: number) => `${String(h).padStart(2, '0')}.00–${String(h).padStart(2, '0')}.59`;
@@ -69,6 +75,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             ))}
           </nav>
         )}
+        <nav className="tabs" aria-label="Perbandingan">
+          <Link className="tab" href={href(outlet.id, range, !compare)} aria-current={compare ? 'page' : undefined}>Bandingkan dengan periode sebelumnya</Link>
+        </nav>
         <nav className="tabs" aria-label="Rentang waktu">
           {RANGE_OPTIONS.map((o) => (
             <Link key={o.value} className="tab" href={href(outlet.id, o.value)} aria-current={o.value === range ? 'page' : undefined}>{o.label}</Link>
@@ -80,14 +89,20 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <span className="hero-label">Penjualan bersih</span>
         <b className="hero-value">{rp(t.net)}</b>
         <span className="hero-sub">Penerimaan {rp(t.gross)} − refund {rp(t.refunds)}</span>
+        {cmp && (
+          <span className="hero-sub">
+            <Delta change={cmp.change.net} amount={rp} inline /> dibanding {rangeText(cmp.previous.range.from, cmp.previous.range.to)} ({rp(cmp.previous.totals.net)})
+            {cmp.partial && ' · periode ini belum selesai, jadi angkanya belum penuh'}
+          </span>
+        )}
       </section>
 
       <div className="tiles">
-        <div className="tile"><span>Order</span><b>{t.orders.toLocaleString('id-ID')}</b></div>
-        <div className="tile"><span>Rata-rata per order</span><b>{rp(t.avgOrder)}</b></div>
-        <div className="tile"><span>Diskon</span><b>{rp(t.discount.amount)}</b><small>{t.discount.count} kali</small></div>
-        <div className="tile"><span>Refund</span><b>{rp(t.refunds)}</b></div>
-        <div className="tile"><span>Void</span><b>{t.voids.count}</b><small>{rp(t.voids.amount)}</small></div>
+        <div className="tile"><span>Order</span><b>{t.orders.toLocaleString('id-ID')}</b>{cmp && <Delta change={cmp.change.orders} />}</div>
+        <div className="tile"><span>Rata-rata per order</span><b>{rp(t.avgOrder)}</b>{cmp && <Delta change={cmp.change.avgOrder} />}</div>
+        <div className="tile"><span>Diskon</span><b>{rp(t.discount.amount)}</b><small>{t.discount.count} kali</small>{cmp && <Delta change={cmp.change.discount} bad />}</div>
+        <div className="tile"><span>Refund</span><b>{rp(t.refunds)}</b>{cmp && <Delta change={cmp.change.refunds} bad />}</div>
+        <div className="tile"><span>Void</span><b>{t.voids.count}</b><small>{rp(t.voids.amount)}</small>{cmp && <Delta change={cmp.change.voids} bad />}</div>
       </div>
 
       <section className={`panel ${after.count > 0 ? 'urgent' : ''}`} aria-labelledby="void-paid">
@@ -171,6 +186,30 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           {r.ordersWithoutItems > 0 && ` ${r.ordersWithoutItems} order dari terminal versi lama tidak memuat rincian item dan tidak ikut dihitung di sini.`}
         </p>
       </section>
+
+      {cmp && (cmp.movers.up.length > 0 || cmp.movers.down.length > 0) && (
+        <section className="panel" aria-labelledby="movers">
+          <h2 id="movers">Produk yang paling berubah</h2>
+          <div className="movers">
+            {([['Naik', cmp.movers.up, 'pos'], ['Turun', cmp.movers.down, 'neg']] as const).map(([title, list, tone]) => (
+              <div key={title}>
+                <h3 style={{ marginTop: 0 }}>{title}</h3>
+                {list.length === 0 ? <p className="muted small" style={{ margin: 0 }}>Tidak ada.</p> : (
+                  <ul>
+                    {list.map((m) => (
+                      <li key={m.itemId}>
+                        <span>{m.name}<small className="muted"> {rp(m.previous)} → {rp(m.current)}</small></span>
+                        <b className={`delta ${tone}`}>{m.delta > 0 ? '+' : '−'}{rp(Math.abs(m.delta))}</b>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="muted small" style={{ marginBottom: 0 }}>Nilai kotor penjualan per produk dibanding {rangeText(cmp.previous.range.from, cmp.previous.range.to)}.</p>
+        </section>
+      )}
 
       {r.byOption.length > 0 && (
         <section className="panel" aria-labelledby="opsi">

@@ -10,6 +10,8 @@ export interface Bar {
   value: number;
   /** Keterangan tambahan di tooltip, mis. "3 order". */
   detail?: string;
+  /** Nilai pembanding (mis. periode sebelumnya) pada posisi yang sama: digambar sebagai garis tipis di atas batang. */
+  ghost?: number;
 }
 
 const HEIGHT = 180;
@@ -25,9 +27,11 @@ export function BarChart({ title, data, unit, empty, unitLabel = 'order' }: { ti
   const fmt = (v: number) => (unit === 'rp' ? rp(v) : `${v.toLocaleString('id-ID')} ${unitLabel}`);
   const fmtAxis = (v: number) => (unit === 'rp' ? (v === 0 ? '0' : rpCompact(v).replace('Rp ', '')) : String(v));
   const max = Math.max(0, ...data.map((d) => d.value));
-  if (max === 0) return <div className="empty">{empty}</div>;
+  const hasGhost = data.some((d) => d.ghost !== undefined);
+  const scaleMax = Math.max(max, ...data.map((d) => d.ghost ?? 0));
+  if (max === 0 && scaleMax === 0) return <div className="empty">{empty}</div>;
 
-  const top = niceMax(max);
+  const top = niceMax(scaleMax);
   const maxIndex = data.findIndex((d) => d.value === max);
   const pct = (v: number) => `${(Math.max(0, v) / top) * 100}%`;
   const edge = hover === null ? '' : hover < data.length * 0.2 ? 'left' : hover > data.length * 0.8 ? 'right' : '';
@@ -48,11 +52,12 @@ export function BarChart({ title, data, unit, empty, unitLabel = 'order' }: { ti
                 key={d.label}
                 type="button"
                 className={`chart-col ${hover === i ? 'on' : ''}`}
-                aria-label={`${d.label}: ${fmt(d.value)}${d.detail ? `, ${d.detail}` : ''}`}
+                aria-label={`${d.label}: ${fmt(d.value)}${d.detail ? `, ${d.detail}` : ''}${d.ghost !== undefined ? `, sebelumnya ${fmt(d.ghost)}` : ''}`}
                 onPointerEnter={() => setHover(i)}
                 onFocus={() => setHover(i)}
                 onBlur={() => setHover(null)}
               >
+                {d.ghost !== undefined && <i className="chart-ghost" style={{ bottom: pct(d.ghost) }} aria-hidden="true" />}
                 <span className="chart-bar" style={{ height: pct(d.value) }}>
                   {i === maxIndex && hover === null && <b className="chart-cap">{unit === 'rp' ? rpCompact(d.value) : d.value}</b>}
                 </span>
@@ -64,6 +69,7 @@ export function BarChart({ title, data, unit, empty, unitLabel = 'order' }: { ti
               <strong>{fmt(data[hover]!.value)}</strong>
               <span>{data[hover]!.label}</span>
               {data[hover]!.detail && <span>{data[hover]!.detail}</span>}
+              {data[hover]!.ghost !== undefined && <span>Sebelumnya: {fmt(data[hover]!.ghost!)}</span>}
             </div>
           )}
         </div>
@@ -71,15 +77,17 @@ export function BarChart({ title, data, unit, empty, unitLabel = 'order' }: { ti
       <div className="chart-x" aria-hidden="true">
         {data.map((d) => <span key={d.label}>{d.axis}</span>)}
       </div>
+      {hasGhost && <p className="chart-legend small muted"><i className="chart-ghost-key" aria-hidden="true" /> Garis = periode sebelumnya, pada urutan hari yang sama</p>}
       <details className="chart-table">
         <summary>Lihat sebagai tabel</summary>
         <table className="table" aria-labelledby={id}>
-          <thead id={id}><tr><th>{title}</th><th className="num">Nilai</th></tr></thead>
+          <thead id={id}><tr><th>{title}</th><th className="num">Nilai</th>{hasGhost && <th className="num">Sebelumnya</th>}</tr></thead>
           <tbody>
             {data.map((d) => (
               <tr key={d.label}>
                 <td data-label="Waktu">{d.label}</td>
                 <td className="num" data-label="Nilai">{fmt(d.value)}{d.detail ? ` · ${d.detail}` : ''}</td>
+                {hasGhost && <td className="num" data-label="Sebelumnya">{d.ghost !== undefined ? fmt(d.ghost) : '–'}</td>}
               </tr>
             ))}
           </tbody>

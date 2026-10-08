@@ -128,4 +128,29 @@ describe('GET /v1/outlets/:id/reports/sales', () => {
     expect(r.status).toBe(200);
     expect(r.body.range.days).toBe(31);
   });
+
+  it('compare=1: periode sebelumnya sama panjang tepat sebelum periode ini; tanpa compare tidak ada comparison', async () => {
+    expect((await h.http('GET', url('?range=7d'), owner)).body).not.toHaveProperty('comparison');
+    const r = await h.http('GET', url('?from=2026-10-01&to=2026-10-02&compare=1'), owner);
+    expect(r.status).toBe(200);
+    expect(r.body.comparison.previous.range).toMatchObject({ from: '2026-09-29', to: '2026-09-30', days: 2 });
+    expect(r.body.comparison.previous.totals).toMatchObject({ net: 0, orders: 0 });
+    expect(r.body.comparison.change.net).toEqual({ delta: 50_000, pct: null });
+    expect(r.body.comparison.partial).toBe(true); // memuat hari ini (2026-10-02)
+    // periode yang sudah selesai (21 Sep–1 Okt) dibanding 11 hari sebelumnya (10–20 Sep), yang memuat penjualan m1
+    const past = await h.http('GET', url('?from=2026-09-21&to=2026-10-01&compare=1'), owner);
+    expect(past.body.comparison).toMatchObject({ partial: false, previous: { range: { from: '2026-09-10', to: '2026-09-20', days: 11 } } });
+    expect(past.body.comparison.previous.totals).toMatchObject({ net: 70_000, orders: 1 });
+    expect(past.body.comparison.change.net).toEqual({ delta: -20_000, pct: -28.6 });
+    expect(past.body.comparison.movers.down.map((m: { name: string; delta: number }) => [m.name, m.delta])).toEqual([['Kopi Susu', -44_000], ['Latte', -26_000]]);
+    expect(past.body.comparison.previous.byDay).toHaveLength(11);
+  });
+
+  it('compare: nilai tidak dikenal 400; peran dan tenant tetap berlaku; tanpa rentang tetap berfungsi', async () => {
+    expect((await h.http('GET', url('?compare=semua'), owner)).status).toBe(400);
+    expect((await h.http('GET', url('?compare=1'), supervisor)).status).toBe(403);
+    expect((await h.http('GET', url('?compare=1'), other)).status).toBeLessThan(500);
+    expect((await h.http('GET', url('?compare=1'), other)).status).not.toBe(200);
+    expect((await h.http('GET', url('?compare=1'), manager)).body.comparison.previous.range.days).toBe(7);
+  });
 });

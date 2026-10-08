@@ -235,7 +235,18 @@ export interface CashierRow {
 }
 
 /** Bentuk respons GET /v1/outlets/:id/reports/sales (lihat apps/api/src/sales-report.ts). */
+export interface Change { delta: number; pct: number | null }
+export interface ProductMover { itemId: string; name: string; current: number; previous: number; delta: number }
+export interface SalesComparison {
+  previous: { range: SalesReport['range']; totals: SalesReport['totals']; byDay: SalesReport['byDay'] };
+  partial: boolean;
+  change: { net: Change; gross: Change; orders: Change; avgOrder: Change; refunds: Change; discount: Change; voids: Change; voidsAfterPayment: Change };
+  movers: { up: ProductMover[]; down: ProductMover[] };
+}
+
 export interface SalesReport {
+  /** Hanya ada bila diminta dengan `compare=1`. */
+  comparison?: SalesComparison;
   range: { from: string; to: string; days: number; utcOffsetMinutes: number; generatedAt: number };
   totals: {
     gross: number;

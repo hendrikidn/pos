@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EventBody } from '@pos/events';
 import { Sim } from '@pos/sim';
-import { addDays, buildSalesReport, localDate, startOfLocalDay, DAY_MS } from '../src/sales-report';
+import { addDays, buildSalesReport, compareSales, localDate, startOfLocalDay, DAY_MS } from '../src/sales-report';
 
 const DAY = '2026-10-01';
 const NOW = Date.parse('2026-10-02T09:00:00+07:00');
@@ -312,3 +312,68 @@ describe('laporan penjualan: bill tunai ditahan lama', () => {
   });
 });
 
+
+describe('perbandingan dengan periode sebelumnya', () => {
+  const D1 = '2026-09-30';
+  const D2 = '2026-10-01';
+  const line = (itemId: string, name: string, qty: number, unitPrice: number) => ({ itemId, name, qty, unitPrice });
+  /** Order tunai dengan item di tagihan, supaya masuk laporan produk. */
+  const sale = (s: Sim, id: string, at: string, items: ReturnType<typeof line>[], actor = 'budi') => {
+    const total = items.reduce((a, l) => a + l.qty * l.unitPrice, 0);
+    created(s, id, at, actor);
+    s.pos({ type: 'bill.printed', payload: { orderId: id, total, items } }, at, actor);
+    pay(s, id, at, total, 'CASH', actor);
+  };
+  const both = (a: Sim, b: Sim, today = '2026-10-02') => {
+    const events = [...a.events, ...b.events];
+    const mk = (from: string, to: string) => buildSalesReport({ events, from, to, utcOffsetMinutes: 420, now: NOW, fromMs: startOfLocalDay(from, 420), toMs: startOfLocalDay(to, 420) + DAY_MS });
+    return compareSales(mk(D2, D2), mk(D1, D1), today);
+  };
+
+  it('selisih dan persen per angka utama; produk naik dan turun dicocokkan menurut itemId', () => {
+    const prev = new Sim('o1', D1);
+    sale(prev, 'p1', '10:00:00', [line('kopi', 'Kopi', 4, 20_000), line('teh', 'Teh', 2, 15_000)]); // 110.000
+    sale(prev, 'p2', '11:00:00', [line('roti', 'Roti', 1, 30_000)]); // 30.000
+    const cur = new Sim('o1', D2);
+    sale(cur, 'c1', '10:00:00', [line('kopi', 'Kopi', 2, 20_000), line('teh', 'Teh', 4, 15_000)]); // 100.000
+    sale(cur, 'c2', '11:00:00', [line('matcha', 'Matcha', 1, 40_000)]); // 40.000
+    sale(cur, 'c3', '12:00:00', [line('kopi', 'Kopi', 1, 20_000)]); // 20.000
+    const c = both(prev, cur);
+    expect(c.previous.totals).toMatchObject({ net: 140_000, orders: 2 });
+    expect(c.change.net).toEqual({ delta: 20_000, pct: 14.3 });
+    expect(c.change.orders).toEqual({ delta: 1, pct: 50 });
+    expect(c.change.avgOrder).toEqual({ delta: Math.round(160_000 / 3) - 70_000, pct: -23.8 });
+    expect(c.movers.up.map((m) => [m.name, m.previous, m.current, m.delta])).toEqual([['Matcha', 0, 40_000, 40_000], ['Teh', 30_000, 60_000, 30_000]]);
+    expect(c.movers.down.map((m) => [m.name, m.delta])).toEqual([['Roti', -30_000], ['Kopi', -20_000]]);
+    expect(c.partial).toBe(false);
+  });
+
+  it('periode sebelumnya nol: persen kosong, bukan Infinity; tanda periode berjalan memuat hari ini', () => {
+    const prev = new Sim('o1', D1);
+    const cur = new Sim('o1', D2);
+    sale(cur, 'c1', '10:00:00', [line('kopi', 'Kopi', 1, 20_000)]);
+    const c = both(prev, cur, D2);
+    expect(c.change.net).toEqual({ delta: 20_000, pct: null });
+    expect(c.change.orders).toEqual({ delta: 1, pct: null });
+    expect(c.partial).toBe(true);
+    expect(c.movers.down).toEqual([]);
+  });
+
+  it('penurunan tajam; batas lima produk per arah; produk tanpa perubahan tidak ikut', () => {
+    const prev = new Sim('o1', D1);
+    const cur = new Sim('o1', D2);
+    sale(prev, 'p1', '10:00:00', Array.from({ length: 7 }, (_, i) => line(`m${i}`, `M${i}`, 1, 10_000 * (i + 1))));
+    sale(cur, 'c1', '10:00:00', [line('m0', 'M0', 1, 10_000)]);
+    const c = both(prev, cur);
+    expect(c.change.net.pct).toBe(-96.4);
+    expect(c.movers.up).toEqual([]);
+    expect(c.movers.down.map((m) => m.name)).toEqual(['M6', 'M5', 'M4', 'M3', 'M2']);
+    const many = new Sim('o1', D2);
+    sale(many, 'm1', '10:00:00', Array.from({ length: 7 }, (_, i) => line(`n${i}`, `N${i}`, 1, 10_000 * (i + 1))));
+    expect(both(new Sim('o1', D1), many).movers.up.map((m) => m.name)).toEqual(['N6', 'N5', 'N4', 'N3', 'N2']);
+    const same = new Sim('o1', D1); const same2 = new Sim('o1', D2);
+    sale(same, 's', '10:00:00', [line('kopi', 'Kopi', 1, 20_000)]); sale(same2, 's2', '10:00:00', [line('kopi', 'Kopi', 1, 20_000)]);
+    expect(both(same, same2).movers).toEqual({ up: [], down: [] });
+    expect(both(same, same2).change.net).toEqual({ delta: 0, pct: 0 });
+  });
+});

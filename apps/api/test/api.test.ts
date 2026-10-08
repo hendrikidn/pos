@@ -167,6 +167,34 @@ describe('ingest event', () => {
     expect((await h.postEvents(dev, big)).status).toBe(400);
   });
 
+  it('pindah meja dan pemindahan item: yang benar diterima, yang cacat ditolak', async () => {
+    const item = { itemId: 'kopi-susu', name: 'Kopi Susu', qty: 1, unitPrice: 22_000 };
+    const ok = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');
+    ok.pos({ type: 'order.created', payload: { orderId: 'm1', orderType: 'DINE_IN' } }, '10:00:00', 'budi');
+    ok.pos({ type: 'order.table_changed', payload: { orderId: 'm1', from: '4', to: '7' } }, '10:01:00', 'budi');
+    ok.pos({ type: 'order.created', payload: { orderId: 'm2', orderType: 'DINE_IN' } }, '10:02:00', 'budi');
+    ok.pos({ type: 'order.items_moved', payload: { fromOrderId: 'm1', toOrderId: 'm2', kind: 'SPLIT', items: [item], sent: true, kitchen: 'COOKING' } }, '10:02:01', 'budi');
+    expect((await h.postEvents(dev, ok.events)).status).toBe(201);
+
+    const bad: [string, object][] = [
+      ['table_changed', { orderId: 'x', to: '' }], ['table_changed', { orderId: 'x', to: '12345678901' }], ['table_changed', { to: '3' }],
+      ['items_moved', { fromOrderId: 'a', toOrderId: 'a', kind: 'SPLIT', items: [item], sent: false }],
+      ['items_moved', { fromOrderId: 'a', toOrderId: 'b', kind: 'COPY', items: [item], sent: false }],
+      ['items_moved', { fromOrderId: 'a', toOrderId: 'b', kind: 'SPLIT', items: [item] }],
+      ['items_moved', { fromOrderId: 'a', toOrderId: 'b', kind: 'SPLIT', sent: false }],
+      ['items_moved', { fromOrderId: 'a', toOrderId: 'b', kind: 'SPLIT', items: [], sent: false }],
+      ['items_moved', { fromOrderId: 'a', toOrderId: 'b', kind: 'SPLIT', items: [item], sent: false, kitchen: 'BURNT' }],
+      ['items_moved', { fromOrderId: 'a', toOrderId: 'b', kind: 'MERGE', items: [{ ...item, qty: 0 }], sent: false }],
+    ];
+    for (const [i, [kind, payload]] of bad.entries()) {
+      const t = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');
+      t.pos({ type: `order.${kind}`, payload } as never, '11:00:00', 'budi');
+      const r = await h.postEvents(dev, t.events);
+      expect(r.status, `kasus ${i}: ${kind}`).toBe(400);
+      expect(r.body.message).toMatch(new RegExp(`order\\.${kind}`));
+    }
+  });
+
   it('item pesanan di bill.printed: yang benar diterima dan tersimpan, yang cacat ditolak', async () => {
     const s = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');
     const items = [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 28_000, note: 'es sedikit', options: [{ group: 'Ukuran', name: 'Large', price: 6_000 }] }];

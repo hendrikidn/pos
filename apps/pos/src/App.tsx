@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { OrderRecord, StaffPublic } from '@pos/pos-core';
+import { lineKey, lineLabel, type OrderRecord, type StaffPublic } from '@pos/pos-core';
 import { ApprovalDialog, Modal, PinPad } from './dialogs';
 import { CustomerDisplay, DISPLAY_CHANNEL, type DisplayView } from './CustomerDisplay';
 import { Logo } from './Logo';
@@ -201,7 +201,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
         </div>
         <ul className="strip-list" aria-label="Order di shift ini">
           {orders.length === 0 && <li className="strip-empty">Belum ada order di shift ini.</li>}
-          {orders.map((o) => (
+          {orders.filter((o) => o.state.status !== 'MERGED').map((o) => (
             <li key={o.id}>
               <button className={`order-card ${selected === o.id ? 'on' : ''}`} onClick={() => ctx.selectOrder(o.id)}>
                 <span><b>#{o.number}</b> {orderLabel(o, engine.staff())}</span>
@@ -264,7 +264,11 @@ function Kitchen({ ctx }: { ctx: Ctx }) {
       {queue.map((o: OrderRecord) => (
         <article key={o.id} className="panel ticket">
           <h3>#{o.number} {o.tableNo ? `· Meja ${o.tableNo}` : TYPE_LABEL[o.type]}</h3>
-          <ul>{o.items.filter((l) => l.sentQty > 0).map((l) => <li key={l.itemId}>{l.sentQty}× {l.name}</li>)}</ul>
+          <ul>
+            {o.items.filter((l) => l.sentQty > 0).map((l) => (
+              <li key={lineKey(l)}>{l.sentQty}× {lineLabel(l)}{l.note && <small className="line-note"> “{l.note}”</small>}</li>
+            ))}
+          </ul>
           <div className="actions wrap">
             {(['COOKING', 'READY', 'SERVED'] as const).map((s) => (
               <button key={s} className={o.kitchen === s ? '' : 'secondary'} onClick={() => void run(ctx, () => engine.setKitchenStatus(o.id, s))}>

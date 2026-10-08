@@ -261,3 +261,32 @@ describe('laporan penjualan: varian dan tambahan', () => {
     expect(report(busyDay()).byOption).toEqual([]);
   });
 });
+
+describe('laporan penjualan: pisah bill dan gabung order', () => {
+  const kopi = (qty: number) => ({ itemId: 'kopi', name: 'Kopi', qty, unitPrice: 22_000 });
+  const bill = (s: Sim, id: string, at: string, items: object[], total: number) =>
+    s.pos({ type: 'bill.printed', payload: { orderId: id, total, items } } as never, at, 'budi');
+
+  it('pisah bill: dua pembayaran = dua order, produk dijumlahkan sekali (3 kopi, bukan 4)', () => {
+    const s = new Sim('o1', DAY);
+    created(s, 'a', '10:00:00');
+    created(s, 'b', '10:20:00');
+    s.pos({ type: 'order.items_moved', payload: { fromOrderId: 'a', toOrderId: 'b', kind: 'SPLIT', items: [kopi(1)], sent: false } }, '10:20:01', 'budi');
+    bill(s, 'a', '10:30:00', [kopi(2)], 44_000); pay(s, 'a', '10:31:00', 44_000);
+    bill(s, 'b', '10:32:00', [kopi(1)], 22_000); pay(s, 'b', '10:33:00', 22_000, 'QRIS');
+    const r = report(s);
+    expect(r.totals).toMatchObject({ gross: 66_000, orders: 2, avgOrder: 33_000 });
+    expect(r.byProduct).toEqual([{ itemId: 'kopi', name: 'Kopi', qty: 3, amount: 66_000 }]);
+  });
+
+  it('gabung order: order asal tanpa pembayaran tidak menambah apa pun; hanya order tujuan terhitung', () => {
+    const s = new Sim('o1', DAY);
+    created(s, 'a', '10:00:00'); created(s, 'b', '10:05:00');
+    s.pos({ type: 'order.items_moved', payload: { fromOrderId: 'b', toOrderId: 'a', kind: 'MERGE', items: [kopi(1)], sent: false } }, '10:06:00', 'budi');
+    bill(s, 'a', '10:30:00', [kopi(3)], 66_000); pay(s, 'a', '10:31:00', 66_000);
+    const r = report(s);
+    expect(r.totals).toMatchObject({ gross: 66_000, orders: 1 });
+    expect(r.byProduct).toEqual([{ itemId: 'kopi', name: 'Kopi', qty: 3, amount: 66_000 }]);
+  });
+});
+

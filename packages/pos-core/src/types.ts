@@ -87,6 +87,10 @@ export interface OrderRecord {
   refunds: { amount: number; method: PaymentMethod }[];
   receipt: ReceiptStatus;
   kitchen: KitchenStatus | null;
+  /** Order ini dibuat dari pemisahan bill order lain. */
+  splitFrom?: string;
+  /** Seluruh item order ini sudah digabung ke order lain (status MERGED). */
+  mergedInto?: string;
 }
 
 export interface ShiftRecord {

@@ -34,6 +34,28 @@ export const VOID_REASONS = [
 const signature = (itemId: string, optionIds: string[], note: string | undefined) =>
   JSON.stringify([itemId, [...optionIds].sort(), note ?? '']);
 
+/**
+ * Menaruh baris ke order: digabung ke baris yang sama (menu, opsi, dan catatan sama) atau menjadi baris baru. Baris pertama
+ * sebuah menu memakai itemId sebagai lineId (sama dengan order lama); berikutnya diberi nomor.
+ */
+function placeLine(o: OrderRecord, l: CartLine): void {
+  const sig = signature(l.itemId, (l.options ?? []).map((x) => x.optionId), l.note);
+  const same = o.items.find((x) => signature(x.itemId, (x.options ?? []).map((y) => y.optionId), x.note) === sig);
+  if (same) {
+    same.qty += l.qty;
+    same.sentQty += l.sentQty;
+    return;
+  }
+  const taken = new Set(o.items.map(lineKey));
+  let lineId = l.itemId;
+  for (let n = 2; taken.has(lineId); n++) lineId = `${l.itemId}#${n}`;
+  o.items.push({ ...l, lineId });
+}
+
+const KITCHEN_RANK: Record<KitchenStatus, number> = { COOKING: 1, READY: 2, SERVED: 3 };
+const furthest = (a: KitchenStatus | null, b: KitchenStatus | null): KitchenStatus | null =>
+  !a ? b : !b ? a : KITCHEN_RANK[a] >= KITCHEN_RANK[b] ? a : b;
+
 /** Baris pesanan untuk payload event: nama dan harga disalin saat kejadian. */
 const eventLine = (l: CartLine, qty: number): LineItem => ({
   itemId: l.itemId, name: l.name, qty, unitPrice: l.unitPrice,
@@ -290,19 +312,10 @@ export class PosEngine {
     const sel = resolveSelection(item.modifierGroups, opts.options ?? []);
     if (!sel.ok) return fail(sel.code, sel.message);
 
-    const sig = signature(itemId, sel.options.map((x) => x.optionId), note);
-    const line = o.items.find((l) => signature(l.itemId, (l.options ?? []).map((x) => x.optionId), l.note) === sig);
-    if (line) line.qty += qty;
-    else {
-      // Baris pertama sebuah menu memakai itemId sebagai lineId (sama dengan order lama); berikutnya diberi nomor.
-      const taken = new Set(o.items.map(lineKey));
-      let lineId = itemId;
-      for (let n = 2; taken.has(lineId); n++) lineId = `${itemId}#${n}`;
-      const fresh: CartLine = { lineId, itemId, name: item.name, qty, unitPrice: item.price + sel.extra, sentQty: 0 };
-      if (sel.options.length > 0) fresh.options = sel.options;
-      if (note) fresh.note = note;
-      o.items.push(fresh);
-    }
+    const fresh: CartLine = { itemId, name: item.name, qty, unitPrice: item.price + sel.extra, sentQty: 0 };
+    if (sel.options.length > 0) fresh.options = sel.options;
+    if (note) fresh.note = note;
+    placeLine(o, fresh);
     await this.save(o);
     return ok(o);
   }
@@ -342,6 +355,133 @@ export class PosEngine {
     else delete line.note;
     await this.save(o);
     return ok(o);
+  }
+
+  // ---------- meja, pisah bill, gabung order ----------
+
+  /** Memindahkan order dine-in ke meja lain. Tercatat sebagai event agar perpindahan meja bisa ditelusuri. */
+  async moveTable(orderId: string, tableNo: string): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    if (o.type !== 'DINE_IN') return fail('NOT_DINE_IN', 'Hanya order dine-in yang punya meja.');
+    if (!ACTIVE.has(o.state.status)) return fail('ORDER_LOCKED', 'Order sudah selesai.');
+    const to = tableNo.trim();
+    if (to === '' || to.length > 10) return fail('TABLE_INVALID', 'Nomor meja wajib diisi (maksimal 10 karakter).');
+    if (to === o.tableNo) return fail('TABLE_SAME', 'Order sudah berada di meja itu.');
+    await this.emit({ type: 'order.table_changed', payload: { orderId, ...(o.tableNo ? { from: o.tableNo } : {}), to } });
+    o.tableNo = to;
+    await this.save(o);
+    return ok(o);
+  }
+
+  /**
+   * Memisahkan sebagian item ke bill baru (order baru dengan jenis dan meja yang sama) agar dibayar terpisah. Hanya sebelum
+   * tagihan dicetak: tagihan yang sudah dicetak berisi total lama. Minimal satu item tetap di bill awal. Item yang sudah dikirim
+   * ke dapur tetap tercatat terkirim di bill baru, sehingga tidak dikirim dua kali.
+   */
+  async splitOrder(orderId: string, picks: { lineId: string; qty: number }[]): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    if (!this.shift) return fail('NO_SHIFT', 'Buka shift terlebih dahulu.');
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    if (o.type === 'EMPLOYEE') return fail('SPLIT_EMPLOYEE', 'Order makan karyawan tidak bisa dipisah.');
+    if (o.state.status !== 'DRAFT' && o.state.status !== 'SENT') {
+      return fail('SPLIT_LOCKED', 'Tagihan sudah dicetak atau order sudah selesai. Pisahkan item sebelum mencetak tagihan.');
+    }
+    if (picks.length === 0) return fail('SPLIT_EMPTY', 'Pilih item yang akan dipisah.');
+    if (new Set(picks.map((p) => p.lineId)).size !== picks.length) return fail('SPLIT_INVALID', 'Baris dipilih lebih dari sekali.');
+    let moving = 0;
+    for (const p of picks) {
+      const l = o.items.find((x) => lineKey(x) === p.lineId);
+      if (!l) return fail('ITEM_NOT_FOUND', 'Item tidak ada di order.');
+      if (!Number.isInteger(p.qty) || p.qty < 1 || p.qty > l.qty) return fail('QTY_INVALID', `Jumlah ${l.name} tidak valid.`);
+      moving += p.qty;
+    }
+    if (moving >= o.items.reduce((s, l) => s + l.qty, 0)) {
+      return fail('SPLIT_ALL', 'Sisakan minimal satu item di bill awal. Untuk memindahkan semuanya, gabungkan order.');
+    }
+
+    this.counter += 1;
+    await this.d.store.write({ counter: this.counter });
+    const id = `${this.cfg.deviceId}-${this.counter}`;
+    const created = await this.emit({ type: 'order.created', payload: { orderId: id, orderType: o.type } });
+    const dest: OrderRecord = {
+      id, number: this.counter, type: o.type, tableNo: o.tableNo, creatorId: w.value, createdAt: this.d.now(), shiftId: this.shift.id,
+      items: [], discount: 0, payments: [], refunds: [], receipt: 'NONE', kitchen: null, splitFrom: o.id,
+      state: reduceOrder(undefined, created)!,
+    };
+    const moved: LineItem[] = [];
+    let sent = false;
+    for (const p of picks) {
+      const l = o.items.find((x) => lineKey(x) === p.lineId)!;
+      const unsent = l.qty - l.sentQty;
+      const movedSent = Math.max(0, p.qty - unsent);
+      sent ||= movedSent > 0;
+      placeLine(dest, { itemId: l.itemId, name: l.name, qty: p.qty, unitPrice: l.unitPrice, sentQty: movedSent, ...(l.options ? { options: l.options } : {}), ...(l.note ? { note: l.note } : {}) });
+      moved.push(eventLine(l, p.qty));
+      l.qty -= p.qty;
+      l.sentQty -= movedSent;
+    }
+    o.items = o.items.filter((l) => l.qty > 0);
+    const kitchen = sent ? o.kitchen : null;
+    const e = await this.emit({
+      type: 'order.items_moved',
+      payload: { fromOrderId: o.id, toOrderId: id, kind: 'SPLIT', items: moved, sent, ...(kitchen ? { kitchen } : {}) },
+    });
+    dest.state = reduceOrder(dest.state, e) ?? dest.state;
+    dest.kitchen = dest.state.kitchen;
+    // Order asal masih berstatus "di dapur" hanya bila masih punya item terkirim.
+    if (o.state.status === 'SENT' && !o.items.some((l) => l.sentQty > 0)) o.state = { ...o.state, status: 'DRAFT' };
+    await this.save(dest);
+    await this.save(o);
+    return ok(dest);
+  }
+
+  /**
+   * Menggabungkan order lain (`fromId`) ke order ini (`intoId`): seluruh item pindah dan order asal ditutup (MERGED). Syaratnya
+   * kedua order sejenis (dine-in atau take-away), belum ditagih, dan bukan makan karyawan. Status dapur order gabungan mengikuti
+   * yang paling maju, sehingga kunci void tetap memperlakukan makanan yang sudah disajikan sebagai sudah disajikan.
+   */
+  async mergeOrders(intoId: string, fromId: string): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    if (intoId === fromId) return fail('MERGE_SAME', 'Pilih order yang berbeda.');
+    const a = this.order(intoId);
+    if (!a.ok) return a;
+    const b = this.order(fromId);
+    if (!b.ok) return b;
+    const into = a.value;
+    const from = b.value;
+    if (into.type === 'EMPLOYEE' || from.type === 'EMPLOYEE') return fail('MERGE_EMPLOYEE', 'Order makan karyawan tidak bisa digabung.');
+    if (into.type !== from.type) return fail('MERGE_TYPE', 'Hanya order sejenis (dine-in dengan dine-in, take-away dengan take-away) yang bisa digabung.');
+    for (const o of [into, from]) {
+      if (o.state.status !== 'DRAFT' && o.state.status !== 'SENT') {
+        return fail('MERGE_LOCKED', `Order #${o.number} sudah ditagih atau selesai. Gabungkan sebelum mencetak tagihan.`);
+      }
+    }
+    if (from.items.length === 0) return fail('EMPTY_ORDER', `Order #${from.number} masih kosong.`);
+
+    const moved = from.items.map((l) => eventLine(l, l.qty));
+    const sent = from.items.some((l) => l.sentQty > 0);
+    const kitchen = furthest(into.kitchen, from.kitchen);
+    for (const l of from.items) placeLine(into, { ...l });
+    from.items = [];
+    from.mergedInto = into.id;
+    const e = await this.emit({
+      type: 'order.items_moved',
+      payload: { fromOrderId: from.id, toOrderId: into.id, kind: 'MERGE', items: moved, sent, ...(kitchen ? { kitchen } : {}) },
+    });
+    from.state = reduceOrder(from.state, e) ?? from.state;
+    into.state = reduceOrder(into.state, e) ?? into.state;
+    into.kitchen = into.state.kitchen;
+    await this.save(from);
+    await this.save(into);
+    return ok(into);
   }
 
   async sendToKitchen(orderId: string): Promise<Result<OrderRecord>> {

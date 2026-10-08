@@ -116,6 +116,53 @@ describe('R2: void setelah produksi', () => {
   });
 });
 
+describe('R2: pisah bill tidak boleh menyembunyikan riwayat dapur', () => {
+  const KDS_ONLY: Capabilities = { sensor: false, kds: true, printerReportsStatus: false };
+  const item = { itemId: 'kopi', name: 'Kopi', qty: 1, unitPrice: 22_000 };
+  const split = (s: Sim, at: string, sent: boolean) => {
+    s.pos({ type: 'order.created', payload: { orderId: 'o2', orderType: 'TAKE_AWAY' } }, at, 'budi');
+    s.pos({ type: 'order.items_moved', payload: { fromOrderId: 'o1', toOrderId: 'o2', kind: 'SPLIT', items: [item], sent } }, at, 'budi');
+  };
+
+  it('tanpa KDS: item terkirim dipisah ke order baru lalu di-void > 5 menit kemudian tetap terhitung dari waktu kirim order asal', () => {
+    const s = new Sim();
+    s.pos({ type: 'order.created', payload: { orderId: 'o1', orderType: 'TAKE_AWAY' } }, '10:00:00', 'budi');
+    s.pos({ type: 'order.sent_to_kitchen', payload: { orderId: 'o1' } }, '10:00:10', 'budi');
+    split(s, '10:01:00', true);
+    s.pos(voidBody('o2'), '10:08:30', 'budi');
+    const hits = run(s, '10:30:00', NO_SENSOR).filter((h) => h.rule === 'R2');
+    expect(hits.map((h) => [h.rule, h.orderId, h.weight])).toEqual([['R2', 'o2', 20]]);
+  });
+
+  it('kontrol: bila yang dipisah belum pernah dikirim ke dapur, tidak ada warisan dan tidak memicu', () => {
+    const s = new Sim();
+    s.pos({ type: 'order.created', payload: { orderId: 'o1', orderType: 'TAKE_AWAY' } }, '10:00:00', 'budi');
+    split(s, '10:01:00', false);
+    s.pos(voidBody('o2'), '10:08:30', 'budi');
+    expect(rules(run(s, '10:30:00', NO_SENSOR))).not.toContain('R2');
+  });
+
+  it('dengan KDS: tiket order asal sudah dimasak, lalu item dipisah dan order baru di-void → R2', () => {
+    const s = new Sim();
+    s.pos({ type: 'order.created', payload: { orderId: 'o1', orderType: 'TAKE_AWAY' } }, '10:00:00', 'budi');
+    s.pos({ type: 'order.sent_to_kitchen', payload: { orderId: 'o1' } }, '10:00:10', 'budi');
+    s.pos({ type: 'kitchen.status_changed', payload: { orderId: 'o1', status: 'COOKING' } }, '10:02:00', 'dapur');
+    split(s, '10:03:00', true);
+    s.pos(voidBody('o2'), '10:04:00', 'budi');
+    expect(run(s, '10:30:00', KDS_ONLY).filter((h) => h.rule === 'R2').map((h) => h.orderId)).toEqual(['o2']);
+  });
+
+  it('dengan KDS: dimasak SETELAH void tidak dihitung (kontrol waktu)', () => {
+    const s = new Sim();
+    s.pos({ type: 'order.created', payload: { orderId: 'o1', orderType: 'TAKE_AWAY' } }, '10:00:00', 'budi');
+    s.pos({ type: 'order.sent_to_kitchen', payload: { orderId: 'o1' } }, '10:00:10', 'budi');
+    split(s, '10:03:00', true);
+    s.pos(voidBody('o2'), '10:04:00', 'budi');
+    s.pos({ type: 'kitchen.status_changed', payload: { orderId: 'o1', status: 'COOKING' } }, '10:09:00', 'dapur');
+    expect(rules(run(s, '10:30:00', KDS_ONLY))).not.toContain('R2');
+  });
+});
+
 describe('R3: void setelah customer pergi', () => {
   it('void saat customer masih di kasir tidak memicu', () => {
     const s = new Sim();

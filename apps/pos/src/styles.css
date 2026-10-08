@@ -225,3 +225,13 @@ main { flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch
 .opt-foot .qty b { min-width: 24px; text-align: center; font-size: 18px; }
 .opt-foot .qty button { min-height: 48px; width: 48px; padding: 0; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 24px; line-height: 1; }
 .opt-foot .pay { flex: 1; min-height: 56px; font-size: 17px; border-radius: 14px; }
+
+/* Pisah bill */
+.split-list { list-style: none; margin: 12px 0; padding: 0; border-top: 1px solid var(--line); }
+.split-list li { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.split-list .name { font-weight: 600; }
+.split-list .name small { display: block; color: var(--muted); font-weight: 500; font-size: 13px; }
+.split-list .qty { display: flex; align-items: center; gap: 8px; }
+.split-list .qty b { min-width: 22px; text-align: center; font-size: 17px; }
+.split-list .qty button { min-height: 44px; width: 44px; padding: 0; border-radius: 50%; background: var(--surface-2); color: var(--text); font-size: 22px; line-height: 1; }
+.pill.s-MERGED { background: var(--surface-2); color: var(--muted); }

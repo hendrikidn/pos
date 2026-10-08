@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import type { MenuItem, OrderRecord } from '@pos/pos-core';
 import { lineKey, VOID_REASONS } from '@pos/pos-core';
-import { Modal, ModifierDialog, NoteDialog, PayDialog, PinPad } from './dialogs';
+import { MergeDialog, Modal, ModifierDialog, MoveTableDialog, NoteDialog, PayDialog, PinPad, SplitDialog } from './dialogs';
 import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, type Ctx } from './ui';
 
-type Dialog = 'pay' | 'discount' | 'void' | 'decline' | 'refund' | null;
+type Dialog = 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null;
 
 export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
   const { engine, config } = ctx.rt;
@@ -15,7 +15,13 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
   const totals = engine.totals(order);
   const locked = order.state.status !== 'DRAFT' && order.state.status !== 'SENT';
   const paid = isPaid(order);
-  const final = order.state.status === 'VOIDED' || paid;
+  const final = order.state.status === 'VOIDED' || order.state.status === 'MERGED' || paid;
+  const open = order.state.status === 'DRAFT' || order.state.status === 'SENT';
+  const splittable = open && order.type !== 'EMPLOYEE';
+  const itemCount = order.items.reduce((s, l) => s + l.qty, 0);
+  const mergeable = order.type === 'EMPLOYEE' || !open ? [] : engine.listOrders().filter(
+    (o) => o.id !== order.id && o.type === order.type && o.shiftId === order.shiftId && (o.state.status === 'DRAFT' || o.state.status === 'SENT') && o.items.length > 0,
+  );
   const categories = [...new Set(config.menu.map((m) => m.category))];
   const threshold = config.policy?.secondApprovalAbove ?? 50_000;
 
@@ -134,6 +140,13 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
               <button className="secondary" disabled={order.items.length === 0} onClick={() => setDlg('discount')}>Diskon</button>
               <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
             </div>
+            {(order.type === 'DINE_IN' || splittable) && (
+              <div className="sub">
+                {order.type === 'DINE_IN' && <button className="secondary" onClick={() => setDlg('table')}>Pindah meja</button>}
+                {splittable && <button className="secondary" disabled={itemCount < 2} onClick={() => setDlg('split')}>Pisah bill</button>}
+                {splittable && <button className="secondary" disabled={mergeable.length === 0} onClick={() => setDlg('merge')}>Gabung</button>}
+              </div>
+            )}
           </div>
         )}
 
@@ -183,6 +196,42 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
           onSave={async (note) => {
             const r = await run(ctx, () => engine.setNote(order.id, noteFor, note));
             if (r.ok) setNoteFor(null);
+          }}
+        />
+      )}
+      {dlg === 'table' && (
+        <MoveTableDialog
+          order={order}
+          onClose={() => setDlg(null)}
+          onSave={async (table) => {
+            const r = await run(ctx, () => engine.moveTable(order.id, table));
+            if (r.ok) setDlg(null);
+          }}
+        />
+      )}
+      {dlg === 'split' && (
+        <SplitDialog
+          order={order}
+          onClose={() => setDlg(null)}
+          onSplit={async (picks) => {
+            const r = await run(ctx, () => engine.splitOrder(order.id, picks));
+            if (r.ok) {
+              setDlg(null);
+              ctx.toast(`Bill baru #${r.value.number} dibuat`, 'info');
+              ctx.selectOrder(r.value.id);
+            }
+          }}
+        />
+      )}
+      {dlg === 'merge' && (
+        <MergeDialog
+          order={order}
+          candidates={mergeable}
+          totalOf={(o) => engine.totals(o).total}
+          onClose={() => setDlg(null)}
+          onMerge={async (fromId) => {
+            const r = await run(ctx, () => engine.mergeOrders(order.id, fromId));
+            if (r.ok) setDlg(null);
           }}
         />
       )}

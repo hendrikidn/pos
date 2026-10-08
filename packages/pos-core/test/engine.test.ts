@@ -548,3 +548,253 @@ describe('varian dan tambahan menu', () => {
     expect(sent.map((e) => (e.type === 'order.sent_to_kitchen' ? e.payload.items?.[0]?.qty : 0))).toEqual([1, 2]);
   });
 });
+
+describe('pindah meja, pisah bill, gabung order, bayar sebagian', () => {
+  let c: Ctx;
+  beforeEach(async () => {
+    c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+  });
+  const dineIn = async (table = '4') => must(await c.engine.createOrder('DINE_IN', { tableNo: table })).id;
+  const takeAway = async () => must(await c.engine.createOrder('TAKE_AWAY')).id;
+  const evs = async <T extends PosEvent['type']>(type: T) => (await c.events()).filter((e) => e.type === type) as Extract<PosEvent, { type: T }>[];
+  const total = (id: string) => c.engine.totals(c.engine.getOrder(id)!).total;
+
+  describe('pindah meja', () => {
+    it('mengubah meja dan mencatat event dengan meja asal dan tujuan', async () => {
+      const id = await dineIn('4');
+      must(await c.engine.moveTable(id, ' 12 '));
+      expect(c.engine.getOrder(id)!.tableNo).toBe('12');
+      expect((await evs('order.table_changed')).map((e) => e.payload)).toEqual([{ orderId: id, from: '4', to: '12' }]);
+    });
+
+    it('menolak: take-away, meja sama, meja kosong atau terlalu panjang, order yang sudah lunas', async () => {
+      expect(await c.engine.moveTable(await takeAway(), '3')).toMatchObject({ code: 'NOT_DINE_IN' });
+      const id = await dineIn('4');
+      expect(await c.engine.moveTable(id, '4')).toMatchObject({ code: 'TABLE_SAME' });
+      expect(await c.engine.moveTable(id, '  ')).toMatchObject({ code: 'TABLE_INVALID' });
+      expect(await c.engine.moveTable(id, '12345678901')).toMatchObject({ code: 'TABLE_INVALID' });
+      must(await c.engine.addItem(id, 'kopi-susu', 1));
+      must(await c.engine.printBill(id));
+      must(await c.engine.pay(id, { method: 'CASH' }));
+      expect(await c.engine.moveTable(id, '9')).toMatchObject({ code: 'ORDER_LOCKED' });
+      expect((await evs('order.table_changed'))).toHaveLength(0);
+    });
+  });
+
+  describe('pisah bill', () => {
+    async function threeKopiOneLatte() {
+      const id = await dineIn('5');
+      must(await c.engine.addItem(id, 'kopi-susu', 3));
+      must(await c.engine.addItem(id, 'latte', 1));
+      return id;
+    }
+
+    it('memindahkan 1 kopi ke bill baru: jumlah dan nilai terbagi, jumlah keduanya sama dengan semula', async () => {
+      const id = await threeKopiOneLatte();
+      const before = total(id); // 3×22.000 + 26.000 = 92.000 + PBJT 9.200
+      expect(before).toBe(101_200);
+      const dest = must(await c.engine.splitOrder(id, [{ lineId: 'kopi-susu', qty: 1 }]));
+      const src = c.engine.getOrder(id)!;
+      expect(src.items.map((l) => [l.itemId, l.qty])).toEqual([['kopi-susu', 2], ['latte', 1]]);
+      expect(dest.items.map((l) => [l.itemId, l.qty, l.sentQty])).toEqual([['kopi-susu', 1, 0]]);
+      expect(dest).toMatchObject({ type: 'DINE_IN', tableNo: '5', splitFrom: id, state: { status: 'DRAFT' } });
+      expect(total(id)).toBe(Math.round(70_000 * 1.1));
+      expect(total(dest.id)).toBe(Math.round(22_000 * 1.1));
+      expect(total(id) + total(dest.id)).toBe(before); // 77.000 + 24.200
+    });
+
+    it('event: order baru dibuat lalu items_moved SPLIT dengan item yang berpindah', async () => {
+      const id = await threeKopiOneLatte();
+      const dest = must(await c.engine.splitOrder(id, [{ lineId: 'kopi-susu', qty: 2 }]));
+      const types = (await c.types()).slice(-2);
+      expect(types).toEqual(['order.created', 'order.items_moved']);
+      const [m] = await evs('order.items_moved');
+      expect(m!.payload).toEqual({
+        fromOrderId: id, toOrderId: dest.id, kind: 'SPLIT', sent: false,
+        items: [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 22_000 }],
+      });
+      expect(verifyChain(await c.events())).toEqual([]);
+    });
+
+    it('item yang sudah dikirim ke dapur tetap tercatat terkirim di bill baru dan tidak dikirim dua kali', async () => {
+      const id = await dineIn();
+      must(await c.engine.addItem(id, 'kopi-susu', 2));
+      must(await c.engine.sendToKitchen(id));
+      must(await c.engine.setKitchenStatus(id, 'COOKING'));
+      const dest = must(await c.engine.splitOrder(id, [{ lineId: 'kopi-susu', qty: 1 }]));
+      expect(dest.items[0]).toMatchObject({ qty: 1, sentQty: 1 });
+      expect(dest.state).toMatchObject({ status: 'SENT', kitchen: 'COOKING' });
+      expect(c.engine.getOrder(id)!.items[0]).toMatchObject({ qty: 1, sentQty: 1 });
+      expect(await c.engine.sendToKitchen(dest.id)).toMatchObject({ code: 'NOTHING_TO_SEND' });
+      must(await c.engine.addItem(id, 'kopi-susu', 1)); // tambahan baru di bill asal: hanya itu yang dikirim
+      must(await c.engine.sendToKitchen(id));
+      const sent = await evs('order.sent_to_kitchen');
+      expect(sent.map((e) => e.payload.items?.map((l) => l.qty))).toEqual([[2], [1]]);
+    });
+
+    it('campuran terkirim dan belum: yang belum terkirim dipindah lebih dulu, yang terkirim tetap di bill asal', async () => {
+      const id = await dineIn();
+      must(await c.engine.addItem(id, 'kopi-susu', 1));
+      must(await c.engine.sendToKitchen(id)); // 1 terkirim
+      must(await c.engine.addItem(id, 'kopi-susu', 2)); // total 3, 1 terkirim, 2 belum
+      const dest = must(await c.engine.splitOrder(id, [{ lineId: 'kopi-susu', qty: 2 }]));
+      expect(dest.items[0]).toMatchObject({ qty: 2, sentQty: 0 });
+      expect(c.engine.getOrder(id)!.items[0]).toMatchObject({ qty: 1, sentQty: 1 });
+    });
+
+    it('bill asal kembali "draft" bila semua item terkirimnya sudah pindah', async () => {
+      const id = await dineIn();
+      must(await c.engine.addItem(id, 'kopi-susu', 1));
+      must(await c.engine.sendToKitchen(id));
+      must(await c.engine.addItem(id, 'latte', 1));
+      expect(c.engine.getOrder(id)!.state.status).toBe('SENT');
+      must(await c.engine.splitOrder(id, [{ lineId: 'kopi-susu', qty: 1 }]));
+      expect(c.engine.getOrder(id)!.state.status).toBe('DRAFT');
+    });
+
+    it('opsi dan catatan ikut pindah, dan baris yang sama di bill baru digabung', async () => {
+      const id = await dineIn();
+      must(await c.engine.addItem(id, 'matcha', 3, { options: ['large'], note: 'es sedikit' }));
+      const dest = must(await c.engine.splitOrder(id, [{ lineId: 'matcha', qty: 2 }]));
+      expect(dest.items).toHaveLength(1);
+      expect(dest.items[0]).toMatchObject({ qty: 2, unitPrice: 34_000, note: 'es sedikit', options: [{ name: 'Large' }] });
+    });
+
+    it('dua bill dibayar terpisah dengan metode berbeda; item di event tagihan masing-masing sesuai', async () => {
+      const id = await threeKopiOneLatte();
+      const dest = must(await c.engine.splitOrder(id, [{ lineId: 'latte', qty: 1 }]));
+      must(await c.engine.printBill(dest.id));
+      must(await c.engine.pay(dest.id, { method: 'QRIS', tid: '12345678' }));
+      must(await c.engine.printBill(id));
+      must(await c.engine.pay(id, { method: 'CASH', tendered: 100_000 }));
+      expect([c.engine.getOrder(id)!.state.status, c.engine.getOrder(dest.id)!.state.status]).toEqual(['PAID', 'PAID']);
+      const bills = await evs('bill.printed');
+      const byOrder = Object.fromEntries(bills.map((b) => [b.payload.orderId, b.payload.items?.map((l) => `${l.qty}×${l.itemId}`)]));
+      expect(byOrder).toEqual({ [dest.id]: ['1×latte'], [id]: ['3×kopi-susu'] });
+    });
+
+    it('ditolak: tidak memilih apa pun, jumlah berlebih, baris tidak ada, baris ganda, semua item, order karyawan, sudah ditagih', async () => {
+      const id = await threeKopiOneLatte();
+      expect(await c.engine.splitOrder(id, [])).toMatchObject({ code: 'SPLIT_EMPTY' });
+      expect(await c.engine.splitOrder(id, [{ lineId: 'kopi-susu', qty: 4 }])).toMatchObject({ code: 'QTY_INVALID' });
+      expect(await c.engine.splitOrder(id, [{ lineId: 'kopi-susu', qty: 0 }])).toMatchObject({ code: 'QTY_INVALID' });
+      expect(await c.engine.splitOrder(id, [{ lineId: 'tidak-ada', qty: 1 }])).toMatchObject({ code: 'ITEM_NOT_FOUND' });
+      expect(await c.engine.splitOrder(id, [{ lineId: 'latte', qty: 1 }, { lineId: 'latte', qty: 1 }])).toMatchObject({ code: 'SPLIT_INVALID' });
+      expect(await c.engine.splitOrder(id, [{ lineId: 'kopi-susu', qty: 3 }, { lineId: 'latte', qty: 1 }])).toMatchObject({ code: 'SPLIT_ALL' });
+      must(await c.engine.printBill(id));
+      expect(await c.engine.splitOrder(id, [{ lineId: 'latte', qty: 1 }])).toMatchObject({ code: 'SPLIT_LOCKED' });
+      const meal = must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+      must(await c.engine.addItem(meal.id, 'kopi-susu', 2));
+      expect(await c.engine.splitOrder(meal.id, [{ lineId: 'kopi-susu', qty: 1 }])).toMatchObject({ code: 'SPLIT_EMPLOYEE' });
+      expect(await evs('order.items_moved')).toHaveLength(0);
+      expect(c.engine.listOrders()).toHaveLength(2); // tidak ada order baru yang tertinggal dari percobaan gagal
+    });
+  });
+
+  describe('gabung order', () => {
+    it('semua item order asal pindah, baris yang sama dijumlahkan, order asal MERGED dan kosong', async () => {
+      const a = await takeAway();
+      const b = await takeAway();
+      must(await c.engine.addItem(a, 'kopi-susu', 1));
+      must(await c.engine.addItem(b, 'kopi-susu', 2));
+      must(await c.engine.addItem(b, 'latte', 1));
+      const into = must(await c.engine.mergeOrders(a, b));
+      expect(into.items.map((l) => [l.itemId, l.qty])).toEqual([['kopi-susu', 3], ['latte', 1]]);
+      const src = c.engine.getOrder(b)!;
+      expect(src).toMatchObject({ items: [], mergedInto: a, state: { status: 'MERGED' } });
+      expect(total(a)).toBe(Math.round(92_000 * 1.1));
+      const [m] = await evs('order.items_moved');
+      expect(m!.payload).toMatchObject({ fromOrderId: b, toOrderId: a, kind: 'MERGE', sent: false });
+      expect(m!.payload.items.map((l) => [l.itemId, l.qty])).toEqual([['kopi-susu', 2], ['latte', 1]]);
+    });
+
+    it('jumlah terkirim ikut dijumlahkan: yang sudah dikirim di order asal tidak dikirim ulang', async () => {
+      const a = await dineIn('1');
+      const b = await dineIn('2');
+      must(await c.engine.addItem(a, 'kopi-susu', 1));
+      must(await c.engine.sendToKitchen(a));
+      must(await c.engine.addItem(b, 'kopi-susu', 2));
+      must(await c.engine.sendToKitchen(b));
+      const into = must(await c.engine.mergeOrders(a, b));
+      expect(into.items[0]).toMatchObject({ qty: 3, sentQty: 3 });
+      expect(await c.engine.sendToKitchen(a)).toMatchObject({ code: 'NOTHING_TO_SEND' });
+    });
+
+    it('status dapur mengikuti yang paling maju: order asal sudah disajikan → void order gabungan wajib persetujuan', async () => {
+      const a = await takeAway();
+      const b = await takeAway();
+      must(await c.engine.addItem(a, 'latte', 1)); // draft: void tanpa persetujuan
+      must(await c.engine.addItem(b, 'kopi-susu', 1));
+      must(await c.engine.sendToKitchen(b));
+      must(await c.engine.setKitchenStatus(b, 'SERVED'));
+      const into = must(await c.engine.mergeOrders(a, b));
+      expect(into.state).toMatchObject({ status: 'SENT', kitchen: 'SERVED' });
+      expect(await c.engine.voidOrder(a, 'WRONG_ORDER', [])).toMatchObject({ ok: false, code: 'NOT_ENOUGH_APPROVERS' });
+    });
+
+    it('kedua order punya status dapur: yang paling maju menang, ke arah mana pun penggabungannya', async () => {
+      for (const [into, from, want] of [['COOKING', 'SERVED', 'SERVED'], ['SERVED', 'COOKING', 'SERVED'], ['READY', 'COOKING', 'READY']] as const) {
+        const a = await takeAway();
+        const b = await takeAway();
+        for (const [id, st] of [[a, into], [b, from]] as const) {
+          must(await c.engine.addItem(id, 'kopi-susu', 1));
+          must(await c.engine.sendToKitchen(id));
+          must(await c.engine.setKitchenStatus(id, st));
+        }
+        const merged = must(await c.engine.mergeOrders(a, b));
+        expect(merged.state.kitchen, `${into}+${from}`).toBe(want);
+        expect(merged.kitchen).toBe(want);
+      }
+    });
+
+    it('order gabungan dibayar; shift bisa ditutup karena order asal sudah MERGED', async () => {
+      const a = await takeAway();
+      const b = await takeAway();
+      must(await c.engine.addItem(a, 'kopi-susu', 1));
+      must(await c.engine.addItem(b, 'kopi-susu', 1));
+      must(await c.engine.mergeOrders(a, b));
+      expect(await c.engine.closeShift(0)).toMatchObject({ code: 'OPEN_ORDERS' });
+      must(await c.engine.printBill(a));
+      must(await c.engine.pay(a, { method: 'CASH' }));
+      must(await c.engine.closeShift(100_000 + 48_400));
+    });
+
+    it('ditolak: order sama, beda jenis, karyawan, sudah ditagih, asal kosong; tidak ada event yang tercatat', async () => {
+      const a = await takeAway();
+      const d = await dineIn();
+      const b = await takeAway();
+      must(await c.engine.addItem(a, 'kopi-susu', 1));
+      must(await c.engine.addItem(d, 'kopi-susu', 1));
+      expect(await c.engine.mergeOrders(a, a)).toMatchObject({ code: 'MERGE_SAME' });
+      expect(await c.engine.mergeOrders(a, d)).toMatchObject({ code: 'MERGE_TYPE' });
+      expect(await c.engine.mergeOrders(a, b)).toMatchObject({ code: 'EMPTY_ORDER' });
+      const meal = must(await c.engine.createOrder('EMPLOYEE', { employeeId: 'sari' }));
+      must(await c.engine.addItem(meal.id, 'kopi-susu', 1));
+      expect(await c.engine.mergeOrders(a, meal.id)).toMatchObject({ code: 'MERGE_EMPLOYEE' });
+      must(await c.engine.addItem(b, 'latte', 1));
+      must(await c.engine.printBill(b));
+      expect(await c.engine.mergeOrders(a, b)).toMatchObject({ code: 'MERGE_LOCKED' });
+      expect(await c.engine.mergeOrders(b, a)).toMatchObject({ code: 'MERGE_LOCKED' });
+      expect(await evs('order.items_moved')).toHaveLength(0);
+    });
+  });
+
+  describe('bayar sebagian', () => {
+    it('sebagian tunai lalu sisanya QRIS: status tetap ditagih sampai lunas, penerimaan terbagi per metode', async () => {
+      const id = await takeAway();
+      must(await c.engine.addItem(id, 'kopi-susu', 2)); // 44.000 + 4.400 = 48.400
+      must(await c.engine.printBill(id));
+      const first = must(await c.engine.pay(id, { method: 'CASH', amount: 20_000, tendered: 50_000 }));
+      expect(first.change).toBe(30_000);
+      expect(c.engine.getOrder(id)!.state.status).toBe('BILLED');
+      expect(c.engine.outstanding(c.engine.getOrder(id)!)).toBe(28_400);
+      expect(await c.engine.pay(id, { method: 'QRIS', amount: 30_000 })).toMatchObject({ code: 'AMOUNT_INVALID' });
+      must(await c.engine.pay(id, { method: 'QRIS', amount: 28_400 }));
+      expect(c.engine.getOrder(id)!.state.status).toBe('PAID');
+      expect(c.engine.getOrder(id)!.payments.map((p) => [p.method, p.amount])).toEqual([['CASH', 20_000], ['QRIS', 28_400]]);
+    });
+  });
+});
+

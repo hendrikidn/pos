@@ -49,6 +49,8 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
     (byDevice.get(e.deviceId) ?? byDevice.set(e.deviceId, []).get(e.deviceId)!).push(e);
     const oid = orderIdOf(e);
     if (oid) (byOrder.get(oid) ?? byOrder.set(oid, []).get(oid)!).push(e);
+    // Pemindahan item tercatat di kedua order: order tujuan perlu tahu dari mana itemnya datang.
+    if (e.type === 'order.items_moved') (byOrder.get(e.payload.toOrderId) ?? byOrder.set(e.payload.toOrderId, []).get(e.payload.toOrderId)!).push(e);
     if (e.type === 'presence.session') {
       sessions.push({
         start: e.payload.start - e.clockOffsetMs,
@@ -118,18 +120,23 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
     const voided = list.find((e): e is EventOf<'void.approved'> => e.type === 'void.approved');
     const payment = list.find((e) => e.type === 'payment.received');
     const last = list.reduce((m, e) => Math.max(m, t(e)), 0);
+    // Item yang dipindah ke order ini sudah dikirim dan mungkin sudah dimasak di order asalnya. Tanpa warisan ini, memisah item
+    // ke order baru lalu mem-void-nya akan lolos dari R2 (riwayat dapur ada di order asal).
+    const sources = list.flatMap((e) =>
+      e.type === 'order.items_moved' && e.payload.toOrderId === id && e.payload.sent ? (byOrder.get(e.payload.fromOrderId) ?? []) : [],
+    );
     orders.push({
       id,
       terminalId: created.deviceId,
       createdAt: t(created),
       orderType: created.payload.orderType,
       created,
-      sent: list.find((e) => e.type === 'order.sent_to_kitchen'),
+      sent: list.find((e) => e.type === 'order.sent_to_kitchen') ?? sources.find((e) => e.type === 'order.sent_to_kitchen'),
       bill: list.find((e) => e.type === 'bill.printed'),
       payment,
       voided,
       endAt: voided ? t(voided) : payment ? t(payment) : last,
-      events: list,
+      events: [...list, ...sources.filter((e) => e.type === 'kitchen.status_changed')],
     });
   }
   orders.sort((a, b) => a.createdAt - b.createdAt);

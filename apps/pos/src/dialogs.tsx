@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import type { MenuItem, OrderRecord, StaffPublic } from '@pos/pos-core';
+import { lineKey, type MenuItem, type OrderRecord, type StaffPublic } from '@pos/pos-core';
 import { resolveSelection } from '@pos/order';
 import { METHOD_LABEL, rp, type Ctx } from './ui';
 
@@ -88,24 +88,43 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
   const [tid, setTid] = useState(config.edcs[0]?.tid ?? '');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [part, setPart] = useState('');
+  const amount = part === '' ? due : Number(part);
   const cash = Number(tendered || 0);
-  const quick = [...new Set([due, Math.ceil(due / 10_000) * 10_000, Math.ceil(due / 50_000) * 50_000, 100_000])].filter((n) => n >= due);
+  const quick = [...new Set([amount, Math.ceil(amount / 10_000) * 10_000, Math.ceil(amount / 50_000) * 50_000, 100_000])].filter((n) => n >= amount);
+  const partial = amount > 0 && amount < due;
+  const amountOk = Number.isInteger(amount) && amount > 0 && amount <= due;
 
   async function submit() {
     setBusy(true);
     const r = await engine.pay(order.id, {
       method,
-      ...(method === 'CASH' ? { tendered: cash || due } : { tid, approvalCode: code.trim() || undefined }),
+      amount,
+      ...(method === 'CASH' ? { tendered: cash || amount } : { tid, approvalCode: code.trim() || undefined }),
     });
     setBusy(false);
     ctx.bump();
     if (!r.ok) return ctx.toast(r.message, 'error');
-    ctx.toast(method === 'CASH' && r.value.change > 0 ? `Kembalian ${rp(r.value.change)}` : 'Pembayaran tercatat', 'info');
+    const left = engine.outstanding(r.value.order);
+    ctx.toast(
+      method === 'CASH' && r.value.change > 0 ? `Kembalian ${rp(r.value.change)}` : left > 0 ? `Tercatat. Sisa tagihan ${rp(left)}` : 'Pembayaran tercatat',
+      'info',
+    );
     onClose();
   }
 
   return (
-    <Modal title={`Bayar ${rp(due)}`} onClose={onClose}>
+    <Modal title={`Bayar ${rp(amountOk ? amount : due)}`} onClose={onClose}>
+      <label className="field">Nominal yang dibayar sekarang (sisa tagihan {rp(due)})
+        <input inputMode="numeric" value={part} onChange={(e) => setPart(e.target.value.replace(/\D/g, ''))} placeholder={String(due)} />
+      </label>
+      <div className="quick" aria-label="Bagi rata">
+        <button type="button" className="secondary" onClick={() => setPart('')}>Penuh</button>
+        {[2, 3, 4].map((n) => (
+          <button key={n} type="button" className="secondary" onClick={() => setPart(String(Math.min(due, Math.ceil(due / n))))}>Bagi {n}</button>
+        ))}
+      </div>
+      {partial && <p className="notice">Pembayaran sebagian. Sisa {rp(due - amount)} dibayar kemudian (metode boleh berbeda).</p>}
       <div className="seg seg-2">
         {(['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const).map((m) => (
           <button key={m} className={method === m ? 'on' : ''} onClick={() => setMethod(m)}>{METHOD_LABEL[m]}</button>
@@ -121,7 +140,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
               <button key={n} className="secondary" onClick={() => setTendered(String(n))}>{rp(n)}</button>
             ))}
           </div>
-          {cash > due && <p className="change">Kembalian {rp(cash - due)}</p>}
+          {cash > amount && <p className="change">Kembalian {rp(cash - amount)}</p>}
         </>
       ) : (
         <>
@@ -142,7 +161,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
       )}
       <div className="actions">
         <button className="secondary" onClick={onClose}>Batal</button>
-        <button disabled={busy || (method === 'CASH' && cash > 0 && cash < due)} onClick={submit}>Konfirmasi</button>
+        <button disabled={busy || !amountOk || (method === 'CASH' && cash > 0 && cash < amount)} onClick={submit}>Konfirmasi</button>
       </div>
     </Modal>
   );
@@ -236,6 +255,106 @@ export function NoteDialog({ title, initial, onClose, onSave }: { title: string;
       <div className="actions">
         <button className="secondary" onClick={onClose}>Batal</button>
         <button onClick={() => onSave(note)}>Simpan</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Pindah meja untuk order dine-in. */
+export function MoveTableDialog({ order, onClose, onSave }: { order: OrderRecord; onClose: () => void; onSave: (table: string) => void }) {
+  const [table, setTable] = useState('');
+  return (
+    <Modal title={`Pindah meja${order.tableNo ? ` (sekarang ${order.tableNo})` : ''}`} onClose={onClose}>
+      <PinPad value={table} onChange={setTable} max={3} />
+      <div className="actions">
+        <button className="secondary" onClick={onClose}>Batal</button>
+        <button disabled={!table} onClick={() => onSave(table)}>Pindahkan</button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Memilih item (dan jumlahnya) yang dibayar terpisah. Minimal satu item harus tetap di bill awal. */
+export function SplitDialog({
+  order, onClose, onSplit,
+}: {
+  order: OrderRecord;
+  onClose: () => void;
+  onSplit: (picks: { lineId: string; qty: number }[]) => void;
+}) {
+  const [qty, setQty] = useState<Record<string, number>>({});
+  const total = order.items.reduce((s, l) => s + l.qty, 0);
+  const picked = order.items.reduce((s, l) => s + (qty[lineKey(l)] ?? 0), 0);
+  const value = order.items.reduce((s, l) => s + (qty[lineKey(l)] ?? 0) * l.unitPrice, 0);
+  const set = (k: string, max: number, n: number) => setQty((q) => ({ ...q, [k]: Math.max(0, Math.min(max, n)) }));
+  return (
+    <Modal title="Pisah bill" onClose={onClose}>
+      <p className="muted">Pilih item yang dibayar terpisah. Item itu pindah ke bill baru; sisanya tetap di bill ini.</p>
+      <ul className="split-list">
+        {order.items.map((l) => {
+          const k = lineKey(l);
+          const n = qty[k] ?? 0;
+          return (
+            <li key={k}>
+              <span className="name">
+                {l.name}
+                {l.options && l.options.length > 0 && <small className="line-opts">{l.options.map((o) => o.name).join(' · ')}</small>}
+                <small className="line-opts">{l.qty}× · {rp(l.unitPrice)}</small>
+              </span>
+              <span className="qty">
+                <button type="button" aria-label="Kurangi" disabled={n === 0} onClick={() => set(k, l.qty, n - 1)}>−</button>
+                <b>{n}</b>
+                <button type="button" aria-label="Tambah" disabled={n >= l.qty} onClick={() => set(k, l.qty, n + 1)}>+</button>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {picked >= total && picked > 0 && <p className="notice">Sisakan minimal satu item di bill awal. Untuk memindahkan semuanya, gunakan Gabung.</p>}
+      <div className="actions">
+        <button className="secondary" onClick={onClose}>Batal</button>
+        <button
+          disabled={picked === 0 || picked >= total}
+          onClick={() => onSplit(order.items.filter((l) => (qty[lineKey(l)] ?? 0) > 0).map((l) => ({ lineId: lineKey(l), qty: qty[lineKey(l)]! })))}
+        >
+          {picked > 0 ? `Pisahkan ${picked} item · ${rp(value)}` : 'Pisahkan'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Memilih order lain yang digabung ke order ini. */
+export function MergeDialog({
+  order, candidates, onClose, onMerge, totalOf,
+}: {
+  order: OrderRecord;
+  candidates: OrderRecord[];
+  onClose: () => void;
+  onMerge: (fromId: string) => void;
+  totalOf: (o: OrderRecord) => number;
+}) {
+  const [from, setFrom] = useState<string | null>(null);
+  const chosen = candidates.find((c) => c.id === from);
+  return (
+    <Modal title={`Gabungkan ke #${order.number}`} onClose={onClose}>
+      {candidates.length === 0 ? (
+        <p className="muted">Tidak ada order lain yang bisa digabung (harus sejenis, belum ditagih, dan berisi item).</p>
+      ) : (
+        <>
+          <p className="muted">Pilih order yang itemnya dipindahkan ke #{order.number}. Order itu ditutup setelah digabung.</p>
+          <div className="reasons">
+            {candidates.map((c) => (
+              <button key={c.id} className={c.id === from ? '' : 'secondary'} onClick={() => setFrom(c.id)}>
+                #{c.number}{c.tableNo ? ` · Meja ${c.tableNo}` : ''} · {c.items.reduce((s, l) => s + l.qty, 0)} item · {rp(totalOf(c))}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="actions">
+        <button className="secondary" onClick={onClose}>Batal</button>
+        <button disabled={!chosen} onClick={() => chosen && onMerge(chosen.id)}>{chosen ? `Gabungkan #${chosen.number} ke #${order.number}` : 'Gabungkan'}</button>
       </div>
     </Modal>
   );

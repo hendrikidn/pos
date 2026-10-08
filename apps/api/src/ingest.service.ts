@@ -70,6 +70,13 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     return null;
   },
   'order.sent_to_kitchen': (p) => (str(p, 'orderId') ? badItems(p) : 'orderId wajib'),
+  'order.table_changed': (p) =>
+    str(p, 'orderId') && str(p, 'to') && (p['to'] as string).length <= 10 && (p['from'] === undefined || (str(p, 'from') && (p['from'] as string).length <= 10))
+      ? null : 'orderId/to/from tidak valid',
+  'order.items_moved': (p) =>
+    str(p, 'fromOrderId') && str(p, 'toOrderId') && p['fromOrderId'] !== p['toOrderId'] && oneOf(p, 'kind', ['SPLIT', 'MERGE']) && bool(p, 'sent')
+    && (p['kitchen'] === undefined || oneOf(p, 'kitchen', ['COOKING', 'READY', 'SERVED'])) && p['items'] !== undefined
+      ? badItems(p) : 'field pemindahan item tidak valid',
   'kitchen.status_changed': (p) => (str(p, 'orderId') && oneOf(p, 'status', ['COOKING', 'READY', 'SERVED']) ? null : 'orderId/status tidak valid'),
   'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? badItems(p) : 'orderId/total tidak valid'),
   'discount.applied': (p) =>

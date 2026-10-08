@@ -4,7 +4,7 @@ import type { Runtime } from './runtime';
 export const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
 export const STATUS_LABEL: Record<string, string> = {
-  DRAFT: 'Draft', SENT: 'Di dapur', BILLED: 'Ditagih', PAID: 'Lunas', VOIDED: 'Dibatalkan',
+  DRAFT: 'Draft', SENT: 'Di dapur', BILLED: 'Ditagih', PAID: 'Lunas', VOIDED: 'Dibatalkan', MERGED: 'Digabung',
 };
 
 export const TYPE_LABEL: Record<string, string> = { DINE_IN: 'Dine-in', TAKE_AWAY: 'Take-away', EMPLOYEE: 'Karyawan' };

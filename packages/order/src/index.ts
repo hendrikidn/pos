@@ -4,7 +4,8 @@ import type { EventBody, KitchenStatus, OrderType, PosEvent } from '@pos/events'
 export type Role = 'CASHIER' | 'SUPERVISOR' | 'MANAGER' | 'OWNER';
 const RANK: Record<Role, number> = { CASHIER: 0, SUPERVISOR: 1, MANAGER: 2, OWNER: 3 };
 
-export type OrderStatus = 'DRAFT' | 'SENT' | 'BILLED' | 'PAID' | 'VOIDED';
+/** MERGED: seluruh itemnya dipindahkan ke order lain; order ini tidak punya nilai lagi. */
+export type OrderStatus = 'DRAFT' | 'SENT' | 'BILLED' | 'PAID' | 'VOIDED' | 'MERGED';
 
 export interface OrderState {
   orderId: string;
@@ -51,6 +52,16 @@ export function reduceOrder(state: OrderState | undefined, e: PosEvent): OrderSt
     }
     case 'void.approved':
       return { ...state, status: 'VOIDED' };
+    case 'order.items_moved': {
+      const p = e.payload;
+      if (state.orderId === p.fromOrderId) return p.kind === 'MERGE' ? { ...state, status: 'MERGED' } : state;
+      if (state.orderId !== p.toOrderId) return state;
+      return {
+        ...state,
+        status: p.sent && state.status === 'DRAFT' ? 'SENT' : state.status,
+        kitchen: p.kitchen ?? state.kitchen,
+      };
+    }
     default:
       return state;
   }

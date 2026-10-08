@@ -33,6 +33,22 @@ export type EventBody =
       payload: { orderId: string; items?: LineItem[] };
     }
   | { type: 'kitchen.status_changed'; payload: { orderId: string; status: KitchenStatus } }
+  | { type: 'order.table_changed'; payload: { orderId: string; from?: string; to: string } }
+  | {
+      type: 'order.items_moved';
+      payload: {
+        fromOrderId: string;
+        toOrderId: string;
+        /** SPLIT: sebagian item pindah ke order baru. MERGE: seluruh item `fromOrderId` pindah ke `toOrderId` dan order asal ditutup. */
+        kind: 'SPLIT' | 'MERGE';
+        /** Item yang dipindahkan (jumlah yang berpindah). */
+        items: LineItem[];
+        /** Item yang pindah sudah dikirim ke dapur (order tujuan berstatus "di dapur"). */
+        sent: boolean;
+        /** Status dapur order tujuan sesudah pemindahan (yang paling maju antara kedua order). */
+        kitchen?: KitchenStatus;
+      };
+    }
   | {
       type: 'bill.printed';
       /** `items`: seluruh item pada tagihan; item terkunci sejak bill dicetak, jadi ini rincian final order. Tidak ada pada event lama. */
@@ -93,7 +109,7 @@ export type EventBody =
 export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
-  'order.created', 'order.sent_to_kitchen', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
+  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
   'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',
@@ -258,8 +274,11 @@ export function orderIdOf(e: PosEvent): string | undefined {
       return e.payload.originalOrderId;
     case 'drawer.opened':
       return e.payload.orderId;
+    case 'order.items_moved':
+      return e.payload.fromOrderId;
     case 'order.created':
     case 'order.sent_to_kitchen':
+    case 'order.table_changed':
     case 'kitchen.status_changed':
     case 'bill.printed':
     case 'discount.applied':

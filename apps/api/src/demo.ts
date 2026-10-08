@@ -138,6 +138,17 @@ async function main() {
       s.pos({ type: 'kitchen.status_changed', payload: { orderId: e.payload.orderId, status: 'SERVED' } }, e.deviceTime + 8 * MIN, 'dapur');
     }
   }
+  // Kas laci: satu shift jujur dan satu shift dengan terminal yang dimodifikasi (expected disamakan dengan hitungan fisik; server mendeteksi
+  // laci seharusnya 150.000 tetapi hanya 120.000 dan menandainya merah di laporan dan sebagai temuan R30).
+  const drawer = (shiftId: string, minutesAgo: number, counted: number, claimedExpected: number, actor: string) => {
+    s.pos({ type: 'shift.opened', payload: { shiftId, openingCash: 100_000 } }, at(minutesAgo), actor);
+    s.pos({ type: 'payment.received', payload: { orderId: `${shiftId}-cash`, method: 'CASH', amount: 50_000 } }, at(minutesAgo - 20), actor);
+    s.pos({ type: 'cash.counted', payload: { shiftId, counted, expected: claimedExpected } }, at(minutesAgo - 40), actor);
+    s.pos({ type: 'shift.closed', payload: { shiftId } }, at(minutesAgo - 41), actor);
+  };
+  drawer('demo-S1', 400, 150_000, 150_000, 'siti');
+  drawer('demo-S2', 300, 120_000, 120_000, 'budi');
+
   const liveOrder = (id: string, type: 'DINE_IN' | 'TAKE_AWAY', table: string | undefined, minutesAgo: number, items: ReturnType<typeof line>[]) => {
     s.presence(at(minutesAgo + 1), at(minutesAgo - 1));
     s.pos({ type: 'order.created', payload: { orderId: id, orderType: type, ...(table ? { tableNo: table } : {}) } }, at(minutesAgo, 5), 'budi');

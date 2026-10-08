@@ -193,12 +193,20 @@ export class PosEngine {
     return this.shift;
   }
 
+  /** Mencatat uang tunai yang masuk/keluar laci pada shift berjalan (hanya metode TUNAI). */
+  private async trackCash(dir: 'in' | 'out', method: PaymentMethod, amount: number): Promise<void> {
+    if (method !== 'CASH' || !this.shift || this.shift.cashIn === undefined || this.shift.cashOut === undefined) return;
+    if (dir === 'in') this.shift.cashIn += amount;
+    else this.shift.cashOut += amount;
+    await this.d.store.write({ shift: this.shift });
+  }
+
   async openShift(openingCash: number): Promise<Result<ShiftRecord>> {
     const w = this.who();
     if (!w.ok) return w;
     if (this.shift) return fail('SHIFT_OPEN', 'Shift sudah dibuka.');
     if (!Number.isInteger(openingCash) || openingCash < 0) return fail('AMOUNT_INVALID', 'Modal awal tidak valid.');
-    this.shift = { id: `${this.cfg.deviceId}-S${this.d.now()}`, userId: w.value, openedAt: this.d.now(), openingCash };
+    this.shift = { id: `${this.cfg.deviceId}-S${this.d.now()}`, userId: w.value, openedAt: this.d.now(), openingCash, cashIn: 0, cashOut: 0 };
     await this.d.store.write({ shift: this.shift });
     await this.emit({ type: 'shift.opened', payload: { shiftId: this.shift.id, openingCash } });
     return ok(this.shift);
@@ -216,9 +224,13 @@ export class PosEngine {
     const open = this.listOrders().filter((o) => o.shiftId === this.shift!.id && ACTIVE.has(o.state.status));
     if (open.length > 0) return fail('OPEN_ORDERS', `Masih ada ${open.length} order yang belum selesai atau dibatalkan.`);
 
-    const mine = this.listOrders().filter((o) => o.shiftId === this.shift!.id);
-    const cashIn = mine.flatMap((o) => o.payments).filter((p) => p.method === 'CASH').reduce((s, p) => s + p.amount, 0);
-    const cashOut = mine.flatMap((o) => o.refunds).filter((r) => r.method === 'CASH').reduce((s, r) => s + r.amount, 0);
+    // Shift baru melacak kas sendiri (sama dengan hitungan ulang server); shift lama (sebelum pelacakan) dihitung dari order-nya.
+    let { cashIn, cashOut } = this.shift;
+    if (cashIn === undefined || cashOut === undefined) {
+      const mine = this.listOrders().filter((o) => o.shiftId === this.shift!.id);
+      cashIn = mine.flatMap((o) => o.payments).filter((p) => p.method === 'CASH').reduce((s, p) => s + p.amount, 0);
+      cashOut = mine.flatMap((o) => o.refunds).filter((r) => r.method === 'CASH').reduce((s, r) => s + r.amount, 0);
+    }
     const expected = this.shift.openingCash + cashIn - cashOut;
 
     await this.emit({ type: 'cash.counted', payload: { shiftId: this.shift.id, counted, expected } });
@@ -645,6 +657,7 @@ export class PosEngine {
       },
     });
     o.payments.push({ method: p.method, amount, tid, approvalCode: p.approvalCode, at: this.d.now() });
+    await this.trackCash('in', p.method, amount);
     await this.apply(o, e);
     return ok({ order: o, change });
   }
@@ -724,6 +737,7 @@ export class PosEngine {
     const decision = decideRefund(o.state, { actorId: w.value, refundId, approverId: a.value[0]!, amount, method }, this.ctx());
     if (!decision.ok) return fail(decision.code, decision.message);
     await this.emit(decision.body);
+    await this.trackCash('out', method, amount);
     o.refunds.push({ amount, method });
     await this.save(o);
     return ok(o);

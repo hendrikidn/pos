@@ -16,6 +16,8 @@ export interface SalesReportInput {
   to: string;
   utcOffsetMinutes: number;
   now: number;
+  /** Hasil hitung ulang kas oleh server (lihat cash-check.ts). Bila ada, `expected` di laporan memakai angka server. */
+  cashChecks?: { deviceId: string; seq: number; claimed: number; serverExpected: number }[];
 }
 
 export interface CashierRow {
@@ -84,7 +86,11 @@ export interface SalesReport {
   ordersWithoutItems: number;
   cashCounts: {
     toleranceAmount: number;
-    shifts: { shiftId: string; userId: string | null; terminalId: string; at: number; counted: number; expected: number; diff: number }[];
+    /**
+     * `expected`: kas yang seharusnya menurut server bila terverifikasi, selain itu menurut terminal. `verified`: dihitung ulang server.
+     * `claimed`: yang dilaporkan terminal, hanya ada bila berbeda dari angka server (indikasi klien dimodifikasi; juga temuan R30).
+     */
+    shifts: { shiftId: string; userId: string | null; terminalId: string; at: number; counted: number; expected: number; diff: number; verified: boolean; claimed?: number }[];
   };
   notes: string[];
 }
@@ -280,12 +286,18 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
     }
   }
 
+  const checks = new Map((input.cashChecks ?? []).map((c) => [`${c.deviceId}#${c.seq}`, c]));
   const shifts = ordered
     .filter((e): e is EventOf<'cash.counted'> => e.type === 'cash.counted' && inRange(e))
-    .map((e) => ({
-      shiftId: e.payload.shiftId, userId: e.actorId, terminalId: e.deviceId, at: t(e),
-      counted: e.payload.counted, expected: e.payload.expected, diff: e.payload.counted - e.payload.expected,
-    }))
+    .map((e) => {
+      const c = checks.get(`${e.deviceId}#${e.seq}`);
+      const expected = c ? c.serverExpected : e.payload.expected;
+      return {
+        shiftId: e.payload.shiftId, userId: e.actorId, terminalId: e.deviceId, at: t(e),
+        counted: e.payload.counted, expected, diff: e.payload.counted - expected, verified: !!c,
+        ...(c && c.claimed !== c.serverExpected ? { claimed: c.claimed } : {}),
+      };
+    })
     .reverse();
 
   const orders = countedOrders.size;

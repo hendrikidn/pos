@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { PosEvent } from '@pos/events';
 import {
-  buildIncidents, DEFAULT_CONFIG, evaluatePatternRules, evaluateRules, type Capabilities, type Incident, type RuleHit,
+  buildIncidents, DEFAULT_CONFIG, evaluateCashMismatch, evaluatePatternRules, evaluateRules, type Capabilities, type Incident, type RuleHit,
 } from '@pos/rules';
+import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { Database } from './db/database';
 import { shadowState } from './shadow';
 import type { Queryable } from './db/driver';
@@ -83,6 +84,9 @@ export class GuardService {
         await q.query<{ hit: RuleHit }>('select hit from bank_finding where outlet_id = $1 and at_ms >= $2', [outletId, from])
       ).rows.map((r) => r.hit);
 
+      // Kas yang seharusnya dihitung ulang dari rantai event, tidak dipercaya dari kiriman terminal (R14 dan R30).
+      await verifyPendingCashCounts(q, tenantId, outletId, from - DEFAULT_CONFIG.r14WindowMs);
+      const cashChecks = await loadCashChecks(q, outletId);
       const cashCounts = (
         await q.query<EventRow>(
           `select ${EVENT_COLUMNS} from event where outlet_id = $1 and type = 'cash.counted' and device_time_ms >= $2 order by device_id, seq`,
@@ -97,7 +101,8 @@ export class GuardService {
           // Kuota makan karyawan diatur owner per outlet, dan sama dengan yang dipakai terminal.
           config: { r6DailyQuota: outlet.policy?.employeeMealQuota ?? DEFAULT_CONFIG.r6DailyQuota },
         }),
-        ...evaluatePatternRules({ events: cashCounts, emitFrom: from }),
+        ...evaluatePatternRules({ events: cashCounts, emitFrom: from, checks: cashChecks }),
+        ...evaluateCashMismatch({ events: cashCounts, checks: cashChecks, emitFrom: from }),
         ...bankHits,
       ];
       const incidents = buildIncidents(hits).map((i) => ({ ...i, id: `${outletId}:${i.id}` }));

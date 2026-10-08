@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { verifyChain, type PosEvent } from '@pos/events';
-import { DEFAULT_POLICY } from '@pos/order';
+import { DEFAULT_POLICY, verifyCashCount } from '@pos/order';
 import { demoConfig, MemoryStore, PosEngine, Recorder, SimPrinter } from '../src';
 
 const T0 = Date.parse('2026-10-01T10:00:00+07:00');
@@ -921,6 +921,48 @@ describe('bill tunai yang ditahan lama', () => {
     must(await c.engine.pay(id, { method: 'QRIS', tid: '12345678' }));
     c.tick(300 * MIN);
     expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBeNull();
+  });
+});
+
+describe('kas laci: terminal dan server menghitung sama', () => {
+  it('skenario campuran: tunai, QRIS, bayar sebagian, refund atas order shift sebelumnya, kembalian — expected terminal = hitungan ulang server', async () => {
+    const c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+    // shift 1: order a tunai penuh (kembalian tidak masuk), order b QRIS, order c tunai sebagian lalu QRIS
+    const a = must(await c.engine.createOrder('TAKE_AWAY')).id; must(await c.engine.addItem(a, 'kopi-susu', 2)); must(await c.engine.printBill(a));
+    must(await c.engine.pay(a, { method: 'CASH', tendered: 100_000 })); // tagihan 48.400, kembalian 51.600
+    const b = must(await c.engine.createOrder('TAKE_AWAY')).id; must(await c.engine.addItem(b, 'kopi-susu', 1)); must(await c.engine.printBill(b));
+    must(await c.engine.pay(b, { method: 'QRIS', tid: '12345678' }));
+    const d = must(await c.engine.createOrder('TAKE_AWAY')).id; must(await c.engine.addItem(d, 'latte', 2)); must(await c.engine.printBill(d));
+    must(await c.engine.pay(d, { method: 'CASH', amount: 20_000, tendered: 20_000 }));
+    must(await c.engine.pay(d, { method: 'QRIS', tid: '12345678' }));
+    must(await c.engine.closeShift(100_000 + 48_400 + 20_000));
+    // shift 2: refund tunai atas order a (milik shift 1) mengeluarkan uang dari laci shift 2
+    must(await c.engine.openShift(50_000));
+    await login(c, 'hendra');
+    must(await c.engine.refund(a, 10_000, 'CASH', { userId: 'rina', pin: c.pins.rina }));
+    await login(c, 'budi');
+    const e = must(await c.engine.createOrder('TAKE_AWAY')).id; must(await c.engine.addItem(e, 'kopi-susu', 1)); must(await c.engine.printBill(e));
+    must(await c.engine.pay(e, { method: 'CASH' }));
+    must(await c.engine.closeShift(50_000 - 10_000 + 24_200));
+
+    const events = await c.events();
+    const counts = events.filter((x) => x.type === 'cash.counted');
+    expect(counts).toHaveLength(2);
+    const checks = counts.map((x) => verifyCashCount(x as never, events));
+    expect(checks.map((k) => [k.status, k.serverExpected, k.claimed])).toEqual([['OK', 168_400, 168_400], ['OK', 64_200, 64_200]]);
+  });
+
+  it('pelacakan kas ikut tersimpan: shift yang dilanjutkan setelah aplikasi dimulai ulang tetap menghitung benar', async () => {
+    const c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(10_000));
+    const a = must(await c.engine.createOrder('TAKE_AWAY')).id; must(await c.engine.addItem(a, 'kopi-susu', 1)); must(await c.engine.printBill(a));
+    must(await c.engine.pay(a, { method: 'CASH' }));
+    expect(c.engine.currentShift()).toMatchObject({ cashIn: 24_200, cashOut: 0 });
+    const stored = await c.store.get<{ cashIn: number }>('shift');
+    expect(stored?.cashIn).toBe(24_200);
   });
 });
 

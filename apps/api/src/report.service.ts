@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import type { ApiAuth } from './auth';
 import { Database } from './db/database';
+import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { addDays, buildSalesReport, DAY_MS, localDate, startOfLocalDay, type SalesReport } from './sales-report';
 
@@ -75,8 +76,10 @@ export class ReportService {
         )
       ).rows;
 
+      // Hitung ulang kas yang belum diperiksa agar laporan selalu memakai angka server (idempoten).
+      await verifyPendingCashCounts(q, auth.tenantId, outletId, fromMs - 2 * DAY_MS);
       return buildSalesReport({
-        events: [...rows, ...voids].map(rowToEvent), fromMs, toMs, from, to, utcOffsetMinutes: off, now,
+        events: [...rows, ...voids].map(rowToEvent), fromMs, toMs, from, to, utcOffsetMinutes: off, now, cashChecks: await loadCashChecks(q, outletId),
       });
     });
   }

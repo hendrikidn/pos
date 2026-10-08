@@ -107,6 +107,12 @@ export interface ShiftRecord {
   userId: string;
   openedAt: number;
   openingCash: number;
+  /**
+   * Tunai masuk dan keluar sejak shift dibuka (pembayaran dan refund TUNAI yang dicatat selama shift ini), persis seperti yang
+   * dihitung ulang server dari rantai event (`verifyCashCount`). Tidak ada pada shift yang dibuka sebelum pelacakan ini.
+   */
+  cashIn?: number;
+  cashOut?: number;
 }
 
 export type Result<T = void> =

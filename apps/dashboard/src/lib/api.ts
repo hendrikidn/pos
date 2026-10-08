@@ -251,7 +251,7 @@ export interface SalesReport {
   ordersWithoutItems: number;
   cashCounts: {
     toleranceAmount: number;
-    shifts: { shiftId: string; userId: string | null; terminalId: string; at: number; counted: number; expected: number; diff: number }[];
+    shifts: { shiftId: string; userId: string | null; terminalId: string; at: number; counted: number; expected: number; diff: number; verified: boolean; claimed?: number }[];
   };
   notes: string[];
 }

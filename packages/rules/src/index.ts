@@ -1,5 +1,5 @@
 export { evaluateRules } from './engine';
-export { evaluatePatternRules, type PatternInput } from './pattern';
+export { evaluateCashMismatch, evaluatePatternRules, type CashCheckInfo, type PatternInput } from './pattern';
 export { buildIncidents, levelOf, multiplier, GROUP_WINDOW_MS } from './incidents';
 export { DEFAULT_CONFIG } from './types';
 export type {

@@ -22,6 +22,7 @@ export const RULE_LABELS: Record<string, string> = {
   R27: 'total settlement EDC berbeda dengan POS',
   R28: 'metode bayar di POS tidak sesuai settlement',
   R29: 'pengaturan keamanan perangkat kasir tidak aman',
+  R30: 'kas yang seharusnya dilaporkan terminal tidak sama dengan hitungan server',
 };
 
 export const ruleLabel = (rule: string): string => RULE_LABELS[rule] ?? rule;

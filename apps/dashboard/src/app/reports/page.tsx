@@ -251,7 +251,14 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                     <td data-label="Ditutup">{wibDateTime(s.at)}</td>
                     <td data-label="Kasir">{s.userId ?? '—'}</td>
                     <td className="num" data-label="Dihitung">{rp(s.counted)}</td>
-                    <td className="num" data-label="Seharusnya">{rp(s.expected)}</td>
+                    <td className="num" data-label="Seharusnya">
+                      {rp(s.expected)}
+                      {s.claimed !== undefined && (
+                        <span className="badge badge-CRITICAL cell-badge" title="Angka yang dilaporkan terminal berbeda dari hitungan server">
+                          terminal melaporkan {rp(s.claimed)}
+                        </span>
+                      )}
+                    </td>
                     <td className="num" data-label="Selisih">
                       {s.diff === 0 ? 'Pas' : (
                         <span className={off ? 'badge badge-MEDIUM' : undefined}>{s.diff < 0 ? 'Kurang' : 'Lebih'} {rp(Math.abs(s.diff))}</span>
@@ -264,7 +271,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </table>
         )}
         <p className="muted small" style={{ marginBottom: 0 }}>
-          Selisih di atas {rp(tol)} ditandai. Bila berulang pada kasir yang sama, sistem membuat insiden tersendiri.
+          Selisih di atas {rp(tol)} ditandai. Bila berulang pada kasir yang sama, sistem membuat insiden tersendiri. Kas yang seharusnya dihitung ulang oleh server dari catatan transaksi, bukan angka kiriman terminal; bila terminal melaporkan angka lain, itu ditandai merah dan menjadi temuan tersendiri.
         </p>
       </section>
 

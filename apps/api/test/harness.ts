@@ -70,6 +70,8 @@ export interface Harness {
   setNow(ms: number): void;
   /** Panggilan HTTP sungguhan ke server Nest. */
   http(method: string, path: string, token?: string, body?: unknown): Promise<{ status: number; body: any }>;
+  /** GET apa adanya (tanpa mengurai JSON): untuk unduhan seperti CSV. */
+  raw(path: string, token?: string): Promise<{ status: number; headers: Headers; text: string }>;
   postEvents(token: string, events: PosEvent[]): Promise<{ status: number; body: any }>;
   close(): Promise<void>;
 }
@@ -111,6 +113,11 @@ export async function createHarness(nowMs: number, opts: { channel?: Channel; pi
     db, app, admin, notifier, mailer,
     setNow: (ms) => { now = ms; },
     http,
+    raw: async (path, token) => {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+      // ignoreBOM: pertahankan BOM di awal teks (res.text() membuangnya) supaya tes bisa memeriksanya.
+      return { status: res.status, headers: res.headers, text: new TextDecoder('utf-8', { ignoreBOM: true }).decode(await res.arrayBuffer()) };
+    },
     postEvents: (token, events) => http('POST', '/v1/events', token, { events }),
     close: async () => {
       await app.close();

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { BarChart, type Bar } from '@/components/BarChart';
 import { Delta } from '@/components/Delta';
 import { IconAlert } from '@/components/Icons';
+import { PrintButton } from '@/components/PrintButton';
 import { Shell } from '@/components/Shell';
 import { api, authed, type Me, type Outlet, type SalesReport } from '@/lib/api';
 import { RANGE_OPTIONS, rangeText, rp, shortDate, weekdayDate, wibDateTime, type RangeValue } from '@/lib/format';
@@ -67,7 +68,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       <h1>Laporan penjualan</h1>
       <p className="sub">{outlet.name} · {rangeText(r.range.from, r.range.to)}</p>
 
-      <div className="filters">
+      <div className="filters no-print">
         {outlets.length > 1 && (
           <nav className="tabs" aria-label="Outlet">
             {outlets.map((o) => (
@@ -84,6 +85,19 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           ))}
         </nav>
       </div>
+
+      <section className="panel export-panel no-print" aria-labelledby="ekspor">
+        <h2 id="ekspor">Ekspor data</h2>
+        <p className="muted small" style={{ marginTop: 0 }}>
+          CSV untuk Excel atau Google Sheets, sesuai rentang di atas ({rangeText(r.range.from, r.range.to)}). Setiap ekspor tercatat di log audit.
+        </p>
+        <div className="export-links">
+          {([['transactions', 'Transaksi'], ['payments', 'Pembayaran'], ['items', 'Item terjual'], ['exceptions', 'Void, refund, diskon'], ['daily', 'Ringkasan harian']] as const).map(([k, label]) => (
+            <a key={k} className="btn-like secondary" href={`/api/export/${k}?outlet=${encodeURIComponent(outlet.id)}&range=${range}`} download>{label}</a>
+          ))}
+          <PrintButton />
+        </div>
+      </section>
 
       <section className="hero panel" aria-label="Penjualan bersih">
         <span className="hero-label">Penjualan bersih</span>

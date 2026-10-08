@@ -492,3 +492,14 @@ label.btn-like:hover { background: var(--surface-2); border-color: var(--muted);
 .days legend { font-weight: 600; margin-bottom: 6px; padding: 0; }
 .inline-form { display: flex; gap: 8px; margin: 0 0 12px; } .inline-form input { flex: 1; max-width: 360px; }
 td.neg { color: var(--crit-fg); font-weight: 700; }
+
+/* Ekspor dan cetak */
+.export-links { display: flex; flex-wrap: wrap; gap: 8px; }
+a.btn-like { text-decoration: none; padding: 0 14px; min-height: 44px; border: 1.5px solid var(--line); background: var(--surface); color: var(--text); font-weight: 600; font-size: 15px; }
+@media print {
+  .no-print, nav, aside, header.mobilebar, .chart-table summary { display: none !important; }
+  body { background: #fff !important; color: #000 !important; }
+  .panel, .tile, .hero { box-shadow: none !important; break-inside: avoid; border-color: #ccc !important; }
+  main { padding: 0 !important; margin: 0 !important; max-width: none !important; }
+  .chart-bar { background: #444 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

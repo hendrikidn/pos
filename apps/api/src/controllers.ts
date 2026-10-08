@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Inject, NotFoundException, Param, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, NotFoundException, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { Public, requireApi, requireDevice, type AuthedRequest } from './auth';
 import { BankService } from './bank.service';
 import { Database } from './db/database';
@@ -87,6 +87,29 @@ export class ApiController {
     const auth = requireApi(req, ['OWNER', 'OPS', 'MANAGER']);
     await this.assertOutlet(auth.tenantId, outletId);
     return this.reports.sales(auth, outletId, { from, to, range, compare }, this.clock());
+  }
+
+  /**
+   * Ekspor CSV (UTF-8 dengan BOM) untuk Excel/Sheets: `kind` = transactions | payments | items | exceptions | daily. Rentang sama dengan laporan penjualan.
+   * Setiap ekspor tercatat di log audit karena memuat data per transaksi.
+   */
+  @Get('v1/outlets/:outletId/exports/:kind')
+  async exportSales(
+    @Req() req: AuthedRequest,
+    @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void },
+    @Param('outletId') outletId: string,
+    @Param('kind') kind: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('range') range?: string,
+  ) {
+    const auth = requireApi(req, ['OWNER', 'OPS', 'MANAGER']);
+    await this.assertOutlet(auth.tenantId, outletId);
+    const out = await this.reports.export(auth, outletId, kind, { from, to, range }, this.clock());
+    res.setHeader('content-type', 'text/csv; charset=utf-8');
+    res.setHeader('content-disposition', `attachment; filename="${out.filename}"`);
+    res.setHeader('cache-control', 'no-store');
+    return out.csv;
   }
 
   @Post('v1/outlets/:outletId/evaluate')

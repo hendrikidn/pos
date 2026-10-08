@@ -153,4 +153,36 @@ describe('GET /v1/outlets/:id/reports/sales', () => {
     expect((await h.http('GET', url('?compare=1'), other)).status).not.toBe(200);
     expect((await h.http('GET', url('?compare=1'), manager)).body.comparison.previous.range.days).toBe(7);
   });
+
+  it('ekspor CSV: berkas unduhan dengan BOM, nama berkas, isi sesuai data, dan tercatat di audit', async () => {
+    const r = await h.raw('/v1/outlets/o1/exports/transactions?from=2026-10-01&to=2026-10-01', owner);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toMatch(/^text\/csv/);
+    expect(r.headers.get('content-disposition')).toBe('attachment; filename="o1-transaksi-2026-10-01_2026-10-01.csv"');
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    expect(r.text.charCodeAt(0)).toBe(0xfeff);
+    const lines = r.text.slice(1).trim().split('\r\n');
+    expect(lines[0]).toBe('Tanggal,Jam,Order,Jenis,Meja,Kasir,Terminal,Subtotal,Diskon,Service,Pajak,Pembulatan,Total tagihan,Dibayar,Metode,Diskon dari,Member');
+    expect(lines).toHaveLength(2); // order a saja; b di-void
+    expect(lines[1]).toMatch(/^2026-10-01,10:05:00,a,Take-away,,budi,term-1,,,,,,50000,50000,Tunai,,$/);
+    const audit = (await h.db.admin.query<{ detail: { kind: string; rows: number } }>("select detail from audit_log where action = 'export.sales'")).rows;
+    expect(audit.map((a) => [a.detail.kind, a.detail.rows])).toEqual([['transactions', 1]]);
+    const items = await h.raw('/v1/outlets/o1/exports/items?range=30d', owner);
+    expect(items.text).toContain('Kopi Susu');
+    const daily = await h.raw('/v1/outlets/o1/exports/daily?from=2026-09-30&to=2026-10-02', owner);
+    expect(daily.text.slice(1).trim().split('\r\n')).toEqual([
+      'Tanggal,Order,Penerimaan,Refund,Penjualan bersih,Rata-rata per order,Diskon', '2026-09-30,0,0,0,0,0,0', '2026-10-01,1,50000,0,50000,50000,0', '2026-10-02,0,0,0,0,0,0',
+    ]);
+  });
+
+  it('ekspor: jenis tidak dikenal 400, rentang tidak sah 400, peran dan tenant dijaga', async () => {
+    expect((await h.raw('/v1/outlets/o1/exports/semua', owner)).status).toBe(400);
+    expect((await h.raw('/v1/outlets/o1/exports/daily?from=2026-10-02&to=2026-10-01', owner)).status).toBe(400);
+    expect((await h.raw('/v1/outlets/o1/exports/daily?from=2026-08-01&to=2026-10-02', owner)).status).toBe(400); // lebih dari 31 hari
+    expect((await h.raw('/v1/outlets/o1/exports/daily', supervisor)).status).toBe(403);
+    expect((await h.raw('/v1/outlets/o1/exports/daily', device)).status).toBe(403);
+    expect((await h.raw('/v1/outlets/o1/exports/daily')).status).toBe(401);
+    expect((await h.raw('/v1/outlets/o1/exports/daily', other)).status).toBe(404);
+    expect((await h.raw('/v1/outlets/o1/exports/daily', manager)).status).toBe(200);
+  });
 });

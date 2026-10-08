@@ -26,6 +26,8 @@ import { HandoffService } from './handoff.service';
 import { MemberController } from './member.controller';
 import { MemberService } from './member.service';
 import { BillingService } from './billing.service';
+import { AccountingService } from './accounting.service';
+import { AccountingController } from './accounting.controller';
 import { SignupService } from './signup.service';
 import { BillingController } from './billing.controller';
 import { ReceiptService } from './receipt.service';
@@ -57,7 +59,7 @@ export class AppModule {
   static forRoot(db: Database, opts: AppOptions = {}): DynamicModule {
     return {
       module: AppModule,
-      controllers: [ApiController, ConfigController, DeviceController, StockController, MemberController, BillingController, PlatformController, LoginController, TenantUsersController],
+      controllers: [ApiController, ConfigController, DeviceController, StockController, MemberController, BillingController, AccountingController, PlatformController, LoginController, TenantUsersController],
       providers: [
         // useFactory, bukan useValue: Nest menyerialisasi metadata modul dinamis untuk membuat token modul,
         // dan objek database (memori WASM) membuat serialisasi itu gagal.
@@ -70,7 +72,7 @@ export class AppModule {
         { provide: MAILER, useFactory: () => opts.mailer ?? mailerFromEnv() },
         { provide: CLOCK, useFactory: () => opts.clock ?? Date.now },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
+        AdminService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, AccountingService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
       ],
       exports: [AdminService, ConfigService],
     };

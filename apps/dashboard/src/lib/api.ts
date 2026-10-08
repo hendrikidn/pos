@@ -374,3 +374,14 @@ export interface Billing {
   invoices: InvoiceRow[];
   paymentInfo: string;
 }
+
+export interface AccountRow { code: string; name: string; type: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE'; normal: 'DEBIT' | 'CREDIT'; active: boolean }
+export interface JournalEntryRow { ref: string; date: string; memo: string; source: 'POS' | 'MANUAL'; lines: { account: string; debit: number; credit: number }[]; notes?: string[] }
+export interface ManualEntryRow { id: number; ref: string; date: string; memo: string; createdBy: string; voided: boolean; voidReason: string | null }
+export interface JournalView { range: { from: string; to: string }; accounts: AccountRow[]; entries: JournalEntryRow[]; manual: ManualEntryRow[] }
+export interface TrialRow { account: string; name: string; type: string; debit: number; credit: number; balance: number }
+export interface AccountingReports {
+  range: { from: string; to: string };
+  trialBalance: { rows: TrialRow[]; totalDebit: number; totalCredit: number };
+  incomeStatement: { revenue: TrialRow[]; expenses: TrialRow[]; totalRevenue: number; totalExpenses: number; netIncome: number };
+}

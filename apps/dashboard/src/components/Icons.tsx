@@ -48,3 +48,6 @@ export function Logo({ size = 40 }: { size?: number }) {
   // eslint-disable-next-line @next/next/no-img-element
   return <img src="/logo.png" width={size} height={size} alt="" aria-hidden="true" className="logo" />;
 }
+export const IconBook = () => (
+  <Svg><path d="M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3V4z" /><path d="M5 17a3 3 0 013-3h11" /></Svg>
+);

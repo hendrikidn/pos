@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { IconAlert, IconBox, IconCard, IconChart, IconSliders } from './Icons';
+import { IconAlert, IconBook, IconBox, IconCard, IconChart, IconSliders } from './Icons';
 
 /** Menu utama. Bar bawah di ponsel, rel ikon di tablet portrait, sidebar penuh di layar lebar (diatur CSS). */
 export function NavLinks({ role }: { role: string }) {
@@ -21,6 +21,7 @@ export function NavLinks({ role }: { role: string }) {
       href: '/settlements', label: 'Settlement', icon: <IconCard />, on: path.startsWith('/settlements'),
       show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
     },
+    { href: '/accounting', label: 'Akuntansi', icon: <IconBook />, on: path.startsWith('/accounting'), show: role === 'OWNER' || role === 'MANAGER' },
     { href: '/settings', label: 'Pengaturan', icon: <IconSliders />, on: path.startsWith('/settings'), show: role === 'OWNER' || role === 'OPS' },
   ];
   return (

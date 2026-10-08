@@ -503,3 +503,8 @@ a.btn-like { text-decoration: none; padding: 0 14px; min-height: 44px; border: 1
   main { padding: 0 !important; margin: 0 !important; max-width: none !important; }
   .chart-bar { background: #444 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+/* Akuntansi */
+.journal-entry { border-top: 1px solid var(--line); padding: 10px 0; }
+.journal-entry header { margin-bottom: 4px; }
+.journal-entry .table { margin: 0; }

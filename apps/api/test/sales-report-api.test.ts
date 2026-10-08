@@ -123,6 +123,10 @@ describe('GET /v1/outlets/:id/reports/sales', () => {
     h.setNow(WIB('2026-10-02T09:00:00'));
   });
 
+  it('tanggal yang tidak ada di kalender ditolak 400, bukan 500', async () => {
+    for (const q of ['?from=2026-13-01&to=2026-13-02', '?from=2026-02-30&to=2026-03-01', '?from=2026-10-01&to=2026-00-10']) expect((await h.http('GET', url(q), owner)).status, q).toBe(400);
+  });
+
   it('31 hari tepat diterima', async () => {
     const r = await h.http('GET', url('?from=2026-09-02&to=2026-10-02'), owner);
     expect(r.status).toBe(200);

@@ -4,26 +4,11 @@ import { Database } from './db/database';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { buildExport, EXPORT_EVENT_TYPES, EXPORT_KINDS, toCsv, type ExportKind } from './sales-export';
-import { addDays, buildSalesReport, compareSales, DAY_MS, localDate, startOfLocalDay, type Comparison, type SalesReport } from './sales-report';
+import { resolveRange } from './report-range';
+import { addDays, buildSalesReport, compareSales, DAY_MS, startOfLocalDay, type Comparison, type SalesReport } from './sales-report';
 import type { Queryable } from './db/driver';
 
-export const MAX_REPORT_DAYS = 31;
-const DEFAULT_DAYS = 7;
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-export const RANGES = ['today', 'yesterday', '7d', '30d', 'month'] as const;
-export type RangePreset = (typeof RANGES)[number];
-
-function presetRange(r: RangePreset, today: string): { from: string; to: string } {
-  switch (r) {
-    case 'today': return { from: today, to: today };
-    case 'yesterday': return { from: addDays(today, -1), to: addDays(today, -1) };
-    case '7d': return { from: addDays(today, -6), to: today };
-    case '30d': return { from: addDays(today, -29), to: today };
-    case 'month': return { from: `${today.slice(0, 8)}01`, to: today };
-  }
-}
-
-const validDate = (s: string): boolean => DATE.test(s) && new Date(`${s}T00:00:00Z`).toISOString().slice(0, 10) === s;
+export { MAX_REPORT_DAYS, RANGES, type RangePreset } from './report-range';
 
 @Injectable()
 export class ReportService {
@@ -88,23 +73,8 @@ export class ReportService {
   }
 
 
-  /** Rentang tanggal lokal dari `from`/`to` atau preset `range`, lengkap dengan pemeriksaannya. */
   private resolveRange(off: number, params: { from?: string; to?: string; range?: string }, now: number) {
-    const today = localDate(now, off);
-    let { from, to } = params;
-    if (params.range !== undefined) {
-      if (from !== undefined || to !== undefined) throw new BadRequestException('pakai range atau from/to, tidak keduanya');
-      if (!(RANGES as readonly string[]).includes(params.range)) throw new BadRequestException(`range harus salah satu dari ${RANGES.join(', ')}`);
-      ({ from, to } = presetRange(params.range as RangePreset, today));
-    }
-    to = to ?? today;
-    from = from ?? addDays(to, -(DEFAULT_DAYS - 1));
-    if (!validDate(from) || !validDate(to)) throw new BadRequestException('tanggal harus berformat YYYY-MM-DD');
-    if (from > to) throw new BadRequestException('tanggal awal tidak boleh setelah tanggal akhir');
-    if (to > today) throw new BadRequestException('tanggal akhir tidak boleh di masa depan');
-    const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
-    if (days > MAX_REPORT_DAYS) throw new BadRequestException(`rentang maksimal ${MAX_REPORT_DAYS} hari`);
-    return { from, to, days, today };
+    return resolveRange(off, params, now);
   }
 
   /** Laporan satu rentang tanggal lokal yang sudah divalidasi. */

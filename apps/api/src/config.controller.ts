@@ -47,6 +47,12 @@ export class ConfigController {
     return this.config.listMenu(requireApi(req, ['OWNER', 'OPS', 'MANAGER']));
   }
 
+  /** Impor menu dari CSV: periksa dulu (`apply` kosong), lalu terapkan (`apply: true`). */
+  @Post('menu/import')
+  importMenu(@Req() req: AuthedRequest, @Body() body: { csv?: unknown; apply?: unknown }) {
+    return this.config.importMenu(requireApi(req, ['OWNER', 'OPS']), body ?? {});
+  }
+
   @Post('menu')
   async createMenu(@Req() req: AuthedRequest, @Body() body: MenuInput) {
     await this.config.createMenu(requireApi(req, ['OWNER', 'OPS']), body ?? {});

@@ -7,6 +7,7 @@ import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { checkModifierGroups, checkPromo, type ModifierGroup, type Promo } from '@pos/order';
 import { DEFAULT_SHADOW_DAYS, shadowState } from './shadow';
+import { parseMenuCsv, type ImportError } from './menu-import';
 
 const pbkdf2Async = promisify(pbkdf2);
 
@@ -311,6 +312,53 @@ export class ConfigService {
         [auth.tenantId, input.id, input.outletId ?? null, input.name!.trim(), input.price, input.category!.trim(), input.sort ?? 0, JSON.stringify(input.modifierGroups ?? [])],
       );
       await this.audit(q, auth, 'menu.create', { id: input.id, price: input.price });
+    });
+  }
+
+  /**
+   * Impor menu massal dari CSV. `apply: false` (bawaan) hanya memeriksa dan mengembalikan rencana per baris (baru, diubah, tak berubah);
+   * `apply: true` menerapkannya sekaligus: bila ada satu baris salah, tidak ada yang berubah. Menu yang id-nya sudah ada hanya diubah nama,
+   * kategori, harga, dan statusnya (varian, resep, dan foto tetap); menu baru berlaku di semua outlet. Perubahan harga tercatat di audit.
+   */
+  async importMenu(auth: ApiAuth, input: { csv?: unknown; apply?: unknown }): Promise<{
+    applied: boolean;
+    errors: ImportError[];
+    plan: { line: number; id: string; action: 'create' | 'update' | 'unchanged'; name: string; changes: string[] }[];
+    summary: { create: number; update: number; unchanged: number };
+  }> {
+    need(typeof input.csv === 'string', 'csv wajib berupa teks');
+    need(input.apply === undefined || typeof input.apply === 'boolean', 'apply harus true atau false');
+    const parsed = parseMenuCsv(input.csv as string);
+    const empty = { create: 0, update: 0, unchanged: 0 };
+    if (parsed.errors.length > 0) return { applied: false, errors: parsed.errors, plan: [], summary: empty };
+    return this.db.tenantTx(auth.tenantId, async (q) => {
+      const have = new Map(
+        (await q.query<{ id: string; name: string; price: number; category: string; active: boolean }>('select id, name, price, category, active from menu_item where id = any($1::text[])', [parsed.rows.map((r) => r.id)])).rows.map((r) => [r.id, r]),
+      );
+      const plan = parsed.rows.map((r) => {
+        const old = have.get(r.id);
+        if (!old) return { line: r.line, id: r.id, action: 'create' as const, name: r.name, changes: [`harga ${r.price}`] };
+        const changes = [
+          ...(old.name !== r.name ? [`nama "${old.name}" → "${r.name}"`] : []),
+          ...(old.category !== r.category ? [`kategori ${old.category} → ${r.category}`] : []),
+          ...(old.price !== r.price ? [`harga ${old.price} → ${r.price}`] : []),
+          ...(old.active !== r.active ? [`status ${old.active ? 'aktif' : 'nonaktif'} → ${r.active ? 'aktif' : 'nonaktif'}`] : []),
+        ];
+        return { line: r.line, id: r.id, action: changes.length > 0 ? ('update' as const) : ('unchanged' as const), name: r.name, changes };
+      });
+      const summary = { create: plan.filter((p) => p.action === 'create').length, update: plan.filter((p) => p.action === 'update').length, unchanged: plan.filter((p) => p.action === 'unchanged').length };
+      if (input.apply !== true) return { applied: false, errors: [], plan, summary };
+      for (const r of parsed.rows) {
+        const act = plan.find((p) => p.id === r.id)!.action;
+        if (act === 'create') {
+          await q.query('insert into menu_item (tenant_id, id, outlet_id, name, price, category, sort, active, modifier_groups) values ($1, $2, null, $3, $4, $5, 0, $6, $7)', [auth.tenantId, r.id, r.name, r.price, r.category, r.active, '[]']);
+        } else if (act === 'update') {
+          await q.query('update menu_item set name = $2, price = $3, category = $4, active = $5, updated_at = now() where id = $1', [r.id, r.name, r.price, r.category, r.active]);
+        }
+      }
+      const priceChanges = parsed.rows.filter((r) => have.has(r.id) && have.get(r.id)!.price !== r.price).slice(0, 50).map((r) => ({ id: r.id, priceFrom: have.get(r.id)!.price, priceTo: r.price }));
+      await this.audit(q, auth, 'menu.import', { ...summary, priceChanges });
+      return { applied: true, errors: [], plan, summary };
     });
   }
 

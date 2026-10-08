@@ -1,3 +1,4 @@
+import { MenuImport } from '@/components/MenuImport';
 import { MenuManager } from '@/components/MenuManager';
 import { SettingsNav } from '@/components/SettingsNav';
 import { Shell } from '@/components/Shell';
@@ -14,6 +15,7 @@ export default async function MenuPage() {
       <h1>Pengaturan</h1>
       <SettingsNav active="menu" role={me.role} />
       <MenuManager items={items} />
+      <MenuImport />
     </Shell>
   );
 }

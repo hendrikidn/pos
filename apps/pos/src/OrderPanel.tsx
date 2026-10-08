@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { MenuItem, OrderRecord } from '@pos/pos-core';
 import { lineKey, VOID_REASONS } from '@pos/pos-core';
 import { Qr } from './Qr';
-import { MergeDialog, Modal, ModifierDialog, MoveTableDialog, NoteDialog, PayDialog, PinPad, SplitDialog } from './dialogs';
+import { MergeDialog, Modal, ModifierDialog, MoveTableDialog, NoteDialog, PinPad, SplitDialog } from './dialogs';
+import { PayDialog } from './PayDialog';
 import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, type Ctx } from './ui';
 
 type Dialog = 'qr' | 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null;

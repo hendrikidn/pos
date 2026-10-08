@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { lineKey, type MenuItem, type OrderRecord, type StaffPublic } from '@pos/pos-core';
-import { HOLD_REASONS, resolveSelection } from '@pos/order';
-import { METHOD_LABEL, rp, type Ctx } from './ui';
+import { resolveSelection } from '@pos/order';
+import { rp, type Ctx } from './ui';
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
     <div className="overlay" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className={wide ? 'modal modal-wide' : 'modal'} onClick={(e) => e.stopPropagation()}>
         <header>
           <h2>{title}</h2>
           <button className="ghost" onClick={onClose} aria-label="Tutup">✕</button>
@@ -75,109 +75,6 @@ export function ApprovalDialog({
       <div className="actions">
         <button className="secondary" onClick={() => onDone(null)}>Batal</button>
         <button disabled={!ready} onClick={() => onDone(rows)}>Setujui</button>
-      </div>
-    </Modal>
-  );
-}
-
-export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecord; onClose: () => void }) {
-  const { engine, config } = ctx.rt;
-  const due = engine.outstanding(order);
-  const [method, setMethod] = useState<'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT'>('CASH');
-  const [tendered, setTendered] = useState('');
-  const [tid, setTid] = useState(config.edcs[0]?.tid ?? '');
-  const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [part, setPart] = useState('');
-  const amount = part === '' ? due : Number(part);
-  const cash = Number(tendered || 0);
-  const quick = [...new Set([amount, Math.ceil(amount / 10_000) * 10_000, Math.ceil(amount / 50_000) * 50_000, 100_000])].filter((n) => n >= amount);
-  const heldMin = engine.holdRequiredMinutes(order);
-  const [holdReason, setHoldReason] = useState('');
-  const needReason = method === 'CASH' && heldMin !== null;
-  const partial = amount > 0 && amount < due;
-  const amountOk = Number.isInteger(amount) && amount > 0 && amount <= due;
-
-  async function submit() {
-    setBusy(true);
-    const r = await engine.pay(order.id, {
-      method,
-      amount,
-      ...(needReason ? { holdReason } : {}),
-      ...(method === 'CASH' ? { tendered: cash || amount } : { tid, approvalCode: code.trim() || undefined }),
-    });
-    setBusy(false);
-    ctx.bump();
-    if (!r.ok) return ctx.toast(r.message, 'error');
-    const left = engine.outstanding(r.value.order);
-    ctx.toast(
-      method === 'CASH' && r.value.change > 0 ? `Kembalian ${rp(r.value.change)}` : left > 0 ? `Tercatat. Sisa tagihan ${rp(left)}` : 'Pembayaran tercatat',
-      'info',
-    );
-    onClose();
-  }
-
-  return (
-    <Modal title={`Bayar ${rp(amountOk ? amount : due)}`} onClose={onClose}>
-      <label className="field">Nominal yang dibayar sekarang (sisa tagihan {rp(due)})
-        <input inputMode="numeric" value={part} onChange={(e) => setPart(e.target.value.replace(/\D/g, ''))} placeholder={String(due)} />
-      </label>
-      <div className="quick" aria-label="Bagi rata">
-        <button type="button" className="secondary" onClick={() => setPart('')}>Penuh</button>
-        {[2, 3, 4].map((n) => (
-          <button key={n} type="button" className="secondary" onClick={() => setPart(String(Math.min(due, Math.ceil(due / n))))}>Bagi {n}</button>
-        ))}
-      </div>
-      {partial && <p className="notice">Pembayaran sebagian. Sisa {rp(due - amount)} dibayar kemudian (metode boleh berbeda).</p>}
-      <div className="seg seg-2">
-        {(['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const).map((m) => (
-          <button key={m} className={method === m ? 'on' : ''} onClick={() => setMethod(m)}>{METHOD_LABEL[m]}</button>
-        ))}
-      </div>
-      {method === 'CASH' ? (
-        <>
-          {needReason && (
-            <fieldset className="opt-group">
-              <legend>Bill sudah ditahan {heldMin} menit<small className={holdReason ? '' : 'need'}>Wajib pilih alasan</small></legend>
-              <div className="opts">
-                {HOLD_REASONS.map((r) => (
-                  <button key={r.code} type="button" role="radio" aria-checked={holdReason === r.code} className={`opt ${holdReason === r.code ? 'on' : ''}`} onClick={() => setHoldReason(r.code)}>
-                    <span>{r.label}</span>
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-          )}
-          <label className="field">Uang diterima
-            <input inputMode="numeric" value={tendered} onChange={(e) => setTendered(e.target.value.replace(/\D/g, ''))} placeholder={String(due)} />
-          </label>
-          <div className="quick">
-            {quick.map((n) => (
-              <button key={n} className="secondary" onClick={() => setTendered(String(n))}>{rp(n)}</button>
-            ))}
-          </div>
-          {cash > amount && <p className="change">Kembalian {rp(cash - amount)}</p>}
-        </>
-      ) : (
-        <>
-          <p className="notice">
-            Pastikan nama merchant di mesin atau QR tertulis <b>{config.merchantName}</b>. Jangan terima pembayaran ke QR atau mesin lain.
-          </p>
-          {config.edcs.length > 1 && (
-            <label className="field">Mesin EDC
-              <select value={tid} onChange={(e) => setTid(e.target.value)}>
-                {config.edcs.map((e) => <option key={e.tid} value={e.tid}>{e.label} ({e.tid})</option>)}
-              </select>
-            </label>
-          )}
-          <label className="field">Kode approval pada slip (opsional)
-            <input inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
-          </label>
-        </>
-      )}
-      <div className="actions">
-        <button className="secondary" onClick={onClose}>Batal</button>
-        <button disabled={busy || !amountOk || (needReason && !holdReason) || (method === 'CASH' && cash > 0 && cash < amount)} onClick={submit}>Konfirmasi</button>
       </div>
     </Modal>
   );

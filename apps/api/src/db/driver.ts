@@ -61,8 +61,9 @@ export class PgliteDriver implements Driver {
 export class PgDriver implements Driver {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString });
+  /** `max`: jumlah koneksi maksimum di pool (bawaan pg: 10). Tes memakai kecil agar banyak harness paralel tidak menghabiskan koneksi server. */
+  constructor(connectionString: string, max?: number) {
+    this.pool = new pg.Pool({ connectionString, ...(max ? { max } : {}) });
   }
 
   async query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {

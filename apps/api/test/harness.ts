@@ -4,7 +4,8 @@ import type { Incident } from '@pos/rules';
 import { AdminService } from '../src/admin.service';
 import { createApp } from '../src/bootstrap';
 import { Database } from '../src/db/database';
-import { PgliteDriver } from '../src/db/driver';
+import pg from 'pg';
+import { PgDriver, PgliteDriver, type Driver } from '../src/db/driver';
 import type { MailMessage, Mailer } from '../src/mailer';
 import type { Channel } from '../src/notification.service';
 import type { Notifier } from '../src/pipeline.service';
@@ -33,6 +34,33 @@ export class RecordingMailer implements Mailer {
   count(to: string) { return this.sent.filter((x) => x.to === to).length; }
 }
 
+/**
+ * Driver basis data uji. Bawaan: PGlite (PostgreSQL WASM) di memori. Bila `TEST_PG_URL` diisi (mis. postgres://user:pw@127.0.0.1:5433/postgres),
+ * setiap harness memakai DATABASE BARU di server PostgreSQL asli itu dan menghapusnya saat selesai, sehingga seluruh suite bisa dijalankan
+ * terhadap PostgreSQL sungguhan: `TEST_PG_URL=... npx vitest run`.
+ */
+async function createDriver(): Promise<{ driver: Driver; cleanup: () => Promise<void> }> {
+  const base = process.env['TEST_PG_URL'];
+  if (!base) return { driver: await PgliteDriver.create(), cleanup: async () => undefined };
+  const name = `h_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const admin = new pg.Client({ connectionString: base });
+  await admin.connect();
+  await admin.query(`create database ${name}`);
+  await admin.end();
+  const url = new URL(base);
+  url.pathname = `/${name}`;
+  const driver = new PgDriver(url.toString(), 3);
+  return {
+    driver,
+    cleanup: async () => {
+      const c = new pg.Client({ connectionString: base });
+      await c.connect();
+      await c.query(`drop database if exists ${name} with (force)`);
+      await c.end();
+    },
+  };
+}
+
 export interface Harness {
   db: Database;
   mailer: RecordingMailer;
@@ -58,7 +86,8 @@ export class RecordingChannel implements Channel {
 
 /** Dengan `channel`, NotificationService sungguhan dipakai; tanpa itu, notifikasi hanya dicatat oleh RecordingNotifier. */
 export async function createHarness(nowMs: number, opts: { channel?: Channel; pinIterations?: number; trustProxy?: number | string; mailer?: RecordingMailer } = {}): Promise<Harness> {
-  const db = new Database(await PgliteDriver.create());
+  const { driver, cleanup } = await createDriver();
+  const db = new Database(driver);
   await db.migrate();
   const notifier = new RecordingNotifier();
   const mailer = opts.mailer ?? new RecordingMailer();
@@ -86,6 +115,7 @@ export async function createHarness(nowMs: number, opts: { channel?: Channel; pi
     close: async () => {
       await app.close();
       await db.close();
+      await cleanup();
     },
   };
 }

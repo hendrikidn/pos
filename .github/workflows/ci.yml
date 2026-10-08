@@ -25,6 +25,37 @@ jobs:
       # Termasuk tes firmware C yang dikompilasi dengan gcc runner dan dijalankan terhadap API sungguhan (PGlite).
       - run: npx vitest run
 
+  # Seluruh suite terhadap PostgreSQL asli (versi produksi), bukan PGlite: menangkap perbedaan perilaku (RLS, tipe, indeks, migrasi).
+  # Setiap harness tes membuat database sendiri di server ini dan menghapusnya (lihat apps/api/test/harness.ts).
+  test-postgres:
+    name: Tes terhadap PostgreSQL 17 asli
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: pw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_PG_URL: postgres://postgres:pw@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Role aplikasi dibuat sekali di klaster (role bersifat global; migrasi 001 melewatinya bila sudah ada), agar harness paralel tidak berebut membuatnya.
+      - run: PGPASSWORD=pw psql -h 127.0.0.1 -U postgres -c "create role app_user nologin"
+      - run: npx vitest run
+
   build:
     name: Build dashboard, konsol admin, dan POS
     runs-on: ubuntu-latest

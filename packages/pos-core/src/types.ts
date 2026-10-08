@@ -1,5 +1,5 @@
 import type { KitchenStatus, OrderType, PaymentMethod } from '@pos/events';
-import type { ChosenOption, ModifierGroup, OrderState, Policy, Role } from '@pos/order';
+import type { ChosenOption, ModifierGroup, OrderState, Policy, Role, TableDef } from '@pos/order';
 
 export interface MenuItem {
   id: string;
@@ -42,6 +42,8 @@ export interface PosConfig {
   taxOnService?: boolean;
   roundingUnit?: number;
   edcs: Edc[];
+  /** Denah meja outlet; tidak ada = kasir mengetik nomor meja bebas. */
+  tables?: TableDef[];
   staff: Staff[];
   menu: MenuItem[];
   policy?: Policy;

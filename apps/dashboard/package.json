@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@pos/order": "*",
     "@pos/rules": "*",
     "next": "^15.0.0",
     "react": "^19.0.0",

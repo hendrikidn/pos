@@ -19,6 +19,7 @@ export interface DeviceConfig {
     serviceChargePercent?: number;
     taxOnService?: boolean;
     roundingUnit?: number;
+    tables?: { no: string; area: string; seats: number }[];
     edcs: { tid: string; bank: string; label: string }[];
     policy: Partial<Policy> | null;
   };
@@ -37,6 +38,7 @@ export function toPosConfig(c: DeviceConfig): PosConfig {
     ...(c.outlet.taxOnService === false ? { taxOnService: false } : {}),
     ...(c.outlet.roundingUnit ? { roundingUnit: c.outlet.roundingUnit } : {}),
     edcs: c.outlet.edcs,
+    ...(c.outlet.tables?.length ? { tables: c.outlet.tables } : {}),
     staff: c.staff,
     menu: c.menu,
     policy: { ...DEFAULT_POLICY, ...(c.outlet.policy ?? {}) },

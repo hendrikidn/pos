@@ -276,3 +276,4 @@ export function decideEmployeeMeal(cmd: EmployeeMealCommand, ctx: Ctx): Employee
   if (rank(ctx, cmd.approverId) < RANK.SUPERVISOR) return { ok: false, code: 'APPROVER_ROLE_TOO_LOW', message: 'Approver minimal supervisor.' };
   return { ok: true, approverId: cmd.approverId };
 }
+export * from './tables';

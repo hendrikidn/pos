@@ -59,6 +59,8 @@ export interface SettingsInput {
   taxOnService?: boolean;
   roundingUnit?: number;
   edcs?: { tid: string; bank: string; label: string }[];
+  /** Denah meja; `[]` menghapusnya (kasir kembali mengetik nomor meja bebas). */
+  tables?: { no: string; area: string; seats: number }[];
   policy?: {
     secondApprovalAbove?: number;
     manualDiscountMaxPercent?: number;
@@ -115,6 +117,8 @@ export interface DeviceConfig {
     taxOnService?: boolean;
     roundingUnit?: number;
     edcs: { tid: string; bank: string; label: string }[];
+    /** Hanya bila outlet punya denah meja. */
+    tables?: { no: string; area: string; seats: number }[];
     policy: Record<string, number> | null;
   };
   staff: { id: string; name: string; role: StaffRole; salt: string; hash: string; iterations: number }[];
@@ -242,7 +246,7 @@ export class ConfigService {
 
   async getSettings(auth: ApiAuth, outletId: string, now = Date.now()) {
     const row = await this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
+      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, tables, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
     );
     if (!row) throw new NotFoundException('outlet tidak ditemukan');
     const { shadow_started_ms, ...rest } = row;
@@ -259,6 +263,15 @@ export class ConfigService {
       need(Array.isArray(s.edcs) && s.edcs.length <= 10, 'edcs maksimal 10');
       for (const e of s.edcs) need(/^[0-9]{6,12}$/.test(e.tid) && !!e.bank?.trim() && !!e.label?.trim(), 'setiap EDC perlu tid (6–12 digit), bank, dan label');
       need(new Set(s.edcs.map((e) => e.tid)).size === s.edcs.length, 'TID EDC tidak boleh ganda');
+    }
+    if (s.tables !== undefined) {
+      need(Array.isArray(s.tables) && s.tables.length <= 200, 'tables maksimal 200');
+      for (const t of s.tables) {
+        need(typeof t?.no === 'string' && /^[A-Za-z0-9._-]{1,10}$/.test(t.no), 'nomor meja 1–10 karakter (huruf, angka, titik, - atau _)');
+        need(typeof t.area === 'string' && t.area.trim().length >= 1 && t.area.length <= 30, 'area meja wajib (maks. 30 karakter)');
+        need(Number.isInteger(t.seats) && t.seats >= 1 && t.seats <= 50, 'kursi per meja 1–50');
+      }
+      need(new Set(s.tables.map((t) => t.no.toLowerCase())).size === s.tables.length, 'nomor meja tidak boleh ganda');
     }
     if (s.policy) {
       for (const [k, v] of Object.entries(s.policy)) {
@@ -280,13 +293,14 @@ export class ConfigService {
                 shadow_days = coalesce($9, shadow_days),
                 shadow_started_ms = case when $10::boolean then $11::float8 else shadow_started_ms end,
                 service_charge_percent = coalesce($12, service_charge_percent), tax_on_service = coalesce($13, tax_on_service),
-                rounding_unit = coalesce($14, rounding_unit)
+                rounding_unit = coalesce($14, rounding_unit), tables = coalesce($15::jsonb, tables)
          where id = $1`,
         [
           outletId, s.merchantName?.trim() ?? null, s.taxPercent ?? null, s.edcs ? JSON.stringify(s.edcs) : null,
           s.policy !== undefined, s.policy ? JSON.stringify(s.policy) : null, s.cctvRetentionDays ?? null, s.cctvClockOffsetSec ?? null,
           s.shadowDays ?? null, s.shadowRestart === true, now,
           s.serviceChargePercent ?? null, s.taxOnService ?? null, s.roundingUnit ?? null,
+          s.tables ? JSON.stringify(s.tables.map((t) => ({ no: t.no, area: t.area.trim(), seats: t.seats }))) : null,
         ],
       );
       if (r.rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
@@ -356,8 +370,8 @@ export class ConfigService {
   async deviceConfig(device: DeviceAuth): Promise<DeviceConfig> {
     return this.db.tenantTx(device.tenantId, async (q) => {
       const o = (
-        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; policy: Record<string, number> | null }>(
-          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, policy from outlet where id = $1',
+        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; tables: NonNullable<DeviceConfig['outlet']['tables']>; policy: Record<string, number> | null }>(
+          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, tables, policy from outlet where id = $1',
           [device.outletId],
         )
       ).rows[0];
@@ -387,7 +401,7 @@ export class ConfigService {
           ...(o.service_charge_percent > 0 ? { serviceChargePercent: o.service_charge_percent } : {}),
           ...(o.tax_on_service === false ? { taxOnService: false } : {}),
           ...(o.rounding_unit > 0 ? { roundingUnit: o.rounding_unit } : {}),
-          edcs: o.edcs, policy: o.policy,
+          edcs: o.edcs, ...(o.tables.length > 0 ? { tables: o.tables } : {}), policy: o.policy,
         },
         staff: staff.map((s) => ({ id: s.id, name: s.name, role: s.role, salt: s.pin_salt, hash: s.pin_hash, iterations: s.pin_iterations })),
         menu,

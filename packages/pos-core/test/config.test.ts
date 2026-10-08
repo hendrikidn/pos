@@ -101,4 +101,12 @@ describe('ConfigClient', () => {
     expect(cfg).toMatchObject({ deviceId: 'pos-1', outletId: 'o1', merchantName: 'Kopi Senopati', taxPercent: 10 });
     expect(cfg.policy).toMatchObject({ secondApprovalAbove: 75_000, manualDiscountMaxPercent: 15 });
   });
+
+  it('toPosConfig meneruskan denah meja hanya bila ada', () => {
+    const base = serverConfig();
+    expect(toPosConfig(base)).not.toHaveProperty('tables');
+    expect(toPosConfig({ ...base, outlet: { ...base.outlet, tables: [] } })).not.toHaveProperty('tables');
+    const tables = [{ no: '1', area: 'Indoor', seats: 4 }];
+    expect(toPosConfig({ ...base, outlet: { ...base.outlet, tables } }).tables).toEqual(tables);
+  });
 });

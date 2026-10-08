@@ -2,6 +2,7 @@ import { Body, Controller, Delete, ForbiddenException, Get, Inject, Param, Post,
 import { Public, requireApi, requireDevice, type AuthedRequest } from './auth';
 import { DeviceService } from './device.service';
 import { KdsService } from './kds.service';
+import { TablesService } from './tables.service';
 import { ReceiptService } from './receipt.service';
 import { PairingService, type PairingInput } from './pairing.service';
 
@@ -11,6 +12,7 @@ export class DeviceController {
     @Inject(DeviceService) private readonly devices: DeviceService,
     @Inject(PairingService) private readonly pairing: PairingService,
     @Inject(KdsService) private readonly kds: KdsService,
+    @Inject(TablesService) private readonly tables: TablesService,
     @Inject(ReceiptService) private readonly receipts: ReceiptService,
   ) {}
 
@@ -58,6 +60,14 @@ export class DeviceController {
     const device = requireDevice(req);
     if (device.deviceKind === 'sensor') throw new ForbiddenException('jenis perangkat ini tidak membaca tiket dapur');
     return this.kds.board(device);
+  }
+
+  /** Order dine-in terbuka per meja dari semua terminal outlet ini (denah meja berwarna). Hanya terminal. */
+  @Get('tables/board')
+  tableBoard(@Req() req: AuthedRequest) {
+    const device = requireDevice(req);
+    if (device.deviceKind !== 'terminal') throw new ForbiddenException('hanya terminal yang membaca denah meja');
+    return this.tables.board(device);
   }
 
   /** Struk digital untuk customer (halaman /r/<token> di dashboard memanggil ini). Publik: tokennya sendiri yang menjadi kredensial. */

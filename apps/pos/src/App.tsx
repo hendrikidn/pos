@@ -5,6 +5,7 @@ import { CustomerDisplay, DISPLAY_CHANNEL, type DisplayView } from './CustomerDi
 import { Kds } from './Kds';
 import { Logo } from './Logo';
 import { OrderPanel } from './OrderPanel';
+import { TableMap } from './TableMap';
 import { hardware, isNative, kioskWanted, loadPrinterSetting, savePrinterSetting, setKioskWanted, type PrinterKind } from './native';
 import { createRuntime, saveSettings, setDemo, type Boot, type Runtime } from './runtime';
 import { isActive, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, TYPE_LABEL, type Ctx } from './ui';
@@ -184,7 +185,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
 
 function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   const { engine } = ctx.rt;
-  const [asking, setAsking] = useState<'table' | 'employee' | null>(null);
+  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | null>(null);
   const [table, setTable] = useState('');
   const shift = engine.currentShift();
   const orders = engine.listOrders().filter((o) => o.shiftId === shift?.id);
@@ -212,7 +213,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
       <div className="order-strip">
         <div className="strip-new">
           <button onClick={() => void create('TAKE_AWAY')}>+ Take-away</button>
-          <button className="secondary" onClick={() => setAsking('table')}>+ Dine-in</button>
+          <button className="secondary" onClick={() => setAsking(engine.config.tables?.length ? 'tables' : 'table')}>+ Dine-in</button>
           <button className="secondary" onClick={() => setAsking('employee')}>+ Karyawan</button>
         </div>
         <ul className="strip-list" aria-label="Order di shift ini">
@@ -237,6 +238,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
         </section>
       )}
 
+      {asking === 'tables' && <TableMap ctx={ctx} onPick={(no) => void create('DINE_IN', { tableNo: no })} onClose={() => setAsking(null)} />}
       {asking === 'table' && (
         <Modal title="Nomor meja" onClose={() => setAsking(null)}>
           <PinPad value={table} onChange={setTable} max={3} />

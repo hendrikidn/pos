@@ -172,6 +172,7 @@ export interface OutletSettings {
   tax_on_service: boolean;
   rounding_unit: number;
   edcs: { tid: string; bank: string; label: string }[];
+  tables: { no: string; area: string; seats: number }[];
   policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number; holdBillMinutes?: number } | null;
   cctv_retention_days: number;
   cctv_clock_offset_sec: number;

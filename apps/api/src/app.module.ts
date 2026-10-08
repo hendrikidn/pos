@@ -21,6 +21,7 @@ import { PlatformService } from './platform.service';
 import { PairingService } from './pairing.service';
 import { IngestService } from './ingest.service';
 import { KdsService } from './kds.service';
+import { TablesService } from './tables.service';
 import { ReceiptService } from './receipt.service';
 import { channelFromEnv, NotificationService, type Channel } from './notification.service';
 import { ReportService } from './report.service';
@@ -60,7 +61,7 @@ export class AppModule {
         { provide: MAILER, useFactory: () => opts.mailer ?? mailerFromEnv() },
         { provide: CLOCK, useFactory: () => opts.clock ?? Date.now },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, IngestService, GuardService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
+        AdminService, IngestService, GuardService, TablesService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
       ],
       exports: [AdminService, ConfigService],
     };

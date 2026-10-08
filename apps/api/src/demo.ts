@@ -64,6 +64,11 @@ async function main() {
   const seeder: ApiAuth = { kind: 'api', tenantId: 'demo', userId: 'demo-seed', role: 'OWNER' };
   await config.updateSettings(seeder, 'senopati', {
     merchantName: 'Kopi Senopati', taxPercent: 10, edcs: [{ tid: '12345678', bank: 'Mandiri', label: 'EDC Mandiri' }],
+    // Denah meja: meja 4 dan 9 dipakai terminal term-sen (order hidup di bawah), jadi terminal pos-1 melihatnya terisi.
+    tables: [
+      ...Array.from({ length: 9 }, (_, i) => ({ no: String(i + 1), area: 'Indoor', seats: i < 6 ? 4 : 2 })),
+      ...['T1', 'T2', 'T3'].map((no) => ({ no, area: 'Teras', seats: 6 })),
+    ],
   });
   const demoPins = { budi: '4827', sari: '5930', hendra: '7351', rina: '2468', owner: '9042' };
   const people = [

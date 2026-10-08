@@ -3,7 +3,7 @@ import {
   type KeyPairHolder, type Printer, type PosConfig, type Signer, type SyncResult,
 } from '@pos/pos-core';
 import type { KitchenStatus, PrinterState } from '@pos/events';
-import type { KdsBoard } from '@pos/order';
+import type { KdsBoard, TableBoard } from '@pos/order';
 import { IdbStore } from './idb-store';
 import { createKdsRuntime, type KdsRuntime } from './kds-runtime';
 import {
@@ -91,6 +91,11 @@ export interface Runtime {
   config: PosConfig & { demoPins?: Record<string, string> };
   settings: Settings;
   /**
+   * Order dine-in terbuka di semua terminal outlet (denah meja). Null selama belum pernah berhasil diunduh (offline atau mode demo);
+   * `at` = kapan terakhir berhasil, agar UI bisa menandai data usang.
+   */
+  tableBoard(): { board: TableBoard; at: number } | null;
+  /**
    * Alamat struk digital untuk QR; null bila server belum memberi alamat dasarnya (`DASHBOARD_URL` belum diatur) atau terminal
    * dalam mode demo. API sendiri tidak menyajikan halaman struk, jadi alamat tebakan hanya akan menghasilkan 404 bagi customer.
    */
@@ -128,6 +133,10 @@ export async function createRuntime(): Promise<Boot> {
 
   if (demo) {
     config = await demoConfig('senopati', 'pos-1');
+    config.tables = [
+      ...[1, 2, 3, 4, 5, 6].map((n) => ({ no: String(n), area: 'Indoor', seats: n <= 4 ? 4 : 2 })),
+      ...['T1', 'T2', 'T3'].map((no) => ({ no, area: 'Teras', seats: 6 })),
+    ];
   } else if (cc) {
     let cached = await cc.cached();
     if (!cached) {
@@ -223,6 +232,20 @@ export async function createRuntime(): Promise<Boot> {
     }
   };
 
+  // Denah meja: order terbuka dari terminal lain. Hanya dibaca bila outlet punya denah; offline = papan terakhir yang diketahui.
+  let tableBoard: { board: TableBoard; at: number } | null = null;
+  const pollTables = async () => {
+    if (demo || !settings.token || !engine.config.tables?.length) return;
+    try {
+      const res = await fetch(`${baseUrl}/v1/tables/board`, { headers: { authorization: `Bearer ${settings.token}` } });
+      if (!res.ok) return;
+      tableBoard = { board: (await res.json()) as TableBoard, at: Date.now() };
+      notify();
+    } catch {
+      /* offline: denah memakai papan terakhir dan order lokal */
+    }
+  };
+
   let printerState: PrinterState | null = null;
   const poll = async () => {
     printerState = await engine.pollPrinter();
@@ -251,6 +274,8 @@ export async function createRuntime(): Promise<Boot> {
   setInterval(() => void engine.heartbeat(), 60_000);
   setInterval(() => void poll(), 10_000);
   setInterval(() => void pollKitchen(), 10_000);
+  setInterval(() => void pollTables(), 10_000);
+  void pollTables();
   setInterval(() => void reportPosture(), 10 * 60_000);
   void poll();
   setInterval(() => void syncNow(), 5_000);
@@ -264,6 +289,7 @@ export async function createRuntime(): Promise<Boot> {
     printerState: () => (sim ? (sim.paper ? 'ok' : 'paperOut') : printerState),
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,
+    tableBoard: () => tableBoard,
     syncStatus: () => ({ ...status }),
     configStatus: () => ({
       mode: demo ? 'demo' : 'server', version, fetchedAt,

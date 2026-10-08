@@ -3,7 +3,22 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { OutletSettings } from '@/lib/api';
+import { formatTableList, parseTableList } from '@pos/order';
 import { manage } from '@/lib/manage';
+
+interface TableGroup { area: string; nos: string; seats: string }
+
+/** Meja dengan area dan kursi yang sama dikelompokkan, agar daftar panjang tetap ringkas. */
+function groupTables(tables: OutletSettings['tables']): TableGroup[] {
+  const groups = new Map<string, { area: string; seats: number; nos: string[] }>();
+  for (const t of tables ?? []) {
+    const k = `${t.area}\u0000${t.seats}`;
+    const g = groups.get(k) ?? { area: t.area, seats: t.seats, nos: [] };
+    g.nos.push(t.no);
+    groups.set(k, g);
+  }
+  return [...groups.values()].map((g) => ({ area: g.area, seats: String(g.seats), nos: formatTableList(g.nos) }));
+}
 
 export function OutletSettingsForm({ s }: { s: OutletSettings }) {
   const router = useRouter();
@@ -13,6 +28,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
   const [taxOnService, setTaxOnService] = useState(s.tax_on_service ?? true);
   const [rounding, setRounding] = useState(String(s.rounding_unit ?? 0));
   const [edcs, setEdcs] = useState(s.edcs);
+  const [groups, setGroups] = useState<TableGroup[]>(() => groupTables(s.tables));
   const [threshold, setThreshold] = useState(String(s.policy?.secondApprovalAbove ?? 50_000));
   const [discount, setDiscount] = useState(String(s.policy?.manualDiscountMaxPercent ?? 15));
   const [mealQuota, setMealQuota] = useState(String(s.policy?.employeeMealQuota ?? 1));
@@ -28,8 +44,17 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
     setBusy(true);
     setError(null);
     setSaved(false);
+    const tables: { no: string; area: string; seats: number }[] = [];
+    for (const g of groups) {
+      const nos = parseTableList(g.nos);
+      if (nos === null) {
+        setBusy(false);
+        return setError(`Nomor meja di area "${g.area || '(tanpa nama)'}" tidak valid. Contoh: 1-8, 10, T1`);
+      }
+      for (const no of nos) tables.push({ no, area: g.area.trim(), seats: Number(g.seats || 0) });
+    }
     const r = await manage('PUT', `/v1/outlets/${s.id}/settings`, {
-      merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs,
+      merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs, tables,
       policy: { secondApprovalAbove: Number(threshold), manualDiscountMaxPercent: Number(discount), employeeMealQuota: Number(mealQuota), holdBillMinutes: Number(hold) },
       cctvRetentionDays: Number(retention), cctvClockOffsetSec: Number(offset),
     });
@@ -77,6 +102,18 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
         </div>
       ))}
       <p><button type="button" className="secondary" onClick={() => setEdcs([...edcs, { tid: '', bank: '', label: '' }])}>+ Tambah EDC</button></p>
+
+      <h3>Denah meja</h3>
+      <p className="muted small">Kosongkan bila kasir cukup mengetik nomor meja. Bila diisi, kasir memilih meja dari denah berwarna (kosong, terisi, di dapur, menunggu bayar) di semua terminal. Tulis nomor dipisah koma; rentang dengan tanda hubung (1-8).</p>
+      {groups.map((g, i) => (
+        <div key={i} className="edc-row">
+          <input aria-label="Area" placeholder="Area (mis. Indoor)" value={g.area} maxLength={30} onChange={(e) => setGroups(groups.map((x, j) => (j === i ? { ...x, area: e.target.value } : x)))} />
+          <input aria-label="Nomor meja" placeholder="Nomor meja (1-8, T1)" value={g.nos} onChange={(e) => setGroups(groups.map((x, j) => (j === i ? { ...x, nos: e.target.value } : x)))} />
+          <input aria-label="Kursi per meja" placeholder="Kursi" inputMode="numeric" value={g.seats} onChange={(e) => setGroups(groups.map((x, j) => (j === i ? { ...x, seats: e.target.value.replace(/\D/g, '') } : x)))} />
+          <button type="button" className="secondary" onClick={() => setGroups(groups.filter((_, j) => j !== i))}>Hapus</button>
+        </div>
+      ))}
+      <p><button type="button" className="secondary" onClick={() => setGroups([...groups, { area: '', nos: '', seats: '4' }])}>+ Tambah area</button></p>
 
       {error && <p className="error" role="alert">{error}</p>}
       {saved && <p className="ok-note" role="status">Tersimpan. Terminal memperbarui diri dalam sekitar satu menit.</p>}

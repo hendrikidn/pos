@@ -1048,3 +1048,26 @@ describe('struk digital: panggilan bersamaan', () => {
   });
 });
 
+describe('service charge dan pembulatan di tagihan', () => {
+  it('bill.printed membawa rincian yang jumlahnya = total; cetak bill dan keranjang memakai angka yang sama', async () => {
+    const c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+    const base = c.engine.config;
+    c.engine.setConfig({ ...base, serviceChargePercent: 5, roundingUnit: 500 });
+    const id = must(await c.engine.createOrder('TAKE_AWAY')).id;
+    must(await c.engine.addItem(id, 'kopi-susu', 2)); // 44.000
+    must(await c.engine.printBill(id));
+    // service 2.200; pajak (44.000 + 2.200) × 10% = 4.620; sebelum bulat 50.820 → 51.000 (+180)
+    const bill = (await c.events()).find((e) => e.type === 'bill.printed');
+    expect(bill?.type === 'bill.printed' && bill.payload).toMatchObject({ total: 51_000, breakdown: { subtotal: 44_000, discount: 0, service: 2_200, tax: 4_620, rounding: 180 } });
+    const text = c.printer.printed.at(-1)!;
+    expect(text).toContain('Service 5%');
+    expect(text).toContain('Pembulatan');
+    expect(text).toContain('Rp 51.000');
+    expect(c.engine.outstanding(c.engine.getOrder(id)!)).toBe(51_000);
+    must(await c.engine.pay(id, { method: 'CASH', tendered: 60_000 }));
+    expect(c.engine.getOrder(id)!.state.status).toBe('PAID');
+  });
+});
+

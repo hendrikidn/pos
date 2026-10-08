@@ -37,6 +37,10 @@ export interface PosConfig {
   receiptBaseUrl?: string;
   /** Persen PBJT yang dikenakan setelah diskon */
   taxPercent: number;
+  /** Persen service charge (0/kosong = tidak ada), pajak atas service (bawaan ya), dan kelipatan pembulatan total (0/kosong = tidak). */
+  serviceChargePercent?: number;
+  taxOnService?: boolean;
+  roundingUnit?: number;
   edcs: Edc[];
   staff: Staff[];
   menu: MenuItem[];

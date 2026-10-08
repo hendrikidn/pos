@@ -16,6 +16,9 @@ export interface DeviceConfig {
     id: string;
     merchantName: string;
     taxPercent: number;
+    serviceChargePercent?: number;
+    taxOnService?: boolean;
+    roundingUnit?: number;
     edcs: { tid: string; bank: string; label: string }[];
     policy: Partial<Policy> | null;
   };
@@ -30,6 +33,9 @@ export function toPosConfig(c: DeviceConfig): PosConfig {
     merchantName: c.outlet.merchantName,
     ...(c.receiptBaseUrl ? { receiptBaseUrl: c.receiptBaseUrl } : {}),
     taxPercent: c.outlet.taxPercent,
+    ...(c.outlet.serviceChargePercent ? { serviceChargePercent: c.outlet.serviceChargePercent } : {}),
+    ...(c.outlet.taxOnService === false ? { taxOnService: false } : {}),
+    ...(c.outlet.roundingUnit ? { roundingUnit: c.outlet.roundingUnit } : {}),
     edcs: c.outlet.edcs,
     staff: c.staff,
     menu: c.menu,

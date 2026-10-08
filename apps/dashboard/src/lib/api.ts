@@ -168,6 +168,9 @@ export interface OutletSettings {
   terminals: string[];
   merchant_name: string | null;
   tax_percent: number;
+  service_charge_percent: number;
+  tax_on_service: boolean;
+  rounding_unit: number;
   edcs: { tid: string; bank: string; label: string }[];
   policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number; holdBillMinutes?: number } | null;
   cctv_retention_days: number;

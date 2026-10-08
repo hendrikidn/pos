@@ -4,7 +4,7 @@ import { Directory } from './directory';
 import type { Printer } from './printer';
 import type { Recorder } from './recorder';
 import type { KeyValueStore } from './store';
-import { computeTotals, lineLabel, paidTotal, renderBill, renderKitchenTicket, renderReceipt, type Totals } from './totals';
+import { computeTotals, lineLabel, pricingOf, paidTotal, renderBill, renderKitchenTicket, renderReceipt, type Totals } from './totals';
 import {
   fail, lineKey, ok, type CartLine, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic,
 } from './types';
@@ -75,6 +75,9 @@ function placeLineIn(items: CartLine[], l: CartLine): void {
   for (let n = 2; taken.has(lineId); n++) lineId = `${l.itemId}#${n}`;
   items.push({ ...l, lineId });
 }
+
+/** Rincian total untuk event tagihan (struk, laporan, akuntansi memakai angka yang sama dengan yang dicetak). */
+const breakdownOf = (t: Totals) => ({ subtotal: t.subtotal, discount: t.discount, service: t.service, tax: t.tax, rounding: t.rounding });
 
 const KITCHEN_RANK: Record<KitchenStatus, number> = { COOKING: 1, READY: 2, SERVED: 3 };
 const furthest = (a: KitchenStatus | null, b: KitchenStatus | null): KitchenStatus | null =>
@@ -265,7 +268,7 @@ export class PosEngine {
   }
 
   totals(o: OrderRecord): Totals {
-    return computeTotals(o.items, o.discount, this.cfg.taxPercent);
+    return computeTotals(o.items, o.discount, pricingOf(this.cfg));
   }
 
   outstanding(o: OrderRecord): number {
@@ -581,6 +584,7 @@ export class PosEngine {
       payload: {
         orderId, total: this.totals(o).total,
         items: o.items.map((l) => eventLine(l, l.qty)),
+        breakdown: breakdownOf(this.totals(o)),
       },
     });
     await this.apply(o, e);

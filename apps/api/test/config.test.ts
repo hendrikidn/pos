@@ -216,6 +216,31 @@ describe('konfigurasi terminal: staf, menu, pengaturan', () => {
       expect((await put(path, owner, { policy: { secondApprovalAbove: 75_000 } })).status).toBe(200);
     });
 
+    it('service charge dan pembulatan: batas nilai divalidasi, tersimpan, dan hanya nilai non-bawaan yang sampai ke terminal', async () => {
+      const path = '/v1/outlets/o1/settings';
+      const before = (await h.http('GET', '/v1/device/config', term)).body;
+      expect(before.outlet).not.toHaveProperty('serviceChargePercent');
+      expect(before.outlet).not.toHaveProperty('roundingUnit');
+      for (const [body, msg] of [
+        [{ serviceChargePercent: 31 }, /serviceChargePercent/], [{ serviceChargePercent: -1 }, /serviceChargePercent/], [{ serviceChargePercent: 2.5 }, /serviceChargePercent/],
+        [{ roundingUnit: 250 }, /roundingUnit/], [{ taxOnService: 'ya' }, /taxOnService/],
+      ] as [object, RegExp][]) {
+        const r = await put(path, owner, body);
+        expect(r.status, JSON.stringify(body)).toBe(400);
+        expect(r.body.message).toMatch(msg);
+      }
+      expect((await put(path, owner, { serviceChargePercent: 5, taxOnService: false, roundingUnit: 500 })).status).toBe(200);
+      expect((await h.http('GET', path, owner)).body).toMatchObject({ service_charge_percent: 5, tax_on_service: false, rounding_unit: 500 });
+      const cfg = (await h.http('GET', '/v1/device/config', term)).body;
+      expect(cfg.outlet).toMatchObject({ serviceChargePercent: 5, taxOnService: false, roundingUnit: 500 });
+      expect(cfg.version).not.toBe(before.version);
+      // kembali ke bawaan: konfigurasi kembali tanpa field itu
+      expect((await put(path, owner, { serviceChargePercent: 0, taxOnService: true, roundingUnit: 0 })).status).toBe(200);
+      const back = (await h.http('GET', '/v1/device/config', term)).body;
+      expect(back.outlet).not.toHaveProperty('serviceChargePercent');
+      expect(back.version).toBe(before.version);
+    });
+
     it('outlet tenant lain tidak dapat diubah', async () => {
       expect((await put('/v1/outlets/ox/settings', owner, { taxPercent: 5 })).status).toBe(404);
     });
@@ -234,7 +259,15 @@ describe('konfigurasi terminal: staf, menu, pengaturan', () => {
       expect(cfg.outlet).toMatchObject({ id: 'o1', merchantName: 'Kopi Senopati', taxPercent: 10, policy: { secondApprovalAbove: 75_000 } });
       expect(cfg.outlet.edcs).toEqual([{ tid: '12345678', bank: 'Mandiri', label: 'EDC' }]);
       expect(cfg.staff.map((s: { id: string }) => s.id)).toEqual(['budi', 'sari']);
-      expect(JSON.stringify(cfg)).not.toMatch(/4827|5930|"pin"/);
+      // PIN polos tidak boleh ada: tidak ada kunci pin, dan tidak ada nilai yang persis sama dengan PIN uji. (Tidak memeriksa substring
+      // pada teks JSON: garam dan hash heksadesimal acak bisa kebetulan memuat empat digit itu, dan tes jadi sesekali gagal.)
+      const walk = (v: unknown, path: string): void => {
+        if (v !== null && typeof v === 'object') for (const [k, x] of Object.entries(v)) {
+          expect(k.toLowerCase(), `${path}.${k}`).not.toBe('pin');
+          walk(x, `${path}.${k}`);
+        } else expect(['4827', '5930', 4827, 5930], path).not.toContain(v);
+      };
+      walk(cfg, 'cfg');
       const budi = cfg.staff[0];
       expect(pbkdf2Sync('4827', Buffer.from(budi.salt, 'hex'), budi.iterations, 32, 'sha256').toString('hex')).toBe(budi.hash);
       expect(cfg.menu).toEqual([{ id: 'kopi-susu', name: 'Kopi Susu', price: 24_000, category: 'Kopi' }]);

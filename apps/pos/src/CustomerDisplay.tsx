@@ -5,7 +5,7 @@ import { rp } from './ui';
 export interface DisplayView {
   merchantName: string;
   lines: { name: string; qty: number; amount: number }[];
-  totals: { subtotal: number; discount: number; tax: number; total: number };
+  totals: { subtotal: number; discount: number; service?: number; tax: number; rounding?: number; total: number };
   status: string;
   paperClaim: boolean;
   /** Alamat struk digital; bila ada, layar menampilkan QR-nya. */
@@ -36,7 +36,9 @@ export function CustomerDisplay() {
         ))}
       </ul>
       {view.totals.discount > 0 && <p className="row"><span>Diskon</span><b>−{rp(view.totals.discount)}</b></p>}
+      {!!view.totals.service && <p className="row"><span>Service</span><b>{rp(view.totals.service)}</b></p>}
       {view.totals.tax > 0 && <p className="row"><span>PBJT</span><b>{rp(view.totals.tax)}</b></p>}
+      {!!view.totals.rounding && <p className="row"><span>Pembulatan</span><b>{view.totals.rounding < 0 ? '−' : ''}{rp(Math.abs(view.totals.rounding))}</b></p>}
       <p className="row total"><span>Total</span><b>{rp(view.totals.total)}</b></p>
       {view.status === 'PAID' && <p className="thanks">Terima kasih. Pembayaran diterima.</p>}
       {view.receiptUrl && (

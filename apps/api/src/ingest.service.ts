@@ -35,6 +35,16 @@ const KDS_EVENT_TYPES: readonly EventType[] = ['kitchen.status_changed', 'device
 
 const MAX_LINE_ITEMS = MAX_EVENT_LINES;
 
+/** Rincian total opsional: semua angka bilangan bulat (pembulatan boleh negatif). */
+function badBreakdown(p: Payload): string | null {
+  const b = p['breakdown'];
+  if (b === undefined) return null;
+  if (typeof b !== 'object' || b === null || Array.isArray(b)) return 'breakdown harus objek';
+  const o = b as Payload;
+  for (const k of ['subtotal', 'discount', 'service', 'tax', 'rounding']) if (!Number.isInteger(o[k])) return `breakdown.${k} harus bilangan bulat`;
+  return null;
+}
+
 /** Item pesanan opsional: dibatasi jumlah dan panjangnya agar satu event tidak bisa membengkak. */
 function badItems(p: Payload): string | null {
   const v = p['items'];
@@ -87,7 +97,7 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     && (p['kitchen'] === undefined || oneOf(p, 'kitchen', ['COOKING', 'READY', 'SERVED'])) && p['items'] !== undefined
       ? badItems(p) : 'field pemindahan item tidak valid',
   'kitchen.status_changed': (p) => (str(p, 'orderId') && oneOf(p, 'status', ['COOKING', 'READY', 'SERVED']) ? null : 'orderId/status tidak valid'),
-  'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? badItems(p) : 'orderId/total tidak valid'),
+  'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? badItems(p) ?? badBreakdown(p) : 'orderId/total tidak valid'),
   'discount.applied': (p) =>
     str(p, 'orderId') && oneOf(p, 'kind', ['MANUAL', 'MEMBER', 'COUPON']) && num(p, 'amount') && num(p, 'percent') && bool(p, 'verified')
       ? null : 'field diskon tidak valid',

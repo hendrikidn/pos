@@ -79,4 +79,15 @@ describe('struk digital', () => {
     expect(buildReceipt('o-1', ev)).toMatchObject({ noItems: true, items: [], total: 10_000, tax: 0, status: 'PAID' });
     expect(buildReceipt('tidak-ada', ev)).toBeNull();
   });
+
+  it('rincian dari tagihan dipakai apa adanya: service, pajak, pembulatan (tagihan lama tanpa rincian tetap menurunkan pajak)', () => {
+    const ev = events(
+      created('o-1'),
+      [1, { type: 'bill.printed', payload: { orderId: 'o-1', total: 51_000, items: [kopi(2)], breakdown: { subtotal: 44_000, discount: 0, service: 2_200, tax: 4_620, rounding: 180 } } }],
+      [2, { type: 'payment.received', payload: { orderId: 'o-1', method: 'CASH', amount: 51_000 } }],
+    );
+    expect(buildReceipt('o-1', ev)).toMatchObject({ subtotal: 44_000, service: 2_200, tax: 4_620, rounding: 180, total: 51_000, status: 'PAID' });
+    const old = events(created('o-2'), [1, { type: 'bill.printed', payload: { orderId: 'o-2', total: 48_400, items: [kopi(2)] } }]);
+    expect(buildReceipt('o-2', old)).toMatchObject({ service: 0, rounding: 0, tax: 4_400 });
+  });
 });

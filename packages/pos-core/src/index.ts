@@ -6,7 +6,7 @@ export { SimPrinter, type Printer, type PrinterCapabilities } from './printer';
 export { Directory } from './directory';
 export { derivePin, safeEqual } from './kdf';
 export { ConfigClient, STALE_AFTER_MS, toPosConfig, type DeviceConfig, type RefreshResult } from './config';
-export { computeTotals, lineLabel, paidTotal, renderBill, renderReceipt, type Totals } from './totals';
+export { computeTotals, lineLabel, pricingOf, type PricingRules, paidTotal, renderBill, renderReceipt, type Totals } from './totals';
 export { DEMO_MENU, demoConfig, type DemoPins } from './demo-config';
 export { fail, ok, lineKey } from './types';
 export type {

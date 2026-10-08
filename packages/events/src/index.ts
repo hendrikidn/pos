@@ -23,6 +23,15 @@ export interface LineItem {
   sentQty?: number;
 }
 
+/** Rincian total tagihan: total = subtotal − diskon + service + pajak + pembulatan. Tidak ada pada event lama. */
+export interface BillBreakdown {
+  subtotal: number;
+  discount: number;
+  service: number;
+  tax: number;
+  rounding: number;
+}
+
 /** Isi event menurut tipe. Menambah tipe event = menambah satu baris di sini. */
 export type EventBody =
   | {
@@ -63,7 +72,7 @@ export type EventBody =
   | {
       type: 'bill.printed';
       /** `items`: seluruh item pada tagihan; item terkunci sejak bill dicetak, jadi ini rincian final order. Tidak ada pada event lama. */
-      payload: { orderId: string; total: number; items?: LineItem[] };
+      payload: { orderId: string; total: number; items?: LineItem[]; breakdown?: BillBreakdown };
     }
   | {
       type: 'discount.applied';

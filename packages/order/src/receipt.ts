@@ -18,7 +18,10 @@ export interface Receipt {
   noItems: boolean;
   subtotal: number;
   discount: number;
+  /** Service charge dan pembulatan (0 bila outlet tidak memakainya, atau pada tagihan lama tanpa rincian). */
+  service: number;
   tax: number;
+  rounding: number;
   total: number;
   paid: number;
   payments: { method: PaymentMethod; amount: number; at: number }[];
@@ -69,7 +72,9 @@ export function buildReceipt(orderId: string, events: PosEvent[]): Receipt | nul
   const subtotal = lines.reduce((s, l) => s + lineAmount(l), 0);
   const paid = payments.reduce((s, p) => s + p.amount, 0);
   const total = bill ? bill.payload.total : paid;
-  const tax = bill && lines.length > 0 ? Math.max(0, total - Math.max(0, subtotal - discount)) : 0;
+  // Rincian tercatat di tagihan (service, pajak, pembulatan) dipakai apa adanya; tagihan lama menurunkan pajak dari selisih.
+  const bd = bill?.payload.breakdown;
+  const tax = bd ? bd.tax : bill && lines.length > 0 ? Math.max(0, total - Math.max(0, subtotal - discount)) : 0;
   const status: Receipt['status'] = voidedAt !== null ? 'VOIDED' : paid >= total && paid > 0 ? 'PAID' : paid > 0 ? 'PARTIAL' : 'UNPAID';
   return {
     ref: orderId.split('-').pop() ?? orderId,
@@ -78,6 +83,7 @@ export function buildReceipt(orderId: string, events: PosEvent[]): Receipt | nul
     status,
     items: lines.map((l) => ({ name: l.name, options: (l.options ?? []).map((o) => o.name), qty: l.qty, unitPrice: l.unitPrice, amount: lineAmount(l) })),
     noItems: !bill || !bill.payload.items,
-    subtotal, discount, tax, total, paid, payments, refunded, voidedAt,
+    subtotal: bd ? bd.subtotal : subtotal, discount: bd ? bd.discount : discount, service: bd?.service ?? 0, tax, rounding: bd?.rounding ?? 0,
+    total, paid, payments, refunded, voidedAt,
   };
 }

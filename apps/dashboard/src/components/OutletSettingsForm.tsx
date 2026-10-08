@@ -9,6 +9,9 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
   const router = useRouter();
   const [merchant, setMerchant] = useState(s.merchant_name ?? s.name);
   const [tax, setTax] = useState(String(s.tax_percent));
+  const [service, setService] = useState(String(s.service_charge_percent ?? 0));
+  const [taxOnService, setTaxOnService] = useState(s.tax_on_service ?? true);
+  const [rounding, setRounding] = useState(String(s.rounding_unit ?? 0));
   const [edcs, setEdcs] = useState(s.edcs);
   const [threshold, setThreshold] = useState(String(s.policy?.secondApprovalAbove ?? 50_000));
   const [discount, setDiscount] = useState(String(s.policy?.manualDiscountMaxPercent ?? 15));
@@ -26,7 +29,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
     setError(null);
     setSaved(false);
     const r = await manage('PUT', `/v1/outlets/${s.id}/settings`, {
-      merchantName: merchant, taxPercent: Number(tax), edcs,
+      merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs,
       policy: { secondApprovalAbove: Number(threshold), manualDiscountMaxPercent: Number(discount), employeeMealQuota: Number(mealQuota), holdBillMinutes: Number(hold) },
       cctvRetentionDays: Number(retention), cctvClockOffsetSec: Number(offset),
     });
@@ -42,6 +45,19 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
       <div className="form-grid">
         <label>Nama merchant (tampil di layar customer)<input value={merchant} onChange={(e) => setMerchant(e.target.value)} maxLength={80} required /></label>
         <label>PBJT / pajak (%)<input inputMode="numeric" value={tax} onChange={(e) => setTax(e.target.value.replace(/\D/g, ''))} required /></label>
+        <label>Service charge (%) (0 = tidak ada)<input inputMode="numeric" value={service} onChange={(e) => setService(e.target.value.replace(/\D/g, ''))} /></label>
+        <label className="check-label">
+          <span>Pajak (PBJT) juga atas service charge</span>
+          <input type="checkbox" checked={taxOnService} onChange={(e) => setTaxOnService(e.target.checked)} />
+        </label>
+        <label>Pembulatan total
+          <select value={rounding} onChange={(e) => setRounding(e.target.value)}>
+            <option value="0">Tanpa pembulatan</option>
+            <option value="100">Ke Rp 100 terdekat</option>
+            <option value="500">Ke Rp 500 terdekat</option>
+            <option value="1000">Ke Rp 1.000 terdekat</option>
+          </select>
+        </label>
         <label>Void/refund di atas (Rp) wajib dua persetujuan<input inputMode="numeric" value={threshold} onChange={(e) => setThreshold(e.target.value.replace(/\D/g, ''))} required /></label>
         <label>Diskon manual maks. tanpa verifikasi (%)<input inputMode="numeric" value={discount} onChange={(e) => setDiscount(e.target.value.replace(/\D/g, ''))} required /></label>
         <label>Makan karyawan gratis per orang per hari (0 = selalu perlu persetujuan)<input inputMode="numeric" value={mealQuota} onChange={(e) => setMealQuota(e.target.value.replace(/\D/g, ''))} required /></label>

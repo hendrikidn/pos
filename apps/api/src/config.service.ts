@@ -54,6 +54,10 @@ export interface MenuInput {
 export interface SettingsInput {
   merchantName?: string;
   taxPercent?: number;
+  /** Service charge 0–30%, pajak atas service, dan pembulatan total (0, 100, 500, 1000). */
+  serviceChargePercent?: number;
+  taxOnService?: boolean;
+  roundingUnit?: number;
   edcs?: { tid: string; bank: string; label: string }[];
   policy?: {
     secondApprovalAbove?: number;
@@ -107,6 +111,9 @@ export interface DeviceConfig {
     id: string;
     merchantName: string;
     taxPercent: number;
+    serviceChargePercent?: number;
+    taxOnService?: boolean;
+    roundingUnit?: number;
     edcs: { tid: string; bank: string; label: string }[];
     policy: Record<string, number> | null;
   };
@@ -235,7 +242,7 @@ export class ConfigService {
 
   async getSettings(auth: ApiAuth, outletId: string, now = Date.now()) {
     const row = await this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, edcs, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
+      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
     );
     if (!row) throw new NotFoundException('outlet tidak ditemukan');
     const { shadow_started_ms, ...rest } = row;
@@ -245,6 +252,9 @@ export class ConfigService {
   async updateSettings(auth: ApiAuth, outletId: string, s: SettingsInput, now = Date.now()): Promise<void> {
     if (s.merchantName !== undefined) need(s.merchantName.trim().length > 0 && s.merchantName.length <= 80, 'nama merchant wajib (maks. 80)');
     if (s.taxPercent !== undefined) need(Number.isInteger(s.taxPercent) && s.taxPercent >= 0 && s.taxPercent <= 100, 'taxPercent 0–100');
+    if (s.serviceChargePercent !== undefined) need(Number.isInteger(s.serviceChargePercent) && s.serviceChargePercent >= 0 && s.serviceChargePercent <= 30, 'serviceChargePercent 0–30');
+    if (s.taxOnService !== undefined) need(typeof s.taxOnService === 'boolean', 'taxOnService harus true atau false');
+    if (s.roundingUnit !== undefined) need([0, 100, 500, 1000].includes(s.roundingUnit as number), 'roundingUnit harus 0, 100, 500, atau 1000');
     if (s.edcs !== undefined) {
       need(Array.isArray(s.edcs) && s.edcs.length <= 10, 'edcs maksimal 10');
       for (const e of s.edcs) need(/^[0-9]{6,12}$/.test(e.tid) && !!e.bank?.trim() && !!e.label?.trim(), 'setiap EDC perlu tid (6–12 digit), bank, dan label');
@@ -268,12 +278,15 @@ export class ConfigService {
                 edcs = coalesce($4::jsonb, edcs), policy = case when $5::boolean then $6::jsonb else policy end,
                 cctv_retention_days = coalesce($7, cctv_retention_days), cctv_clock_offset_sec = coalesce($8, cctv_clock_offset_sec),
                 shadow_days = coalesce($9, shadow_days),
-                shadow_started_ms = case when $10::boolean then $11::float8 else shadow_started_ms end
+                shadow_started_ms = case when $10::boolean then $11::float8 else shadow_started_ms end,
+                service_charge_percent = coalesce($12, service_charge_percent), tax_on_service = coalesce($13, tax_on_service),
+                rounding_unit = coalesce($14, rounding_unit)
          where id = $1`,
         [
           outletId, s.merchantName?.trim() ?? null, s.taxPercent ?? null, s.edcs ? JSON.stringify(s.edcs) : null,
           s.policy !== undefined, s.policy ? JSON.stringify(s.policy) : null, s.cctvRetentionDays ?? null, s.cctvClockOffsetSec ?? null,
           s.shadowDays ?? null, s.shadowRestart === true, now,
+          s.serviceChargePercent ?? null, s.taxOnService ?? null, s.roundingUnit ?? null,
         ],
       );
       if (r.rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
@@ -343,8 +356,8 @@ export class ConfigService {
   async deviceConfig(device: DeviceAuth): Promise<DeviceConfig> {
     return this.db.tenantTx(device.tenantId, async (q) => {
       const o = (
-        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; edcs: DeviceConfig['outlet']['edcs']; policy: Record<string, number> | null }>(
-          'select id, name, merchant_name, tax_percent, edcs, policy from outlet where id = $1',
+        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; policy: Record<string, number> | null }>(
+          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, policy from outlet where id = $1',
           [device.outletId],
         )
       ).rows[0];
@@ -368,7 +381,14 @@ export class ConfigService {
       const receiptBaseUrl = this.dashboardUrl ? `${this.dashboardUrl.replace(/\/$/, '')}/r/` : undefined;
       const body = {
         ...(receiptBaseUrl ? { receiptBaseUrl } : {}),
-        outlet: { id: o.id, merchantName: o.merchant_name ?? o.name, taxPercent: o.tax_percent, edcs: o.edcs, policy: o.policy },
+        outlet: {
+          id: o.id, merchantName: o.merchant_name ?? o.name, taxPercent: o.tax_percent,
+          // hanya bila bukan nilai bawaan: konfigurasi outlet lama tidak berubah (versi dan unduhan ulang tetap)
+          ...(o.service_charge_percent > 0 ? { serviceChargePercent: o.service_charge_percent } : {}),
+          ...(o.tax_on_service === false ? { taxOnService: false } : {}),
+          ...(o.rounding_unit > 0 ? { roundingUnit: o.rounding_unit } : {}),
+          edcs: o.edcs, policy: o.policy,
+        },
         staff: staff.map((s) => ({ id: s.id, name: s.name, role: s.role, salt: s.pin_salt, hash: s.pin_hash, iterations: s.pin_iterations })),
         menu,
       };

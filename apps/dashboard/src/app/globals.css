@@ -467,3 +467,5 @@ ul.plain { margin: 0 0 8px; padding-left: 18px; }
 .rcpt-sum dt, .rcpt-sum dd { margin: 0; }
 .rcpt-sum .grand { font-size: 20px; font-weight: 800; padding-top: 4px; }
 .rcpt-foot { margin-top: 18px; }
+.form-grid .check-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 22px; }
+.form-grid .check-label input { width: 22px; height: 22px; accent-color: var(--primary); }

@@ -16,7 +16,9 @@ interface Receipt {
   noItems: boolean;
   subtotal: number;
   discount: number;
+  service: number;
   tax: number;
+  rounding: number;
   total: number;
   paid: number;
   payments: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT'; amount: number; at: number }[];
@@ -94,7 +96,9 @@ export default async function ReceiptPage({ params }: { params: Promise<{ token:
         <dl className="rcpt-sum">
           {!r.noItems && <div><dt>Subtotal</dt><dd>{rp(r.subtotal)}</dd></div>}
           {r.discount > 0 && <div><dt>Diskon</dt><dd>−{rp(r.discount)}</dd></div>}
+          {r.service > 0 && <div><dt>Service</dt><dd>{rp(r.service)}</dd></div>}
           {r.tax > 0 && <div><dt>PBJT</dt><dd>{rp(r.tax)}</dd></div>}
+          {r.rounding !== 0 && <div><dt>Pembulatan</dt><dd>{r.rounding < 0 ? '−' : ''}{rp(Math.abs(r.rounding))}</dd></div>}
           <div className="grand"><dt>Total</dt><dd>{rp(r.total)}</dd></div>
           {r.payments.map((p, i) => <div key={i}><dt>Dibayar · {METHOD[p.method]}</dt><dd>{rp(p.amount)}</dd></div>)}
           {r.refunded > 0 && <div><dt>Dikembalikan</dt><dd>−{rp(r.refunded)}</dd></div>}

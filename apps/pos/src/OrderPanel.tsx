@@ -128,7 +128,9 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
         <dl className="totals">
           <div><dt>Subtotal</dt><dd>{rp(totals.subtotal)}</dd></div>
           {totals.discount > 0 && <div><dt>Diskon</dt><dd>−{rp(totals.discount)}</dd></div>}
+          {totals.service > 0 && <div><dt>Service {config.serviceChargePercent}%</dt><dd>{rp(totals.service)}</dd></div>}
           {totals.tax > 0 && <div><dt>PBJT {config.taxPercent}%</dt><dd>{rp(totals.tax)}</dd></div>}
+          {totals.rounding !== 0 && <div><dt>Pembulatan</dt><dd>{totals.rounding < 0 ? '−' : ''}{rp(Math.abs(totals.rounding))}</dd></div>}
           <div className="grand"><dt>Total</dt><dd>{rp(totals.total)}</dd></div>
           {order.payments.length > 0 && (
             <div><dt>Dibayar ({order.payments.map((p) => METHOD_LABEL[p.method]).join(', ')})</dt><dd>{rp(totals.total - engine.outstanding(order))}</dd></div>

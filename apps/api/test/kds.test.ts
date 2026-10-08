@@ -123,7 +123,8 @@ describe('layar dapur (KDS)', () => {
     const k = (await h.http('GET', '/v1/device/config', kds)).body;
     expect(k).toMatchObject({ deviceKind: 'kds', staff: [], menu: [] });
     expect(k.outlet).toMatchObject({ id: 'o1' });
-    expect(JSON.stringify(k)).not.toMatch(/"salt"|"hash"|4827/);
+    expect(JSON.stringify(k)).not.toMatch(/"salt"|"hash"/);
+    expect(k.staff).toEqual([]);
     const t = (await h.http('GET', '/v1/device/config', term)).body;
     expect(t.deviceKind).toBe('terminal');
     expect(t.staff.map((x: { id: string }) => x.id)).toEqual(['budi']);

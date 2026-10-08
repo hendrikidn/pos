@@ -31,4 +31,13 @@ describe('engine: order dari antrian', () => {
     expect((await s.engine.createQueueOrder({ ticketId: 3, label: 'A003', tableNo: '2' })).ok).toBe(true);
     expect(await s.engine.createQueueOrder({ ticketId: 3, label: 'A003', tableNo: '2' })).toMatchObject({ ok: false, code: 'QUEUE_DUPLICATE' });
   });
+
+  it('order dari antrian tidak bisa diserahkan ke terminal lain (tautannya tidak ikut berpindah)', async () => {
+    const s = await setup();
+    const o = await s.engine.createQueueOrder({ ticketId: 5, label: 'A005', tableNo: '3' });
+    expect(o.ok).toBe(true);
+    if (!o.ok) return;
+    await s.engine.addItem(o.value.id, 'kopi-susu', 1);
+    expect(await s.engine.handOff(o.value.id)).toMatchObject({ ok: false, code: 'HANDOFF_LINKED' });
+  });
 });

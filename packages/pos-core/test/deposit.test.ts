@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { demoConfig, MemoryStore, PosEngine, Recorder, SimPrinter } from '../src';
+import { demoConfig, MemoryStore, PosEngine, Recorder, renderReceipt, SimPrinter } from '../src';
 
 const T0 = Date.parse('2026-10-01T19:00:00+07:00');
 
@@ -57,5 +57,17 @@ describe('engine: pembayaran dengan uang muka reservasi', () => {
     must(await s.engine.pay(id, { method: 'DEPOSIT', amount: total, reservationId: 7 }));
     const approver = { userId: 'hendra', pin: s.pins.hendra };
     expect(await s.engine.refund(id, 10_000, 'DEPOSIT', approver)).toMatchObject({ ok: false, code: 'REFUND_METHOD' });
+  });
+
+  it('struk menulis metode dengan nama yang terbaca (bukan kode), termasuk uang muka', async () => {
+    const s = await setup();
+    const id = await billed(s);
+    const total = s.engine.totals(s.engine.getOrder(id)!).total;
+    must(await s.engine.pay(id, { method: 'DEPOSIT', amount: 10_000, reservationId: 7 }));
+    must(await s.engine.pay(id, { method: 'CASH', amount: total - 10_000, tendered: total - 10_000 }));
+    const text = renderReceipt(s.engine.getOrder(id)!, s.engine.config);
+    expect(text).toContain('Uang muka');
+    expect(text).toContain('Tunai');
+    expect(text).not.toContain('DEPOSIT');
   });
 });

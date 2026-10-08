@@ -98,6 +98,13 @@ describe('bill of material', () => {
     expect(list.find((i) => i.id === 'sirup')!.avgCost).toBeCloseTo(0.0101, 6);
   });
 
+  it('resep menu tidak boleh memakai bahan setengah jadi yang BOM-nya belum diisi (pemakaian bahan baku akan tak terhitung)', async () => {
+    expect((await post('/v1/ingredients', owner, { id: 'kosong', name: 'Kosong', unit: 'ml', kind: 'SEMI', batchYield: 100 })).status).toBe(201);
+    const r = await put('/v1/menu/sup/recipe', owner, lines({ kosong: 10 }));
+    expect(r.status).toBe(400);
+    expect(r.body.message).toContain('kosong');
+  });
+
   it('resep menu boleh memakai bahan setengah jadi; /v1/recipes memberi resep apa adanya; HPP menu memasukkan biayanya', async () => {
     expect((await put('/v1/menu/latte/recipe', owner, lines({ kopi: 18, sirup: 20 }))).status).toBe(200);
     expect((await put('/v1/menu/latte/recipe', owner, { optionId: 'vanila', ...lines({ sirup: 10 }) })).status).toBe(200);

@@ -1,4 +1,5 @@
 import { correctedTime, type EventOf, type PosEvent } from '@pos/events';
+import { orderFlows } from './web-order';
 
 /** Aturan antrian meja yang murni (tanpa database): nomor tiket, urutan panggilan, perkiraan tunggu, dan temuan R48-R49. */
 
@@ -68,12 +69,7 @@ export function queueHits(jumps: JumpFacts[], seated: SeatedFacts[], linkedKnown
     });
   }
   const links = events.filter((e): e is EventOf<'order.queue_linked'> => e.type === 'order.queue_linked').sort((a, b) => t(a) - t(b) || a.deviceId.localeCompare(b.deviceId) || a.seq - b.seq);
-  const voided = new Map<string, number>();
-  const paid = new Set<string>();
-  for (const e of events) {
-    if (e.type === 'void.approved' && !voided.has(e.payload.orderId)) voided.set(e.payload.orderId, t(e));
-    else if (e.type === 'payment.received') paid.add(e.payload.orderId);
-  }
+  const { voided, mergedAway, family } = orderFlows(events);
   const byTicket = new Map<number, EventOf<'order.queue_linked'>[]>();
   for (const l of links) (byTicket.get(l.payload.ticketId) ?? byTicket.set(l.payload.ticketId, []).get(l.payload.ticketId)!).push(l);
   const seatedById = new Map(seated.map((s) => [s.id, s]));
@@ -90,7 +86,7 @@ export function queueHits(jumps: JumpFacts[], seated: SeatedFacts[], linkedKnown
       const oid = l.payload.orderId;
       const v = voided.get(oid);
       if (v !== undefined) hits.push({ rule: 'R49', key: `R49:void:${oid}`, at: v, actor: l.actorId ?? null, terminalId: l.deviceId, orderId: oid, note: `order kasir ${oid} dari tiket antrian ${s.label} di-void` });
-      else if (!paid.has(oid) && now >= s.seatedAtMs + SEAT_UNPAID_AFTER_MS) hits.push({ rule: 'R49', key: `R49:unpaid:${oid}`, at: s.seatedAtMs + SEAT_UNPAID_AFTER_MS, actor: l.actorId ?? null, terminalId: l.deviceId, orderId: oid, note: `order kasir ${oid} dari tiket antrian ${s.label} belum dibayar lebih dari 3 jam setelah didudukkan` });
+      else if (!mergedAway.has(oid) && family(oid).total <= 0 && now >= s.seatedAtMs + SEAT_UNPAID_AFTER_MS) hits.push({ rule: 'R49', key: `R49:unpaid:${oid}`, at: s.seatedAtMs + SEAT_UNPAID_AFTER_MS, actor: l.actorId ?? null, terminalId: l.deviceId, orderId: oid, note: `order kasir ${oid} dari tiket antrian ${s.label} belum dibayar lebih dari 3 jam setelah didudukkan` });
     }
   }
   for (const s of seated) {

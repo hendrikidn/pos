@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Inject, Param, ParseIntPipe, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Query, Req } from '@nestjs/common';
+import { IdPipe } from './id-pipe';
 import { requireApi, type AuthedRequest } from './auth';
 import { TransferService, type TransferInput } from './transfer.service';
 
@@ -20,12 +21,12 @@ export class TransferController {
   }
 
   @Post(':id/receive')
-  receive(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { lines?: unknown }) {
+  receive(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { lines?: unknown }) {
     return this.transfers.receive(requireApi(req, [...ROLES]), id, body ?? {});
   }
 
   @Post(':id/cancel')
-  async cancel(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { reason?: unknown }) {
+  async cancel(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { reason?: unknown }) {
     await this.transfers.cancel(requireApi(req, [...ROLES]), id, body?.reason);
     return { ok: true };
   }

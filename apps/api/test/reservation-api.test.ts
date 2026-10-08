@@ -20,6 +20,7 @@ describe('reservasi dan uang muka', () => {
   const put = (path: string, tok: string, body: unknown) => h.http('PUT', path, tok, body);
   const get = (path: string, tok = owner) => h.http('GET', path, tok);
   const book = async (tok: string, body: Record<string, unknown>) => post('/v1/outlets/o1/reservations', tok, { guestName: 'Tamu', partySize: 2, ...body });
+  const at = (ms: number) => h.setNow(ms);
   const sync = async () => expect((await h.postEvents(term, sim.events)).status).toBe(201);
   const find = async (id: number) => ((await get('/v1/outlets/o1/reservations?from=2026-10-08&to=2026-10-20')).body.reservations as { id: number; [k: string]: any }[]).find((r) => r.id === id)!;
   const r43 = async () => ((await get('/v1/outlets/o1/incidents')).body as { hits: { rule: string; note: string }[] }[]).flatMap((i) => i.hits).filter((x) => x.rule === 'R43');
@@ -56,6 +57,7 @@ describe('reservasi dan uang muka', () => {
     expect((await book(rina, { ...ok, start: 'besok' })).status).toBe(400);
     expect((await book(rina, { ...ok, durationMin: 10 })).status).toBe(400);
     expect((await book(rina, { ...ok, phone: 'abc' })).status).toBe(400);
+    expect((await book(rina, { ...ok, phone: '--------' })).status).toBe(400); // tanpa angka
     expect((await book(rina, { ...ok, tableNo: '99' })).status).toBe(400); // tidak ada di denah
     const r = await book(rina, ok);
     expect(r.status).toBe(201);
@@ -239,5 +241,40 @@ describe('reservasi dan uang muka', () => {
       expect(['BOOKED', 'SEATED']).toContain(r.status);
     }
     expect(b.reservations.some((r: { guestName: string }) => r.guestName === 'Dodi')).toBe(false); // dibatalkan
+  });
+
+  it('uang muka dari order yang di-void kembali menjadi sisa (bisa dipakai lagi atau dikembalikan) dan tidak dihitung terpakai', async () => {
+    at(WIB('2026-10-08T18:50:00'));
+    const r = await book(rina, { guestName: 'Lani', start: WIB('2026-10-08T19:00:00') });
+    const id = r.body.id as number;
+    expect((await post(`/v1/reservations/${id}/deposit`, rina, { amount: 100_000, method: 'CASH' })).status).toBe(201);
+    expect((await post(`/v1/reservations/${id}/seat-device`, term)).status).toBe(201);
+    sim.pos({ type: 'payment.received', payload: { orderId: 'vd-1', method: 'DEPOSIT', amount: 60_000, reservationId: id } }, WIB('2026-10-08T19:05:00'), 'budi');
+    await sync();
+    expect(await find(id)).toMatchObject({ applied: 60_000, remaining: 40_000 });
+    sim.pos({ type: 'void.approved', payload: { orderId: 'vd-1', reasonCode: 'SALAH', approverIds: ['rina'], amount: 60_000 } } as never, WIB('2026-10-08T19:10:00'), 'budi');
+    await sync();
+    expect(await find(id)).toMatchObject({ applied: 0, remaining: 100_000 }); // order di-void: uang muka tidak terpakai
+    // pelanggan membayar ulang dengan seluruh uang muka di order baru: sah, bukan "melebihi"
+    sim.pos({ type: 'payment.received', payload: { orderId: 'vd-2', method: 'DEPOSIT', amount: 100_000, reservationId: id } }, WIB('2026-10-08T19:20:00'), 'budi');
+    await sync();
+    await post('/v1/outlets/o1/evaluate', owner);
+    expect((await r43()).some((x) => x.note.includes(`#${id}`) && x.note.includes('melebihi'))).toBe(false);
+    sim.pos({ type: 'void.approved', payload: { orderId: 'vd-2', reasonCode: 'SALAH', approverIds: ['rina'], amount: 100_000 } } as never, WIB('2026-10-08T19:30:00'), 'budi');
+    await sync();
+    // sisa penuh bisa dikembalikan ke tamu (sebelumnya "sudah terpakai seluruhnya" dan uangnya tersangkut)
+    expect((await post(`/v1/reservations/${id}/settle`, sinta, { kind: 'REFUND', reason: 'pesanan dibatalkan, uang muka dikembalikan' })).body).toEqual({ amount: 100_000 });
+  });
+
+  it('papan terminal: tamu yang sudah duduk tetap terlihat (uang mukanya masih bisa dipakai) sampai 8 jam sejak jam reservasi', async () => {
+    at(WIB('2026-10-08T19:30:00'));
+    const r = await book(owner, { guestName: 'Mira', start: WIB('2026-10-08T19:30:00') });
+    const id = r.body.id as number;
+    expect((await post(`/v1/reservations/${id}/deposit`, owner, { amount: 50_000, method: 'CASH' })).status).toBe(201);
+    expect((await post(`/v1/reservations/${id}/seat-device`, term)).status).toBe(201);
+    at(WIB('2026-10-08T23:30:00')); // 4 jam setelah jam reservasi: masih makan dan belum bayar
+    expect((await get('/v1/reservations/board', term)).body.reservations.find((x: { id: number }) => x.id === id)).toMatchObject({ status: 'SEATED', depositRemaining: 50_000 });
+    at(WIB('2026-10-09T04:00:00')); // 8,5 jam: sudah tidak relevan
+    expect((await get('/v1/reservations/board', term)).body.reservations.some((x: { id: number }) => x.id === id)).toBe(false);
   });
 });

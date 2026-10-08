@@ -1,4 +1,5 @@
-import { Body, Controller, ForbiddenException, Get, Inject, Param, ParseIntPipe, Post, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
+import { IdPipe } from './id-pipe';
 import { Public, requireApi, requireDevice, type AuthedRequest } from './auth';
 import { QueueService, type TicketInput } from './queue.service';
 
@@ -61,28 +62,28 @@ export class QueueController {
   }
 
   @Post('queue/:id/call')
-  call(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { reason?: unknown; note?: unknown; staffId?: unknown }) {
+  call(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { reason?: unknown; note?: unknown; staffId?: unknown }) {
     return this.queue.call(this.terminal(req), id, body ?? {});
   }
 
   @Post('queue/:id/recall')
-  recall(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number) {
+  recall(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number) {
     return this.queue.recall(this.terminal(req), id);
   }
 
   @Post('queue/:id/seat')
-  seat(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { tableNo?: unknown; staffId?: unknown }) {
+  seat(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { tableNo?: unknown; staffId?: unknown }) {
     return this.queue.seat(this.terminal(req), id, body ?? {});
   }
 
   @Post('queue/:id/no-show')
-  async noShow(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { staffId?: unknown }) {
+  async noShow(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { staffId?: unknown }) {
     await this.queue.noShow(this.terminal(req), id, body ?? {});
     return { ok: true };
   }
 
   @Post('queue/:id/cancel')
-  async cancel(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { reason?: unknown; staffId?: unknown }) {
+  async cancel(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { reason?: unknown; staffId?: unknown }) {
     await this.queue.cancel(this.terminal(req), id, body ?? {});
     return { ok: true };
   }

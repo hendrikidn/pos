@@ -5,6 +5,18 @@ import { MAX_NOTE_LENGTH, resolveSelection, type ChosenOption, type ModifierGrou
 
 export const SLUG_RE = /^[a-z0-9][a-z0-9-]{2,29}$/;
 export const PHONE_RE = /^[0-9 +()-]{8,20}$/;
+
+/** Nomor telepon sah: karakter yang wajar dan 8–15 angka (tanda baca saja tidak cukup). */
+export function validPhone(s: string): boolean {
+  const digits = s.replace(/\D/g, '').length;
+  return PHONE_RE.test(s) && digits >= 8 && digits <= 15;
+}
+
+/** Bentuk baku untuk membandingkan nomor: hanya angka, awalan 62 (kode negara) diganti 0. "+62 812-3456" dan "0812 3456" sama. */
+export function phoneKey(s: string): string {
+  const d = s.replace(/\D/g, '');
+  return d.startsWith('62') ? `0${d.slice(2)}` : d;
+}
 export const WEB_EXPIRE_MS = 30 * 60_000;
 export const MAX_LINES = 30;
 export const MAX_LINE_QTY = 20;
@@ -57,6 +69,49 @@ export function checkCart(input: unknown, menu: Map<string, MenuRow>): CartResul
 
 export interface WebOrderFacts { id: number; status: 'NEW' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'; estimatedTotal: number; decidedAtMs: number | null }
 
+/**
+ * Nasib order kasir dari event: yang di-void, yang digabung ke order lain (tidak akan pernah dibayar sendiri), dan pembayaran bersih (setelah
+ * refund) satu order BESERTA pecahannya (pisah bill memindahkan sebagian item ke order baru yang dibayar sendiri).
+ */
+export function orderFlows(events: PosEvent[]) {
+  const t = correctedTime;
+  const voided = new Map<string, number>();
+  const mergedAway = new Set<string>();
+  const children = new Map<string, string[]>();
+  const own = new Map<string, { total: number; last: number }>();
+  for (const e of events) {
+    if (e.type === 'void.approved' && !voided.has(e.payload.orderId)) voided.set(e.payload.orderId, t(e));
+    else if (e.type === 'order.items_moved') {
+      if (e.payload.kind === 'MERGE') mergedAway.add(e.payload.fromOrderId);
+      else (children.get(e.payload.fromOrderId) ?? children.set(e.payload.fromOrderId, []).get(e.payload.fromOrderId)!).push(e.payload.toOrderId);
+    } else if (e.type === 'payment.received') {
+      const p = own.get(e.payload.orderId) ?? { total: 0, last: 0 };
+      p.total += e.payload.amount;
+      p.last = Math.max(p.last, t(e));
+      own.set(e.payload.orderId, p);
+    } else if (e.type === 'refund.created') {
+      const p = own.get(e.payload.originalOrderId) ?? { total: 0, last: 0 };
+      p.total -= e.payload.amount;
+      own.set(e.payload.originalOrderId, p);
+    }
+  }
+  const family = (id: string, seen = new Set<string>()): { total: number; last: number } => {
+    if (seen.has(id)) return { total: 0, last: 0 };
+    seen.add(id);
+    const o = own.get(id) ?? { total: 0, last: 0 };
+    let total = o.total;
+    let last = o.last;
+    for (const c of children.get(id) ?? []) {
+      if (voided.has(c)) continue;
+      const f = family(c, seen);
+      total += f.total;
+      last = Math.max(last, f.last);
+    }
+    return { total, last };
+  };
+  return { voided, mergedAway, family };
+}
+
 export interface WebHit { rule: 'R45' | 'R46' | 'R47'; key: string; at: number; actor: string | null; terminalId: string | null; orderId: string | null; note: string }
 
 const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
@@ -73,21 +128,7 @@ export function webOrderHits(webOrders: WebOrderFacts[], events: PosEvent[], now
   const t = correctedTime;
   const byId = new Map(webOrders.map((w) => [w.id, w]));
   const links = events.filter((e): e is EventOf<'order.web_linked'> => e.type === 'order.web_linked').sort((a, b) => t(a) - t(b) || a.deviceId.localeCompare(b.deviceId) || a.seq - b.seq);
-  const voided = new Map<string, number>();
-  const paid = new Map<string, { total: number; last: number }>();
-  for (const e of events) {
-    if (e.type === 'void.approved' && !voided.has(e.payload.orderId)) voided.set(e.payload.orderId, t(e));
-    else if (e.type === 'payment.received') {
-      const p = paid.get(e.payload.orderId) ?? { total: 0, last: 0 };
-      p.total += e.payload.amount;
-      p.last = Math.max(p.last, t(e));
-      paid.set(e.payload.orderId, p);
-    } else if (e.type === 'refund.created') {
-      const p = paid.get(e.payload.originalOrderId) ?? { total: 0, last: 0 };
-      p.total -= e.payload.amount;
-      paid.set(e.payload.originalOrderId, p);
-    }
-  }
+  const { voided, mergedAway, family } = orderFlows(events);
   const hits: WebHit[] = [];
   const linkedTo = new Map<number, EventOf<'order.web_linked'>[]>();
   for (const l of links) (linkedTo.get(l.payload.webOrderId) ?? linkedTo.set(l.payload.webOrderId, []).get(l.payload.webOrderId)!).push(l);
@@ -111,8 +152,9 @@ export function webOrderHits(webOrders: WebOrderFacts[], events: PosEvent[], now
         hits.push({ rule: 'R46', key: `R46:void:${oid}`, at: v, actor: l.actorId ?? null, terminalId: l.deviceId, orderId: oid, note: `order kasir ${oid} dari pesanan web #${wid} (estimasi ${rp(w.estimatedTotal)}) di-void` });
         continue;
       }
-      const p = paid.get(oid);
-      if (!p || p.total <= 0) {
+      if (mergedAway.has(oid)) continue; // digabung ke order lain: nilainya dibayar lewat order tujuan
+      const p = family(oid);
+      if (p.total <= 0) {
         const due = (w.decidedAtMs ?? t(l)) + UNPAID_AFTER_MS;
         if (now >= due) hits.push({ rule: 'R46', key: `R46:unpaid:${oid}`, at: due, actor: l.actorId ?? null, terminalId: l.deviceId, orderId: oid, note: `order kasir ${oid} dari pesanan web #${wid} (estimasi ${rp(w.estimatedTotal)}) belum dibayar lebih dari 3 jam setelah diterima` });
       } else if (p.total < w.estimatedTotal - Math.max(1000, Math.round(w.estimatedTotal * 0.1))) {

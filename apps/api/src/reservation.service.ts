@@ -9,6 +9,7 @@ import {
   type ReservationStatus, type SettleKind,
 } from './reservation';
 import { DAY_MS, localDate, startOfLocalDay } from './sales-report';
+import { validPhone } from './web-order';
 
 const need = (ok: unknown, message: string): void => {
   if (!ok) throw new BadRequestException(message);
@@ -92,7 +93,7 @@ export class ReservationService {
     const guestName = text(input.guestName, 80);
     need(guestName, 'nama tamu wajib (maks. 80 karakter)');
     const phone = input.phone === undefined || input.phone === null || input.phone === '' ? null : text(input.phone, 24);
-    need(input.phone === undefined || input.phone === null || input.phone === '' || (phone !== null && /^[0-9 +()-]{6,24}$/.test(phone)), 'nomor telepon tidak valid');
+    need(input.phone === undefined || input.phone === null || input.phone === '' || (phone !== null && validPhone(phone)), 'nomor telepon tidak valid');
     need(Number.isInteger(input.partySize) && (input.partySize as number) >= 1 && (input.partySize as number) <= MAX_PARTY, `jumlah tamu 1–${MAX_PARTY}`);
     const start = typeof input.start === 'number' ? input.start : Number.NaN;
     need(Number.isFinite(start), 'jam reservasi tidak valid');
@@ -232,8 +233,9 @@ export class ReservationService {
   async board(device: DeviceAuth, now = this.clock()) {
     return this.db.tenantTx(device.tenantId, async (q) => {
       const rows = (await q.query<Row>(
-        `select ${COLS} from reservation where outlet_id = $1 and status in ('BOOKED', 'SEATED') and start_ms >= $2 and start_ms < $3 order by start_ms, id`,
-        [device.outletId, now - 3 * 3_600_000, now + DAY_MS],
+        // Yang masih dipesan hanya relevan sampai 3 jam setelah jamnya; yang sudah duduk tetap tampil 8 jam (masih makan, uang mukanya belum dipakai).
+        `select ${COLS} from reservation where outlet_id = $1 and ((status = 'BOOKED' and start_ms >= $2) or (status = 'SEATED' and start_ms >= $4)) and start_ms < $3 order by start_ms, id`,
+        [device.outletId, now - 3 * 3_600_000, now + DAY_MS, now - 8 * 3_600_000],
       )).rows;
       const applied = await appliedDeposits(q, device.outletId, rows.map((r) => num(r.id)));
       return {

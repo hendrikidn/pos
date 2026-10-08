@@ -76,6 +76,13 @@ describe('antrian: temuan R48-R49 (murni)', () => {
     expect(dup[0]!.note).toContain('2 order');
   });
 
+  it('R49: order digabung ke order lain atau dipecah bayar tidak dianggap belum dibayar', () => {
+    const moved = (s: Sim, kind: 'MERGE' | 'SPLIT', from: string, to: string, at: number) =>
+      s.pos({ type: 'order.items_moved', payload: { fromOrderId: from, toOrderId: to, kind, items: [], sent: [] } } as never, at, 'budi');
+    expect(run((s) => { link(s, 'a', 1, T + 60_000); s.pos({ type: 'order.created', payload: { orderId: 'b', orderType: 'DINE_IN', tableNo: '4' } }, T + 70_000, 'budi'); moved(s, 'MERGE', 'a', 'b', T + 120_000); pay(s, 'b', T + 200_000); })).toEqual([]);
+    expect(run((s) => { link(s, 'a', 1, T + 60_000); s.pos({ type: 'order.created', payload: { orderId: 'a-S1', orderType: 'DINE_IN', tableNo: '4' } }, T + 70_000, 'budi'); moved(s, 'SPLIT', 'a', 'a-S1', T + 120_000); pay(s, 'a-S1', T + 200_000); })).toEqual([]); // hanya pecahannya yang dibayar
+  });
+
   it('temuan lama sebelum jendela tidak dikeluarkan', () => {
     const hits = queueHits([jump(2, 'OTHER', 'kenalan')], [], new Set(), [], T + 1000, T + 500);
     expect(hits).toEqual([]);

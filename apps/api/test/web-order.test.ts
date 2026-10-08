@@ -105,6 +105,31 @@ describe('toko web: temuan R45-R47 (murni)', () => {
     expect(rules(webOrderHits([accepted(1)], refunded, T + 3_600_000, 0))).toEqual(['R47']);
   });
 
+  it('order digabung ke order lain atau dipecah bayar: bukan "belum dibayar" dan bukan "dibayar di bawah nilai"', () => {
+    const moved = (s: Sim, kind: 'MERGE' | 'SPLIT', from: string, to: string, at: number) =>
+      s.pos({ type: 'order.items_moved', payload: { fromOrderId: from, toOrderId: to, kind, items: [], sent: [] } } as never, at, 'budi');
+    // digabung ke order lain: order asal tidak akan pernah dibayar, nilainya dibayar lewat order tujuan
+    const merged = events((s) => { link(s, 'a', 1, T + 60_000); s.pos({ type: 'order.created', payload: { orderId: 'b', orderType: 'TAKE_AWAY' } }, T + 70_000, 'budi'); moved(s, 'MERGE', 'a', 'b', T + 120_000); pay(s, 'b', 50_000, T + 200_000); });
+    expect(webOrderHits([accepted(1)], merged, T + 4 * 3_600_000, 0)).toEqual([]);
+    // dipecah: separuh item dibayar di order pecahan, separuh di order asal (masing-masing 25.000 dari 50.000)
+    const split = events((s) => {
+      link(s, 'a', 1, T + 60_000);
+      s.pos({ type: 'order.created', payload: { orderId: 'a-S1', orderType: 'TAKE_AWAY' } }, T + 70_000, 'budi');
+      moved(s, 'SPLIT', 'a', 'a-S1', T + 120_000);
+      s.pos({ type: 'payment.received', payload: { orderId: 'a', method: 'CASH', amount: 25_000 } }, T + 200_000, 'budi');
+      s.pos({ type: 'payment.received', payload: { orderId: 'a-S1', method: 'CASH', amount: 25_000 } }, T + 210_000, 'budi');
+    });
+    expect(webOrderHits([accepted(1)], split, T + 4 * 3_600_000, 0)).toEqual([]);
+    // tetapi bila yang dipecah tidak dibayar sama sekali, kekurangannya tetap ketahuan
+    const unpaidSplit = events((s) => {
+      link(s, 'a', 1, T + 60_000);
+      s.pos({ type: 'order.created', payload: { orderId: 'a-S1', orderType: 'TAKE_AWAY' } }, T + 70_000, 'budi');
+      moved(s, 'SPLIT', 'a', 'a-S1', T + 120_000);
+      s.pos({ type: 'payment.received', payload: { orderId: 'a', method: 'CASH', amount: 10_000 } }, T + 200_000, 'budi');
+    });
+    expect(rules(webOrderHits([accepted(1)], unpaidSplit, T + 4 * 3_600_000, 0))).toEqual(['R47']);
+  });
+
   it('temuan lama (sebelum jendela) tidak dikeluarkan', () => {
     expect(webOrderHits([accepted(1)], [], T + 5 * 3_600_000, T + 4 * 3_600_000)).toEqual([]);
   });

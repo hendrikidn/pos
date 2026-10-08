@@ -84,6 +84,9 @@ describe('antrian meja', () => {
     const b = await take({ partySize: 2, phone: '0812 3333 4444' });
     expect(b.body).toMatchObject({ label: 'A002', ahead: 1, estimateMin: 4 });
     expect((await take({ phone: '0812 1111 2222' })).status).toBe(409); // sudah punya tiket aktif
+    expect((await take({ phone: '0812-1111-2222' })).status).toBe(409); // penulisan lain dari nomor yang sama
+    expect((await take({ phone: '+62 812 1111 2222' })).status).toBe(409);
+    expect((await take({ phone: '++++++++' })).status).toBe(400);
     const trap = await take({ website: 'http://spam' });
     expect(trap.status).toBe(201);
     expect((await get('/v1/queue/board', term)).body.tickets).toHaveLength(2); // jebakan tidak menyimpan

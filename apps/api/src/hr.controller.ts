@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Inject, Param, ParseIntPipe, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { IdPipe } from './id-pipe';
 import { requireApi, type AuthedRequest } from './auth';
-import { Database } from './db/database';
 import { HrService, type LineInput, type ManualInput, type PayInput, type RunInput } from './hr.service';
 import { CLOCK, type Clock } from './pipeline.service';
 
@@ -9,7 +9,6 @@ import { CLOCK, type Clock } from './pipeline.service';
 export class HrController {
   constructor(
     @Inject(HrService) private readonly hr: HrService,
-    @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -35,7 +34,7 @@ export class HrController {
   }
 
   @Post('outlets/:outletId/hr/attendance/:id/void')
-  async voidManual(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Param('id', ParseIntPipe) id: number, @Body() body: { reason?: unknown }) {
+  async voidManual(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Param('id', IdPipe) id: number, @Body() body: { reason?: unknown }) {
     await this.hr.voidManual(requireApi(req, ['OWNER', 'MANAGER']), outletId, id, body?.reason);
     return { ok: true };
   }
@@ -51,35 +50,35 @@ export class HrController {
   }
 
   @Get('payroll-runs/:id')
-  detail(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number) {
+  detail(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number) {
     return this.hr.detail(requireApi(req, ['OWNER']), id);
   }
 
   @Put('payroll-runs/:id/lines/:staffId')
-  async updateLine(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Param('staffId') staffId: string, @Body() body: LineInput) {
+  async updateLine(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Param('staffId') staffId: string, @Body() body: LineInput) {
     await this.hr.updateLine(requireApi(req, ['OWNER']), id, staffId, body ?? {});
     return { ok: true };
   }
 
   @Post('payroll-runs/:id/finalize')
-  async finalize(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number) {
+  async finalize(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number) {
     await this.hr.finalize(requireApi(req, ['OWNER']), id);
     return { ok: true };
   }
 
   @Post('payroll-runs/:id/pay')
-  pay(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { date?: unknown; method?: unknown }) {
+  pay(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { date?: unknown; method?: unknown }) {
     return this.hr.pay(requireApi(req, ['OWNER']), id, body ?? {}, this.clock());
   }
 
   @Post('payroll-runs/:id/cancel')
-  async cancel(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { reason?: unknown }) {
+  async cancel(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { reason?: unknown }) {
     await this.hr.cancel(requireApi(req, ['OWNER']), id, body?.reason);
     return { ok: true };
   }
 
   @Get('payroll-runs/:id/export')
-  async exportCsv(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void }, @Param('id', ParseIntPipe) id: number) {
+  async exportCsv(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void }, @Param('id', IdPipe) id: number) {
     const out = await this.hr.exportCsv(requireApi(req, ['OWNER']), id);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${out.filename}"`);

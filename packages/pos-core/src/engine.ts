@@ -675,6 +675,7 @@ export class PosEngine {
     const o = r.value;
     if (o.type === 'EMPLOYEE') return fail('HANDOFF_EMPLOYEE', 'Order makan karyawan tidak bisa diserahkan.');
     if (o.channel) return fail('HANDOFF_ONLINE', 'Order online tidak bisa diserahkan ke terminal lain (kaitannya ke platform tidak ikut berpindah).');
+    if (o.webOrder || o.queue) return fail('HANDOFF_LINKED', 'Order dari pesanan web atau antrian tidak bisa diserahkan ke terminal lain (tautannya ke pesanan tidak ikut berpindah).');
     if (o.handedOff) return fail('HANDOFF_ALREADY', 'Order ini sudah diserahkan.');
     if (o.state.status !== 'DRAFT' && o.state.status !== 'SENT') return fail('HANDOFF_LOCKED', 'Order sudah ditagih atau selesai; hanya order yang belum ditagih bisa diserahkan.');
     if (o.items.length === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');

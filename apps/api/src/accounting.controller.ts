@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Inject, NotFoundException, Param, ParseIntPipe, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Inject, NotFoundException, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { IdPipe } from './id-pipe';
 import { requireApi, type AuthedRequest } from './auth';
 import { AccountingService } from './accounting.service';
 import { Database } from './db/database';
@@ -50,7 +51,7 @@ export class AccountingController {
   }
 
   @Post('outlets/:outletId/accounting/journal/:id/void')
-  async voidEntry(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Param('id', ParseIntPipe) id: number, @Body() body: { reason?: unknown }) {
+  async voidEntry(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Param('id', IdPipe) id: number, @Body() body: { reason?: unknown }) {
     const auth = requireApi(req, ['OWNER']);
     await this.outlet(auth.tenantId, outletId);
     await this.acc.voidEntry(auth, outletId, id, body?.reason);

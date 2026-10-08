@@ -72,4 +72,10 @@ describe('engine: pesanan toko web', () => {
     expect(paid.order.state.status).toBe('PAID');
     expect(paid.change).toBe(1_600);
   });
+
+  it('order dari pesanan web tidak bisa diserahkan ke terminal lain (tautannya tidak ikut berpindah)', async () => {
+    const s = await setup();
+    const o = must(await s.engine.createWebOrder(web()));
+    expect(await s.engine.handOff(o.id)).toMatchObject({ ok: false, code: 'HANDOFF_LINKED' });
+  });
 });

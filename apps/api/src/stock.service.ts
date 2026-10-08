@@ -219,8 +219,10 @@ export class StockService {
       if (!menu) throw new NotFoundException('menu tidak ditemukan');
       if (optionId !== '') need(menu.modifier_groups.some((g) => g.options.some((o) => o.id === optionId)), 'opsi tidak ada pada menu ini');
       for (const id of ids) {
-        const ing = (await q.query<{ active: boolean }>('select active from ingredient where id = $1', [id])).rows[0];
+        const ing = (await q.query<{ active: boolean; kind: string }>('select active, kind from ingredient where id = $1', [id])).rows[0];
         need(ing, `bahan tidak ditemukan: ${id}`);
+        // Bahan setengah jadi tanpa BOM tidak bisa diuraikan: pemakaian bahan bakunya akan diam-diam tidak terhitung.
+        if (ing!.kind === 'SEMI') need((await q.query('select 1 from bom_line where parent_id = $1', [id])).rowCount > 0, `bahan setengah jadi ${id} belum punya BOM: isi BOM-nya dulu`);
       }
       await q.query('delete from recipe_line where menu_id = $1 and option_id = $2', [menuId, optionId]);
       for (const l of input.lines!) {

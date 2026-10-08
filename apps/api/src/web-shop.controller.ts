@@ -1,4 +1,5 @@
-import { Body, Controller, ForbiddenException, Get, Inject, Param, ParseIntPipe, Post, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
+import { IdPipe } from './id-pipe';
 import { Public, requireApi, requireDevice, type AuthedRequest } from './auth';
 import { WebShopService, type WebOrderInput } from './web-shop.service';
 
@@ -44,7 +45,7 @@ export class WebShopController {
   }
 
   @Post('outlets/:outletId/web-orders/:id/reject')
-  async reject(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Param('id', ParseIntPipe) id: number, @Body() body: { reason?: unknown }) {
+  async reject(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Param('id', IdPipe) id: number, @Body() body: { reason?: unknown }) {
     await this.shop.rejectFromDashboard(requireApi(req, ['OWNER', 'MANAGER']), outletId, id, body?.reason);
     return { ok: true };
   }
@@ -55,12 +56,12 @@ export class WebShopController {
   }
 
   @Post('web-orders/:id/accept')
-  accept(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number) {
+  accept(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number) {
     return this.shop.accept(this.terminal(req), id);
   }
 
   @Post('web-orders/:id/reject')
-  async rejectDevice(@Req() req: AuthedRequest, @Param('id', ParseIntPipe) id: number, @Body() body: { reason?: unknown }) {
+  async rejectDevice(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number, @Body() body: { reason?: unknown }) {
     await this.shop.rejectFromDevice(this.terminal(req), id, body?.reason);
     return { ok: true };
   }

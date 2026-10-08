@@ -91,6 +91,8 @@ describe('toko web', () => {
     await bad({ name: 'D' });
     await bad({ phone: '12' });
     await bad({ phone: 'abcdefghij' });
+    await bad({ phone: '++++++++' }); // tanda baca saja
+    await bad({ phone: '(+)-( )-12' }); // kurang dari 8 angka
     await bad({ type: 'DELIVERY' });
     await bad({ type: 'DINE_IN' }); // tanpa meja
     await bad({ type: 'DINE_IN', tableNo: '99' }); // tidak ada di denah
@@ -120,6 +122,9 @@ describe('toko web', () => {
     for (let i = 0; i < 3; i++) expect((await order({})).status).toBe(201);
     expect((await order({})).status).toBe(429);
     expect((await order({ phone: '0899 1111 2222' })).status).toBe(201); // nomor lain tidak terpengaruh
+    // penulisan lain dari nomor yang sama (spasi, tanda hubung, +62) tidak melewati batas
+    expect((await order({ phone: '0812-3456-7890' })).status).toBe(429);
+    expect((await order({ phone: '+62 812 3456 7890' })).status).toBe(429);
   });
 
   it('jebakan bot: isian website terisi pura-pura berhasil tanpa menyimpan; pembatas per alamat 6 pesanan per jam', async () => {

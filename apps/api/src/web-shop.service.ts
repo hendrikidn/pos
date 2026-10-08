@@ -7,7 +7,7 @@ import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { CLOCK, type Clock } from './pipeline.service';
 import { DAY_MS, localDate, startOfLocalDay } from './sales-report';
-import { checkCart, MAX_WEB_TOTAL, PHONE_RE, SLUG_RE, WEB_EXPIRE_MS, type MenuRow, type WebLine } from './web-order';
+import { checkCart, MAX_WEB_TOTAL, phoneKey, SLUG_RE, validPhone, WEB_EXPIRE_MS, type MenuRow, type WebLine } from './web-order';
 
 const need = (ok: unknown, message: string): void => {
   if (!ok) throw new BadRequestException(message);
@@ -104,7 +104,7 @@ export class WebShopService {
     const name = clean(input.name, 2, 40);
     need(name, 'nama wajib diisi (2–40 karakter)');
     const phone = clean(input.phone, 8, 20);
-    need(phone && PHONE_RE.test(phone), 'nomor telepon tidak valid');
+    need(phone && validPhone(phone), 'nomor telepon tidak valid');
     need(input.type === 'TAKE_AWAY' || input.type === 'DINE_IN', 'pilih ambil sendiri atau makan di tempat');
     let tableNo: string | null = null;
     if (input.type === 'DINE_IN') {
@@ -122,9 +122,11 @@ export class WebShopService {
       const lines: CartLine[] = cart.lines.map((l) => ({ itemId: l.itemId, name: l.name, qty: l.qty, unitPrice: l.unitPrice, sentQty: 0 }));
       const total = computeTotals(lines, 0, { taxPercent: o.tax_percent, servicePercent: o.service_charge_percent, taxOnService: o.tax_on_service, roundingUnit: o.rounding_unit }).total;
       need(total <= MAX_WEB_TOTAL, `nilai pesanan maksimal Rp ${MAX_WEB_TOTAL.toLocaleString('id-ID')}; untuk pesanan lebih besar hubungi outlet`);
-      const pending = (await q.query<{ n: string; mine: string }>("select count(*) as n, count(*) filter (where phone = $2) as mine from web_order where outlet_id = $1 and status = 'NEW'", [o.id, phone])).rows[0]!;
-      if (num(pending.mine) >= PENDING_PER_PHONE) throw new HttpException('masih ada pesanan Anda yang menunggu konfirmasi kasir', HttpStatus.TOO_MANY_REQUESTS);
-      if (num(pending.n) >= PENDING_PER_OUTLET) throw new HttpException('toko sedang ramai; coba lagi sebentar', HttpStatus.TOO_MANY_REQUESTS);
+      // Dibandingkan menurut bentuk bakunya: "0812-3456", "+62 812 3456" dan "0812 3456" adalah nomor yang sama.
+      const pendingPhones = (await q.query<{ phone: string }>("select phone from web_order where outlet_id = $1 and status = 'NEW'", [o.id])).rows;
+      const pending = { n: pendingPhones.length, mine: pendingPhones.filter((r) => phoneKey(r.phone) === phoneKey(phone!)).length };
+      if (pending.mine >= PENDING_PER_PHONE) throw new HttpException('masih ada pesanan Anda yang menunggu konfirmasi kasir', HttpStatus.TOO_MANY_REQUESTS);
+      if (pending.n >= PENDING_PER_OUTLET) throw new HttpException('toko sedang ramai; coba lagi sebentar', HttpStatus.TOO_MANY_REQUESTS);
       // Hanya pesanan yang lolos pemeriksaan yang dihitung ke pembatas per alamat, supaya salah ketik tidak menghabiskan jatah.
       this.limit(this.orderHits, caller, ORDERS_PER_IP_PER_HOUR, 3_600_000, 'terlalu banyak pesanan dari perangkat ini; coba lagi nanti atau pesan langsung di kasir');
       const token = randomBytes(16).toString('base64url');

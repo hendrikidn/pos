@@ -8,7 +8,7 @@ import {
   checkCall, estimateWaitMin, labelOf, MAX_PARTY, MAX_WAITING, NO_SHOW_AFTER_MS, type QueueTicketFacts, type TicketStatus,
 } from './queue';
 import { localDate } from './sales-report';
-import { PHONE_RE, SLUG_RE } from './web-order';
+import { phoneKey, SLUG_RE, validPhone } from './web-order';
 
 const need = (ok: unknown, message: string): void => {
   if (!ok) throw new BadRequestException(message);
@@ -119,15 +119,16 @@ export class QueueService {
     const name = input.name === undefined || input.name === null || input.name === '' ? null : clean(input.name, 2, 40);
     need(input.name === undefined || input.name === null || input.name === '' || name !== null, 'nama 2–40 karakter');
     const phone = input.phone === undefined || input.phone === null || input.phone === '' ? null : clean(input.phone, 8, 20);
-    need(input.phone === undefined || input.phone === null || input.phone === '' || (phone !== null && PHONE_RE.test(phone)), 'nomor telepon tidak valid');
+    need(input.phone === undefined || input.phone === null || input.phone === '' || (phone !== null && validPhone(phone)), 'nomor telepon tidak valid');
     const now = this.clock();
     return this.db.tenantTx(o.tenant_id, async (q) => {
       const day = await this.today(q, o, now);
       await q.query('select pg_advisory_xact_lock(hashtext($1))', [`queue:${o.id}`]);
       const waiting = num((await q.query<{ n: string }>("select count(*) as n from queue_ticket where outlet_id = $1 and day = $2 and status = 'WAITING'", [o.id, day])).rows[0]!.n);
       if (waiting >= MAX_WAITING) throw new HttpException('antrian sedang penuh; silakan datang ke kasir', HttpStatus.TOO_MANY_REQUESTS);
-      if (phone && (await q.query("select 1 from queue_ticket where outlet_id = $1 and day = $2 and phone = $3 and status in ('WAITING', 'CALLED')", [o.id, day, phone])).rowCount > 0) {
-        throw new ConflictException('nomor ini sudah punya tiket antrian yang aktif');
+      if (phone) {
+        const active = (await q.query<{ phone: string }>("select phone from queue_ticket where outlet_id = $1 and day = $2 and phone is not null and status in ('WAITING', 'CALLED')", [o.id, day])).rows;
+        if (active.some((r) => phoneKey(r.phone) === phoneKey(phone))) throw new ConflictException('nomor ini sudah punya tiket antrian yang aktif');
       }
       this.limit(this.takeHits, caller, TICKETS_PER_IP_PER_HOUR, 3_600_000, 'terlalu banyak tiket dari perangkat ini; silakan datang ke kasir');
       const seq = num((await q.query<{ n: string }>('select coalesce(max(seq), 0) + 1 as n from queue_ticket where outlet_id = $1 and day = $2', [o.id, day])).rows[0]!.n);
@@ -198,7 +199,7 @@ export class QueueService {
       const o = await this.outletInfo(q, outletId);
       const today = await this.today(q, o, now);
       const d = day ?? today;
-      need(/^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d, 'tanggal tidak valid');
+      need(/^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d, 'tanggal tidak valid');
       const rows = (await q.query<Row>(`select ${COLS} from queue_ticket where outlet_id = $1 and day = $2 order by seq`, [outletId, d])).rows;
       const waits = rows.filter((r) => r.called_at_ms !== null).map((r) => (num(r.called_at_ms) - num(r.created_at_ms)) / 60_000);
       const count = (s: TicketStatus) => rows.filter((r) => r.status === s).length;

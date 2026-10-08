@@ -38,6 +38,8 @@ export function QueueDialog({ ctx, onSeated, onClose }: { ctx: Ctx; onSeated: (o
 
   async function seat() {
     if (!seating || !table) return;
+    // Tamu dicatat duduk di server dulu, jadi pastikan order bisa dibuat (shift terbuka) sebelum itu; kalau tidak tiketnya duduk tanpa order (R49).
+    if (!ctx.rt.engine.currentShift()) return ctx.toast('Buka shift terlebih dahulu sebelum mendudukkan tamu.', 'error');
     const v = await act('seat', seating.id, { tableNo: table });
     if (!v) return;
     const o = await ctx.rt.seatQueueOrder({ id: seating.id, label: seating.label }, table);

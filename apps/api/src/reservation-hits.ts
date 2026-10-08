@@ -38,12 +38,16 @@ export async function reservationHits(q: Queryable, outletId: string, windowEven
       [outletId, ids.map(String)],
     )).rows.map(rowToEvent).filter((e): e is EventOf<'payment.received'> => e.type === 'payment.received');
     const ordered = [...all].sort((a, b) => correctedTime(a) - correctedTime(b) || a.deviceId.localeCompare(b.deviceId) || a.seq - b.seq);
+    // Order yang di-void tidak menghabiskan uang muka: pembayarannya tidak ikut menjumlah pemakaian sebelumnya.
+    const voidedOrders = new Set((await q.query<{ oid: string }>(
+      "select payload->>'orderId' as oid from event where outlet_id = $1 and type = 'void.approved' and payload->>'orderId' = any($2::text[])", [outletId, ordered.map((e) => e.payload.orderId)],
+    )).rows.map((r) => r.oid));
     const before = new Map<string, number>(); // `${deviceId}:${seq}` → jumlah terpakai sebelum pembayaran ini
     const running = new Map<number, number>();
     for (const e of ordered) {
       const rid = e.payload.reservationId!;
       before.set(`${e.deviceId}:${e.seq}`, running.get(rid) ?? 0);
-      running.set(rid, (running.get(rid) ?? 0) + e.payload.amount);
+      if (!voidedOrders.has(e.payload.orderId)) running.set(rid, (running.get(rid) ?? 0) + e.payload.amount);
     }
     for (const e of inWindow) {
       const rid = e.payload.reservationId!;

@@ -34,8 +34,9 @@ export function resolveRange(off: number, params: { from?: string; to?: string; 
     ({ from, to } = presetRange(params.range as RangePreset, today));
   }
   to = to ?? today;
+  // Periksa `to` SEBELUM dipakai menghitung `from`: tanggal seperti "x" atau 2026-13-01 membuat perhitungan tanggal melempar kesalahan (500).
+  if (!validDate(to) || (from !== undefined && !validDate(from))) throw new BadRequestException('tanggal harus berformat YYYY-MM-DD');
   from = from ?? addDays(to, -(DEFAULT_DAYS - 1));
-  if (!validDate(from) || !validDate(to)) throw new BadRequestException('tanggal harus berformat YYYY-MM-DD');
   if (from > to) throw new BadRequestException('tanggal awal tidak boleh setelah tanggal akhir');
   if (to > today) throw new BadRequestException('tanggal akhir tidak boleh di masa depan');
   const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;

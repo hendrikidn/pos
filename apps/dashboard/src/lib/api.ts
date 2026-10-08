@@ -273,3 +273,25 @@ export interface ShadowReport {
     status: string; order_ids: string[]; actor_ids: string[]; rules: string[];
   }[];
 }
+
+export interface Ingredient { id: string; name: string; unit: 'g' | 'ml' | 'pcs'; minStock: number; active: boolean }
+
+export interface StockMovement {
+  id: number; ingredientId: string; kind: 'PURCHASE' | 'WASTE' | 'COUNT'; qty: number; expected: number | null; variance: number | null;
+  periodUsed: number | null; note: string | null; userId: string; at: number;
+}
+
+/** GET /v1/outlets/:id/stock (lihat apps/api/src/stock.ts). */
+export interface StockRow {
+  ingredientId: string; name: string; unit: Ingredient['unit']; minStock: number; active: boolean;
+  baseline: { at: number; counted: number } | null;
+  purchased: number; wasted: number; used: number; expected: number | null;
+  status: 'NO_BASELINE' | 'OK' | 'LOW' | 'EMPTY';
+  lastCount: StockMovement | null;
+  recent: StockMovement[];
+}
+
+export interface CountRow extends StockMovement { name: string; unit: Ingredient['unit']; flagged: boolean }
+
+/** GET /v1/recipes: `{ [menuId]: { base: {bahan: qty}, options: {[optionId]: {bahan: qty}} } }`. */
+export type Recipes = Record<string, { base: Record<string, number>; options: Record<string, Record<string, number>> }>;

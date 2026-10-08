@@ -515,7 +515,7 @@ describe('varian dan tambahan menu', () => {
     must(await c.engine.printBill(id));
     const expected = {
       itemId: 'nasi-goreng', name: 'Nasi Goreng', qty: 2, unitPrice: 43_000, note: 'tanpa bawang',
-      options: [{ group: 'Level pedas', name: 'Pedas', price: 0 }, { group: 'Tambahan', name: 'Telur', price: 5_000 }],
+      options: [{ id: 'pedas', group: 'Level pedas', name: 'Pedas', price: 0 }, { id: 'telur', group: 'Tambahan', name: 'Telur', price: 5_000 }],
     };
     const evs = await c.events();
     const sent = evs.find((e) => e.type === 'order.sent_to_kitchen');

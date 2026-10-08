@@ -15,7 +15,8 @@ export interface LineItem {
   /** Harga satuan akhir, sudah termasuk harga opsi. `qty × unitPrice` selalu nilai baris. */
   unitPrice: number;
   /** Varian dan tambahan yang dipilih; harganya sudah termasuk di `unitPrice`. */
-  options?: { group: string; name: string; price: number }[];
+  /** `id`: id opsi pada menu (dasar resep opsi untuk stok); tidak ada pada event lama. */
+  options?: { id?: string; group: string; name: string; price: number }[];
   /** Catatan kasir untuk dapur. */
   note?: string;
   /** Hanya pada `order.items_moved`: berapa dari `qty` yang sudah dikirim ke dapur (sisanya belum). */

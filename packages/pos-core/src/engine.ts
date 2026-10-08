@@ -71,7 +71,7 @@ const furthest = (a: KitchenStatus | null, b: KitchenStatus | null): KitchenStat
 const eventLine = (l: CartLine, qty: number, sentQty?: number): LineItem => ({
   itemId: l.itemId, name: l.name, qty, unitPrice: l.unitPrice,
   ...(sentQty !== undefined ? { sentQty } : {}),
-  ...(l.options ? { options: l.options.map((x) => ({ group: x.group, name: x.name, price: x.price })) } : {}),
+  ...(l.options ? { options: l.options.map((x) => ({ id: x.optionId, group: x.group, name: x.name, price: x.price })) } : {}),
   ...(l.note ? { note: l.note } : {}),
 });
 

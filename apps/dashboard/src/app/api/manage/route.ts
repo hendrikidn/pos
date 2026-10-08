@@ -5,6 +5,9 @@ import { api, ApiError, sameOrigin } from '@/lib/api';
 const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['POST', 'PUT'], path: /^\/v1\/staff(\/[a-z0-9_-]+)?$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/menu(\/[a-z0-9_-]+)?$/ },
+  { methods: ['PUT'], path: /^\/v1\/menu\/[a-z0-9_-]+\/recipe$/ },
+  { methods: ['POST', 'PUT'], path: /^\/v1\/ingredients(\/[a-z0-9_-]+)?$/ },
+  { methods: ['POST'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/stock\/movements$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/settings$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/settlements$/ },
   { methods: ['POST'], path: /^\/v1\/users$/ },

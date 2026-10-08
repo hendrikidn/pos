@@ -1,3 +1,4 @@
+export * from './consumption';
 export * from './receipt';
 export * from './kds';
 export * from './modifiers';

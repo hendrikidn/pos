@@ -54,6 +54,7 @@ function badItems(p: Payload): string | null {
       for (const raw of l['options'] as unknown[]) {
         const o = raw as Payload | null;
         if (typeof o !== 'object' || o === null || Array.isArray(o)) return 'baris options bukan objek';
+        if (o['id'] !== undefined && (!str(o, 'id') || (o['id'] as string).length > 32)) return 'id opsi tidak valid';
         if (!str(o, 'group') || (o['group'] as string).length > 40 || !str(o, 'name') || (o['name'] as string).length > 40) return 'nama grup/opsi tidak valid';
         if (!Number.isInteger(o['price']) || (o['price'] as number) < 0) return 'harga opsi harus bilangan bulat ≥ 0';
       }

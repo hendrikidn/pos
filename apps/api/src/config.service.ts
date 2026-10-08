@@ -39,6 +39,16 @@ export interface StaffInput {
   active?: boolean;
 }
 
+/** Foto menu kecil (dikecilkan di dashboard); batas keras di server. */
+export const MENU_IMAGE_MAX_BYTES = 150 * 1024;
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+function imageMagicOk(type: string, b: Buffer): boolean {
+  if (type === 'image/jpeg') return b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+  if (type === 'image/png') return b.length > 8 && b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  return b.length > 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP';
+}
+
 export interface MenuInput {
   id?: string;
   name?: string;
@@ -122,7 +132,7 @@ export interface DeviceConfig {
     policy: Record<string, number> | null;
   };
   staff: { id: string; name: string; role: StaffRole; salt: string; hash: string; iterations: number }[];
-  menu: { id: string; name: string; price: number; category: string; modifierGroups?: ModifierGroup[] }[];
+  menu: { id: string; name: string; price: number; category: string; modifierGroups?: ModifierGroup[]; /** Versi foto (sidik jari); ada hanya bila menu punya foto. */ image?: string }[];
 }
 
 @Injectable()
@@ -199,8 +209,48 @@ export class ConfigService {
   listMenu(auth: ApiAuth) {
     return this.db.tenantTx(auth.tenantId, async (q) =>
       (await q.query(`select id, name, price, category, sort, outlet_id, active, updated_at, modifier_groups as "modifierGroups"
-         from menu_item order by category, sort, name`)).rows,
+         , image_version as image from menu_item order by category, sort, name`)).rows,
     );
+  }
+
+  /**
+   * Menyimpan foto menu (sudah dikecilkan dashboard). Hanya JPEG, PNG, dan WebP dengan tanda pengenal isi yang cocok (bukan SVG: bisa memuat
+   * skrip) dan maksimal `MENU_IMAGE_MAX_BYTES`. Versi = sidik jari isi, jadi mengunggah gambar yang sama tidak mengubah versi konfigurasi.
+   */
+  async setMenuImage(auth: ApiAuth, id: string, input: { contentType?: unknown; data?: unknown }): Promise<{ version: string }> {
+    need(typeof input.contentType === 'string' && IMAGE_TYPES.includes(input.contentType), 'jenis gambar harus image/jpeg, image/png, atau image/webp');
+    need(typeof input.data === 'string' && /^[A-Za-z0-9+/]+={0,2}$/.test(input.data) && input.data.length <= Math.ceil((MENU_IMAGE_MAX_BYTES * 4) / 3) + 4, `gambar harus base64 dan maksimal ${MENU_IMAGE_MAX_BYTES / 1024} KB`);
+    const bytes = Buffer.from(input.data as string, 'base64');
+    need(bytes.length > 0 && bytes.length <= MENU_IMAGE_MAX_BYTES, `gambar maksimal ${MENU_IMAGE_MAX_BYTES / 1024} KB`);
+    need(imageMagicOk(input.contentType as string, bytes), 'isi berkas tidak sesuai jenis gambar yang disebut');
+    const version = createHash('sha256').update(bytes).digest('hex').slice(0, 12);
+    await this.db.tenantTx(auth.tenantId, async (q) => {
+      const r = await q.query('update menu_item set image = $2, image_type = $3, image_version = $4, updated_at = now() where id = $1 and image_version is distinct from $4', [id, bytes, input.contentType, version]);
+      if (r.rowCount === 0 && (await q.query('select 1 from menu_item where id = $1', [id])).rowCount === 0) throw new NotFoundException('menu tidak ditemukan');
+      if (r.rowCount > 0) await this.audit(q, auth, 'menu.image', { id, bytes: bytes.length });
+    });
+    return { version };
+  }
+
+  async clearMenuImage(auth: ApiAuth, id: string): Promise<void> {
+    await this.db.tenantTx(auth.tenantId, async (q) => {
+      const r = await q.query('update menu_item set image = null, image_type = null, image_version = null, updated_at = now() where id = $1', [id]);
+      if (r.rowCount === 0) throw new NotFoundException('menu tidak ditemukan');
+      await this.audit(q, auth, 'menu.image.remove', { id });
+    });
+  }
+
+  /** Foto menu untuk dashboard (pengguna) dan terminal (hanya menu aktif yang berlaku di outletnya). */
+  async getMenuImage(tenantId: string, id: string, outletId?: string): Promise<{ contentType: string; version: string; data: string }> {
+    const row = await this.db.tenantTx(tenantId, async (q) =>
+      (await q.query<{ image: Buffer; image_type: string; image_version: string }>(
+        `select image, image_type, image_version from menu_item
+         where id = $1 and image is not null and ($2::text is null or (active and (outlet_id is null or outlet_id = $2)))`,
+        [id, outletId ?? null],
+      )).rows[0],
+    );
+    if (!row) throw new NotFoundException('foto menu tidak ada');
+    return { contentType: row.image_type, version: row.image_version, data: Buffer.from(row.image).toString('base64') };
   }
 
   private checkMenu(i: MenuInput, partial: boolean) {
@@ -386,12 +436,16 @@ export class ConfigService {
         )
       ).rows;
       const menu = isKds ? [] : (
-        await q.query<{ id: string; name: string; price: number; category: string; modifier_groups: ModifierGroup[] }>(
-          `select id, name, price, category, modifier_groups from menu_item
+        await q.query<{ id: string; name: string; price: number; category: string; modifier_groups: ModifierGroup[]; image_version: string | null }>(
+          `select id, name, price, category, modifier_groups, image_version from menu_item
            where active and (outlet_id is null or outlet_id = $1) order by category, sort, name`,
           [device.outletId],
         )
-      ).rows.map(({ modifier_groups, ...m }): DeviceConfig['menu'][number] => (modifier_groups.length > 0 ? { ...m, modifierGroups: modifier_groups } : m));
+      ).rows.map(({ modifier_groups, image_version, ...m }): DeviceConfig['menu'][number] => ({
+        ...m,
+        ...(modifier_groups.length > 0 ? { modifierGroups: modifier_groups } : {}),
+        ...(image_version ? { image: image_version } : {}),
+      }));
       const receiptBaseUrl = this.dashboardUrl ? `${this.dashboardUrl.replace(/\/$/, '')}/r/` : undefined;
       const body = {
         ...(receiptBaseUrl ? { receiptBaseUrl } : {}),

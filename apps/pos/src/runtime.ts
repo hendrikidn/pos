@@ -95,6 +95,8 @@ export interface Runtime {
    * `at` = kapan terakhir berhasil, agar UI bisa menandai data usang.
    */
   tableBoard(): { board: TableBoard; at: number } | null;
+  /** Foto menu sebagai data URL (sudah diunduh dan tersimpan di terminal); null bila menu tanpa foto atau belum terunduh. */
+  menuImage(id: string): string | null;
   /** Serah-terima order antar-terminal. Tidak tersedia di mode demo (perlu server). */
   handoffs(): { available: boolean; incoming: Handoff[] };
   /** Menyerahkan order ke terminal lain; event disinkronkan segera supaya terminal lain bisa melihatnya. */
@@ -215,6 +217,7 @@ export async function createRuntime(): Promise<Boot> {
       version = r.config.version;
       fetchedAt = Date.now();
       configError = null;
+      void syncImages();
     } else if (r.status === 'unchanged') {
       fetchedAt = Date.now();
       configError = null;
@@ -251,6 +254,41 @@ export async function createRuntime(): Promise<Boot> {
       notify();
     } catch {
       /* offline: denah memakai papan terakhir dan order lokal */
+    }
+  };
+
+  // Foto menu: versi di konfigurasi menentukan perlu-tidaknya mengunduh; hasilnya disimpan agar tampil juga saat offline.
+  const images = new Map<string, { v: string; url: string }>();
+  for (const key of await store.keys('img:')) {
+    const v = await store.get<{ v: string; url: string }>(key);
+    if (v) images.set(key.slice(4), v);
+  }
+  let syncingImages = false;
+  const syncImages = async () => {
+    if (demo || !settings.token || syncingImages) return;
+    syncingImages = true;
+    try {
+      const wanted = new Map(engine.config.menu.filter((m) => m.image).map((m) => [m.id, m.image!]));
+      const stale = [...images.keys()].filter((id) => !wanted.has(id));
+      if (stale.length > 0) {
+        await store.write({}, stale.map((id) => `img:${id}`));
+        for (const id of stale) images.delete(id);
+        notify();
+      }
+      for (const [id, version] of wanted) {
+        if (images.get(id)?.v === version) continue;
+        const res = await fetch(`${baseUrl}/v1/menu/${encodeURIComponent(id)}/image`, { headers: { authorization: `Bearer ${settings.token}` } });
+        if (!res.ok) continue;
+        const img = (await res.json()) as { contentType: string; version: string; data: string };
+        const entry = { v: img.version, url: `data:${img.contentType};base64,${img.data}` };
+        await store.write({ [`img:${id}`]: entry });
+        images.set(id, entry);
+        notify();
+      }
+    } catch {
+      /* offline: foto yang sudah tersimpan tetap dipakai; dicoba lagi pada pembaruan konfigurasi berikutnya */
+    } finally {
+      syncingImages = false;
     }
   };
 
@@ -312,6 +350,7 @@ export async function createRuntime(): Promise<Boot> {
   setInterval(() => void pollTables(), 10_000);
   setInterval(() => void pollHandoffs(), 8_000);
   void pollHandoffs();
+  void syncImages();
   void pollTables();
   setInterval(() => void reportPosture(), 10 * 60_000);
   void poll();
@@ -327,6 +366,7 @@ export async function createRuntime(): Promise<Boot> {
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,
     tableBoard: () => tableBoard,
+    menuImage: (id) => images.get(id)?.url ?? null,
     handoffs: () => ({ available: !demo && !!settings.token, incoming }),
     handOff: async (orderId) => {
       const r = await engine.handOff(orderId);

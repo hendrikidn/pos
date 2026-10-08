@@ -327,3 +327,11 @@ main { flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch
 .incoming-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
 .incoming-list > li { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .incoming-list ul { list-style: none; margin: 4px 0; padding: 0; font-size: 14px; }
+
+/* Kartu menu bergambar (aktif bila outlet punya foto) */
+.menu.menu-photos { grid-template-columns: repeat(auto-fill, minmax(138px, 1fr)); }
+.menu-photos .menu-item { padding: 0 0 10px; overflow: hidden; gap: 6px; min-height: 0; }
+.menu-photos .menu-item > span:not(.menu-photo), .menu-photos .menu-item > b { padding: 0 12px; }
+.menu-photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: var(--surface-2); }
+.menu-item .menu-photo-empty { display: grid; place-items: center; font-size: 34px; font-weight: 800; color: rgba(0, 0, 0, .45); padding: 0; -webkit-line-clamp: unset; }
+.menu-photos .menu-item .qty-badge { box-shadow: 0 0 0 2px var(--surface); }

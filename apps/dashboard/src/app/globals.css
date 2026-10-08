@@ -279,7 +279,7 @@ button, .btn {
 }
 button:hover:not(:disabled) { background: var(--primary-hover); }
 button:active:not(:disabled) { transform: scale(0.98); }
-button.secondary {
+button.secondary, label.btn-like {
   background: var(--surface); color: var(--text); border: 1.5px solid var(--line); font-weight: 600; padding: 0 14px; min-height: 44px; font-size: 15px;
 }
 button.secondary:hover:not(:disabled) { background: var(--surface-2); border-color: var(--muted); }
@@ -309,7 +309,7 @@ input.narrow { width: 130px; text-align: right; min-height: 44px; padding: 8px 1
 .table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .table tr.off td { color: var(--muted); }
 .table select { min-height: 44px; padding: 6px 10px; width: auto; }
-.row-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
+.row-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; min-width: 220px; }
 
 /* ---------- Masuk ---------- */
 .login { max-width: 440px; margin: 0 auto; padding: 8vh 16px 40px; }
@@ -469,3 +469,11 @@ ul.plain { margin: 0 0 8px; padding-left: 18px; }
 .rcpt-foot { margin-top: 18px; }
 .form-grid .check-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 22px; }
 .form-grid .check-label input { width: 22px; height: 22px; accent-color: var(--primary); }
+
+/* Foto menu */
+.thumb { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; display: block; background: var(--surface-2, #f3eee7); }
+.thumb-empty { display: grid; place-items: center; font-weight: 800; font-size: 20px; color: var(--muted); }
+.thumb-cell { width: 72px; }
+.btn-like { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); }
+label.btn-like:hover { background: var(--surface-2); border-color: var(--muted); }
+.btn-like.disabled { opacity: .5; pointer-events: none; }

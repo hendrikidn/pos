@@ -8,6 +8,8 @@ export interface MenuItem {
   category: string;
   /** Varian dan tambahan. Tidak ada = menu polos. */
   modifierGroups?: ModifierGroup[];
+  /** Versi foto menu (sidik jari dari server); ada hanya bila menu punya foto. Isi gambarnya diunduh terpisah dan disimpan di terminal. */
+  image?: string;
 }
 
 /** Staf beserta hash PIN (PBKDF2-HMAC-SHA256, 32 byte, hex). PIN polos tidak pernah ada di perangkat. */

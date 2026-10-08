@@ -6,6 +6,7 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['POST', 'PUT'], path: /^\/v1\/staff(\/[a-z0-9_-]+)?$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/menu(\/[a-z0-9_-]+)?$/ },
   { methods: ['PUT'], path: /^\/v1\/menu\/[a-z0-9_-]+\/recipe$/ },
+  { methods: ['PUT', 'DELETE'], path: /^\/v1\/menu\/[a-z0-9_-]+\/image$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/ingredients(\/[a-z0-9_-]+)?$/ },
   { methods: ['POST'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/stock\/movements$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/settings$/ },

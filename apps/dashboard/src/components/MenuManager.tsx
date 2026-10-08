@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { MenuRow } from '@/lib/api';
+import { resizeToJpeg } from '@/lib/image';
 import { manage } from '@/lib/manage';
 import { ModifierEditor } from './ModifierEditor';
 
@@ -30,10 +31,18 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
       <section className="panel">
         <h2>Menu</h2>
         <table className="table">
-          <thead><tr><th>Menu</th><th>Kategori</th><th className="num">Harga</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Foto</th><th>Menu</th><th>Kategori</th><th className="num">Harga</th><th>Status</th><th /></tr></thead>
           <tbody>
             {items.flatMap((m) => [
               <tr key={m.id} className={m.active ? '' : 'off'}>
+                <td data-label="Foto" className="thumb-cell">
+                  {m.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img className="thumb" src={`/api/menu-image/${m.id}?v=${m.image}`} alt={`Foto ${m.name}`} width={56} height={56} loading="lazy" />
+                  ) : (
+                    <span className="thumb thumb-empty" aria-hidden>{m.name.slice(0, 1).toUpperCase()}</span>
+                  )}
+                </td>
                 <td data-label="Menu">
                   {m.name}
                   <div className="muted small mono">{m.id}</div>
@@ -43,6 +52,25 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
                 <td data-label="Harga" className="num">{rp(m.price)}</td>
                 <td data-label="Status">{m.active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="row-actions">
+                  <label className={`secondary btn-like ${busy ? 'disabled' : ''}`}>
+                    {m.image ? 'Ganti foto' : 'Unggah foto'}
+                    <input
+                      type="file" accept="image/*" hidden disabled={busy}
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file) return;
+                        let img: Awaited<ReturnType<typeof resizeToJpeg>>;
+                        try {
+                          img = await resizeToJpeg(file);
+                        } catch (err) {
+                          return void setError(err instanceof Error ? err.message : 'Gambar tidak bisa diproses.');
+                        }
+                        void run(() => manage('PUT', `/v1/menu/${m.id}/image`, img));
+                      }}
+                    />
+                  </label>
+                  {m.image && <button className="secondary" disabled={busy} onClick={() => void run(() => manage('DELETE', `/v1/menu/${m.id}/image`))}>Hapus foto</button>}
                   <button className="secondary" disabled={busy} onClick={() => setEditing(editing === m.id ? null : m.id)}>
                     Varian{m.modifierGroups.length > 0 ? ` (${m.modifierGroups.length})` : ''}
                   </button>
@@ -65,7 +93,7 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
               ...(editing === m.id
                 ? [
                     <tr key={`${m.id}-mod`} className="mod-row">
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         <ModifierEditor
                           menuName={m.name}
                           groups={m.modifierGroups}
@@ -81,7 +109,7 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
                   ]
                 : []),
             ])}
-            {items.length === 0 && <tr><td colSpan={5} className="muted">Belum ada menu.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={6} className="muted">Belum ada menu.</td></tr>}
           </tbody>
         </table>
         <p className="muted small">Setiap perubahan harga dicatat di log audit beserta harga lama dan barunya. Perubahan varian sampai ke terminal pada pembaruan konfigurasi berikutnya; order yang sedang berjalan tidak berubah.</p>

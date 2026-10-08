@@ -160,6 +160,8 @@ export interface MenuRow {
   sort: number;
   outlet_id: string | null;
   active: boolean;
+  /** Versi foto (sidik jari); null = belum ada foto. */
+  image: string | null;
 }
 
 export interface OutletSettings {

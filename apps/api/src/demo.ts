@@ -1,3 +1,4 @@
+import { deflateSync } from 'node:zlib';
 import { DEMO_MENU } from '@pos/pos-core';
 import { Sim } from '@pos/sim';
 import { AdminService } from './admin.service';
@@ -30,6 +31,45 @@ const MIXES = [
  * Menjalankan API dengan data simulasi untuk mencoba dashboard tanpa hardware.
  * Waktu kejadian dihitung relatif terhadap sekarang, sehingga selalu berada dalam jendela evaluasi 72 jam.
  */
+/** PNG gradien berbentuk lingkaran (tanpa pustaka gambar): foto contoh untuk demo, agar kartu menu bergambar bisa dicoba. */
+function demoPhoto(a: [number, number, number], b: [number, number, number], size = 160): string {
+  const crc = (buf: Buffer) => {
+    let c = ~0;
+    for (const x of buf) {
+      c ^= x;
+      for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+  };
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const out = Buffer.alloc(8 + data.length + 4);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc(body), 8 + data.length);
+    return out;
+  };
+  const raw = Buffer.alloc(size * (size * 3 + 1));
+  for (let y = 0; y < size; y++) {
+    raw[y * (size * 3 + 1)] = 0;
+    for (let x = 0; x < size; x++) {
+      const t = (x + y) / (2 * size);
+      const d = Math.hypot(x - size / 2, y - size / 2) / (size / 2);
+      const inside = d < 0.62;
+      for (let c = 0; c < 3; c++) {
+        const base = a[c]! * (1 - t) + b[c]! * t;
+        raw[y * (size * 3 + 1) + 1 + x * 3 + c] = Math.round(inside ? Math.min(255, base * 0.8 + 70) : base);
+      }
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(size, 0);
+  ihdr.writeUInt32BE(size, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]).toString('base64');
+}
+
 async function main() {
   const db = new Database(await PgliteDriver.create());
   await db.migrate();
@@ -77,7 +117,12 @@ async function main() {
     ['rina', 'Rina (Manager)', 'MANAGER'], ['owner', 'Owner', 'OWNER'],
   ] as const;
   for (const [id, name, role] of people) await config.createStaff(seeder, { id, name, role, pin: demoPins[id] });
+  const photos: Record<string, [[number, number, number], [number, number, number]]> = {
+    'kopi-susu': [[120, 80, 50], [200, 150, 100]], americano: [[40, 30, 25], [110, 80, 60]],
+    matcha: [[90, 150, 70], [190, 220, 140]], croissant: [[200, 140, 50], [240, 200, 120]],
+  };
   for (const m of DEMO_MENU) await config.createMenu(seeder, { id: m.id, name: m.name, price: m.price, category: m.category, modifierGroups: m.modifierGroups });
+  for (const [id, [a, b]] of Object.entries(photos)) await config.setMenuImage(seeder, id, { contentType: 'image/png', data: demoPhoto(a, b) });
 
   const call = async (path: string, token: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') => {
     const r = await fetch(`http://127.0.0.1:${port}${path}`, {

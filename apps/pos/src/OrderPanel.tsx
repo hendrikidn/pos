@@ -8,6 +8,13 @@ import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run
 
 type Dialog = 'qr' | 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null | 'handoff';
 
+/** Warna latar lembut yang tetap untuk satu nama menu (inisial pada kartu tanpa foto). */
+const tint = (name: string): string => {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h} 45% 82%)`;
+};
+
 export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
   const { engine, config } = ctx.rt;
   const [dlg, setDlg] = useState<Dialog>(null);
@@ -26,6 +33,8 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
     (o) => o.id !== order.id && o.type === order.type && o.shiftId === order.shiftId && (o.state.status === 'DRAFT' || o.state.status === 'SENT') && o.items.length > 0,
   );
   const categories = [...new Set(config.menu.map((m) => m.category))];
+  // Outlet yang sudah punya foto memakai kartu bergambar; menu tanpa foto mendapat inisial berwarna agar kisi tetap rata.
+  const photoMode = config.menu.some((m) => m.image);
   const threshold = config.policy?.secondApprovalAbove ?? 50_000;
 
   async function startPay() {
@@ -67,15 +76,19 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
               <button key={c} className={`chip ${c === category ? 'on' : ''}`} onClick={() => setCategory(c)}>{c}</button>
             ))}
           </div>
-          <div className="menu">
+          <div className={`menu ${photoMode ? 'menu-photos' : ''}`}>
             {config.menu.filter((m) => m.category === category).map((m) => {
               const n = qtyOf(m.id);
+              const img = ctx.rt.menuImage(m.id);
               return (
                 <button
                   key={m.id}
                   className={`menu-item ${n > 0 ? 'has' : ''}`}
                   onClick={() => (m.modifierGroups?.length ? setChoosing(m) : void run(ctx, () => engine.addItem(order.id, m.id, 1)))}
                 >
+                  {photoMode && (img
+                    ? <img className="menu-photo" src={img} alt="" loading="lazy" draggable={false} />
+                    : <span className="menu-photo menu-photo-empty" style={{ background: tint(m.name) }} aria-hidden>{m.name.slice(0, 1).toUpperCase()}</span>)}
                   <span>{m.name}</span>
                   <b>{m.modifierGroups?.length ? `mulai ${rp(m.price)}` : rp(m.price)}</b>
                   {n > 0 && <i className="qty-badge" aria-label={`${n} di keranjang`}>{n}</i>}

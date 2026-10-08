@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { requireApi, requireDevice, type AuthedRequest } from './auth';
 import { CLOCK, type Clock } from './pipeline.service';
 import { ConfigService, type MenuInput, type OutletInput, type SettingsInput, type StaffInput } from './config.service';
@@ -57,6 +57,27 @@ export class ConfigController {
   async updateMenu(@Req() req: AuthedRequest, @Param('id') id: string, @Body() body: MenuInput) {
     await this.config.updateMenu(requireApi(req, ['OWNER', 'OPS']), id, body ?? {});
     return { ok: true };
+  }
+
+  @Put('menu/:id/image')
+  setMenuImage(@Req() req: AuthedRequest, @Param('id') id: string, @Body() body: { contentType?: unknown; data?: unknown }) {
+    return this.config.setMenuImage(requireApi(req, ['OWNER', 'OPS']), id, body ?? {});
+  }
+
+  @Delete('menu/:id/image')
+  async clearMenuImage(@Req() req: AuthedRequest, @Param('id') id: string) {
+    await this.config.clearMenuImage(requireApi(req, ['OWNER', 'OPS']), id);
+    return { ok: true };
+  }
+
+  /** Foto menu: terminal (menu aktif outletnya) dan pengguna dashboard. Sensor dan layar dapur tidak. */
+  @Get('menu/:id/image')
+  menuImage(@Req() req: AuthedRequest, @Param('id') id: string) {
+    if (req.auth?.kind === 'device') {
+      if (req.auth.deviceKind !== 'terminal') throw new ForbiddenException('jenis perangkat ini tidak memerlukan foto menu');
+      return this.config.getMenuImage(req.auth.tenantId, id, req.auth.outletId);
+    }
+    return this.config.getMenuImage(requireApi(req, ['OWNER', 'OPS', 'MANAGER']).tenantId, id);
   }
 
   // ----- manajemen outlet (OWNER) -----

@@ -84,6 +84,11 @@ export type EventBody =
       payload: { orderId: string; webOrderId: number };
     }
   | {
+      type: 'order.queue_linked';
+      /** Order ini dibuat untuk tamu yang didudukkan dari antrian (`ticketId` = nomor tiket di server). Server menilai nasibnya (R49). */
+      payload: { orderId: string; ticketId: number };
+    }
+  | {
       type: 'order.member_linked';
       /** Order ini dikaitkan ke member (poin diperoleh dari pembayarannya; penukaran poin merujuk member yang sama). */
       payload: { orderId: string; memberId: string };
@@ -181,7 +186,7 @@ export type EventBody =
 export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
-  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'order.channel_linked', 'order.web_linked', 'attendance.clocked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
+  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'order.channel_linked', 'order.web_linked', 'order.queue_linked', 'attendance.clocked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
   'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.digital', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',
@@ -363,6 +368,7 @@ export function orderIdOf(e: PosEvent): string | undefined {
     case 'order.member_linked':
     case 'order.channel_linked':
     case 'order.web_linked':
+    case 'order.queue_linked':
     case 'bill.hold_reason':
     case 'kitchen.status_changed':
     case 'bill.printed':

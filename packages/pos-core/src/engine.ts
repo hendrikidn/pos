@@ -399,6 +399,26 @@ export class PosEngine {
   }
 
   /**
+   * Membuat order dine-in untuk tamu yang baru didudukkan dari antrian (server sudah mencatat tiket SEATED dan mejanya): order di meja itu
+   * ditautkan ke tiket lewat event `order.queue_linked`. Tamu yang didudukkan tanpa order yang sah menjadi temuan di server (R49).
+   */
+  async createQueueOrder(q: { ticketId: number; label: string; tableNo: string }): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    if (!this.shift) return fail('NO_SHIFT', 'Buka shift terlebih dahulu.');
+    if (!Number.isInteger(q.ticketId) || q.ticketId < 1) return fail('QUEUE_INVALID', 'Tiket antrian tidak valid.');
+    const dup = this.listOrders().find((o) => o.queue?.id === q.ticketId && o.state.status !== 'VOIDED');
+    if (dup) return fail('QUEUE_DUPLICATE', `Tiket ${q.label} sudah punya order #${dup.number}.`);
+    const created = await this.createOrder('DINE_IN', { tableNo: q.tableNo });
+    if (!created.ok) return created;
+    const o = created.value;
+    await this.emit({ type: 'order.queue_linked', payload: { orderId: o.id, ticketId: q.ticketId } });
+    o.queue = { id: q.ticketId, label: q.label };
+    await this.save(o);
+    return ok(o);
+  }
+
+  /**
    * Memeriksa isi pesanan toko web terhadap menu terminal ini sebelum pesanan diterima: menu yang sudah tidak ada, opsi yang tidak
    * cocok, atau jumlah yang tidak sah. Mengembalikan pesan untuk kasir, atau null bila semuanya bisa dibuat.
    */

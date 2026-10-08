@@ -8,6 +8,7 @@ import { BillingService } from './billing.service';
 import { ChannelService } from './channel.service';
 import { HrService } from './hr.service';
 import { PurchaseService } from './purchase.service';
+import { QueueService } from './queue.service';
 import { ReservationService } from './reservation.service';
 import { WebShopService } from './web-shop.service';
 import { TransferService } from './transfer.service';
@@ -368,6 +369,13 @@ async function main() {
   await shop.setSettings(seeder, 'senopati', { enabled: true, slug: 'kopi-senopati' });
   await shop.publicOrder('kopi-senopati', { name: 'Maya', phone: '0812 9000 1234', type: 'TAKE_AWAY', items: [{ itemId: 'kopi-susu', qty: 2 }, { itemId: 'croissant', qty: 1 }], note: 'Diambil jam 8' }, 'demo-seed');
 
+  // Antrian meja: aktif di Senopati dengan tiga tamu menunggu (satu rombongan besar di depan).
+  const queue = app.get(QueueService);
+  await queue.setSettings(seeder, 'senopati', { enabled: true });
+  await queue.publicTake('kopi-senopati', { partySize: 6, name: 'Keluarga Santoso', phone: '0812 8000 0001' }, 'demo-q1');
+  await queue.publicTake('kopi-senopati', { partySize: 2, name: 'Dina', phone: '0812 8000 0002' }, 'demo-q2');
+  await queue.publicTake('kopi-senopati', { partySize: 3, phone: '0812 8000 0003' }, 'demo-q3');
+
   const open = await call('/v1/outlets/senopati/incidents', owner);
   const old = open.find((i: { order_ids: string[] }) => i.order_ids.includes('A-007'));
   if (old) await call(`/v1/incidents/${encodeURIComponent(old.id)}/review`, owner, { label: 'FALSE_ALARM', note: 'Customer salah pesan, dibuktikan CCTV. Void sah.' });
@@ -400,6 +408,7 @@ Sensor ESP32 (isi di firmware/sensor-node/app/secrets.h):
   DEVICE_TOKEN ${liveSensorToken}
   OUTLET_ID    senopati
   TERMINAL_ID  pos-1
+Antrian: http://localhost:3001/antri/kopi-senopati (layar TV: /antri/kopi-senopati/layar)
 Toko web pelanggan: http://localhost:3001/shop/kopi-senopati (pesanan masuk ke tombol "Pesanan web" di POS)
 Staf demo (PIN): ${Object.entries(demoPins).map(([k, v]) => `${k} ${v}`).join(' · ')}
 `);

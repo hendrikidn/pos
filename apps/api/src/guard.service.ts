@@ -7,6 +7,8 @@ import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { channelHits } from './channel.service';
 import { reservationHits } from './reservation-hits';
 import { webOrderFacts } from './web-order-store';
+import { queueFacts } from './queue-store';
+import { queueHits } from './queue';
 import { webOrderHits } from './web-order';
 import { transferHits } from './transfer-hits';
 import { Database } from './db/database';
@@ -133,6 +135,13 @@ export class GuardService {
           rule: h.rule, key: h.key, weight: DEFAULT_CONFIG.weights[h.rule] ?? 0, modalities: ['POS'], outletId, terminalId: h.terminalId, orderId: h.orderId, actorIds: h.actor ? [h.actor] : [],
           at: h.at, windowStart: h.at, windowEnd: h.at, context: false, confidence: 'HIGH', note: h.note,
         })),
+        ...await (async () => {
+          const qf = await queueFacts(q, outletId, from, events.filter((e) => e.type === 'order.queue_linked').map((e) => (e.payload as { ticketId: number }).ticketId));
+          return queueHits(qf.jumps, qf.seated, qf.knownIds, events, now, from).map((h): RuleHit => ({
+            rule: h.rule, key: h.key, weight: DEFAULT_CONFIG.weights[h.rule] ?? 0, modalities: ['POS'], outletId, terminalId: h.terminalId, orderId: h.orderId, actorIds: h.actor ? [h.actor] : [],
+            at: h.at, windowStart: h.at, windowEnd: h.at, context: false, confidence: 'HIGH', note: h.note,
+          }));
+        })(),
         // Temuan dari data di luar jendela event harus tetap berada di dalam jendela insiden (insiden lama di luar jendela tidak dibaca ulang saat disimpan).
         ...(await channelHits(q, outletId, events, outlet.utc_offset_minutes, from, now)).filter((h) => h.at >= from),
         ...evaluateRules({

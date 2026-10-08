@@ -76,6 +76,19 @@ export interface ConfigStatus {
   lastError: string | null;
 }
 
+/** Satu tiket antrian meja yang aktif (menunggu atau sedang dipanggil). */
+export interface QueueItem {
+  id: number;
+  label: string;
+  partySize: number;
+  name: string | null;
+  phone: string | null;
+  status: 'WAITING' | 'CALLED';
+  createdAt: number;
+  calledAt: number | null;
+  callCount: number;
+}
+
 /** Satu pesanan toko web yang menunggu kasir (dari server). `options` = id opsi; `optionNames` hanya untuk tampilan. */
 export interface WebPending {
   id: number;
@@ -123,6 +136,12 @@ export interface Runtime {
   tableBoard(): { board: TableBoard; at: number } | null;
   /** Reservasi hari ini dan sebentar lagi dari server (tanpa nomor telepon); null bila belum pernah berhasil diunduh atau mode demo. */
   reservations(): { items: ReservationItem[]; at: number } | null;
+  /** Antrian meja hari ini; null bila belum pernah berhasil diunduh atau mode demo. */
+  queue(): { enabled: boolean; tickets: QueueItem[]; at: number } | null;
+  /** Aksi antrian (butuh koneksi): hasilnya dari server; `seat` juga membuat order dine-in tertaut di meja itu. */
+  queueAct(action: 'add' | 'call' | 'recall' | 'seat' | 'no-show' | 'cancel', id: number | null, body?: Record<string, unknown>): Promise<Result<Record<string, unknown>>>;
+  /** Membuat order dine-in untuk tiket yang baru didudukkan di meja itu. */
+  seatQueueOrder(ticket: { id: number; label: string }, tableNo: string): Promise<Result<OrderRecord>>;
   /** Pesanan toko web yang menunggu kasir; null bila belum pernah berhasil diunduh atau mode demo. */
   webOrders(): { orders: WebPending[]; at: number } | null;
   /** Menerima pesanan web: periksa menu terminal, klaim di server (hanya satu terminal berhasil), lalu buat order kasir yang tertaut. */
@@ -322,6 +341,40 @@ export async function createRuntime(): Promise<Boot> {
     }
   };
 
+  // Antrian meja: papan dari server dan aksi kasir.
+  let queueBoard: { enabled: boolean; tickets: QueueItem[]; at: number } | null = null;
+  const pollQueue = async () => {
+    if (demo || !settings.token) return;
+    try {
+      const res = await fetch(`${baseUrl}/v1/queue/board`, { headers: { authorization: `Bearer ${settings.token}` } });
+      if (!res.ok) return;
+      const j = (await res.json()) as { enabled: boolean; tickets: QueueItem[] };
+      queueBoard = { enabled: j.enabled, tickets: j.tickets, at: Date.now() };
+      notify();
+    } catch {
+      /* offline: papan terakhir tetap dipakai */
+    }
+  };
+  const queueAct: Runtime['queueAct'] = async (action, id, body = {}) => {
+    if (demo || !settings.token) return { ok: false, code: 'NO_SERVER', message: 'Antrian memerlukan koneksi ke server.' };
+    try {
+      const path = action === 'add' ? '/v1/queue/tickets' : `/v1/queue/${id}/${action}`;
+      const res = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { authorization: `Bearer ${settings.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ ...body, staffId: engine.currentUser()?.id }) });
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown> & { message?: string | string[] };
+      void pollQueue();
+      if (!res.ok) return { ok: false, code: `QUEUE_${res.status}`, message: (Array.isArray(j.message) ? j.message.join('; ') : j.message) ?? `Server menjawab ${res.status}.` };
+      return { ok: true, value: j };
+    } catch {
+      return { ok: false, code: 'OFFLINE', message: 'Tidak terhubung ke server.' };
+    }
+  };
+  const seatQueueOrder: Runtime['seatQueueOrder'] = async (ticket, tableNo) => {
+    const r = await engine.createQueueOrder({ ticketId: ticket.id, label: ticket.label, tableNo });
+    if (r.ok) void syncNow();
+    notify();
+    return r;
+  };
+
   // Pesanan toko web: daftar yang menunggu, menerima (klaim lalu buat order), dan menolak.
   let webBoard: { orders: WebPending[]; at: number } | null = null;
   const pollWeb = async () => {
@@ -485,6 +538,8 @@ export async function createRuntime(): Promise<Boot> {
   void pollHandoffs();
   void syncImages();
   void pollTables();
+  setInterval(() => void pollQueue(), 8_000);
+  void pollQueue();
   setInterval(() => void pollWeb(), 10_000);
   void pollWeb();
   setInterval(() => void pollReservations(), 30_000);
@@ -503,6 +558,9 @@ export async function createRuntime(): Promise<Boot> {
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,
     tableBoard: () => tableBoard,
+    queue: () => queueBoard,
+    queueAct,
+    seatQueueOrder,
     webOrders: () => webBoard,
     acceptWebOrder,
     rejectWebOrder,

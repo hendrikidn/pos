@@ -28,6 +28,8 @@ export const RULE_LABELS: Record<string, string> = {
   R45: 'pesanan web diterima tetapi tidak jadi order kasir, atau tautannya tidak sah',
   R46: 'order kasir dari pesanan web di-void atau tidak dibayar',
   R47: 'order dari pesanan web dibayar jauh di bawah nilainya',
+  R48: 'antrian dipanggil melewati tiket yang lebih lama menunggu',
+  R49: 'tamu dari antrian didudukkan tanpa order kasir yang sah',
   R40: 'transfer stok antar-outlet belum diterima lebih dari 24 jam',
   R41: 'transfer stok diterima kurang dari yang dikirim',
   R37: 'pesanan online di POS tidak ada di laporan platform',

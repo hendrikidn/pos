@@ -5,6 +5,7 @@ import { CustomerDisplay, DISPLAY_CHANNEL, type DisplayView } from './CustomerDi
 import { Kds } from './Kds';
 import { Logo } from './Logo';
 import { OrderPanel } from './OrderPanel';
+import { QueueDialog } from './Queue';
 import { ReservationDialog } from './Reservations';
 import { WebOrdersDialog } from './WebOrders';
 import { TableMap } from './TableMap';
@@ -203,7 +204,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
 
 function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   const { engine } = ctx.rt;
-  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | 'online' | 'reservations' | 'web' | null>(null);
+  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | 'online' | 'reservations' | 'web' | 'queue' | null>(null);
   const [table, setTable] = useState('');
   const incoming = ctx.rt.handoffs().incoming;
   const shift = engine.currentShift();
@@ -227,6 +228,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   };
 
   if (!shift) return <OpenShift ctx={ctx} />;
+  const queueCount = ctx.rt.queue()?.tickets.length ?? 0;
   const webCount = ctx.rt.webOrders()?.orders.length ?? 0;
   const reservationsToday = ctx.rt.reservations()?.items.filter((r) => r.status === 'BOOKED').length ?? 0;
   return (
@@ -237,6 +239,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           <button className="secondary" onClick={() => setAsking(engine.config.tables?.length ? 'tables' : 'table')}>+ Dine-in</button>
           <button className="secondary" onClick={() => setAsking('employee')}>+ Karyawan</button>
           {(engine.config.channels?.length ?? 0) > 0 && <button className="secondary" onClick={() => setAsking('online')}>+ Online</button>}
+          {ctx.rt.queue()?.enabled && <button className="secondary" onClick={() => setAsking('queue')}>Antrian · {queueCount}</button>}
           {webCount > 0 && <button className="incoming" onClick={() => setAsking('web')}>Pesanan web · {webCount}</button>}
           {reservationsToday > 0 && <button className="secondary" onClick={() => setAsking('reservations')}>Reservasi · {reservationsToday}</button>}
           {incoming.length > 0 && <button className="incoming" onClick={() => setAsking('incoming')}>Order masuk · {incoming.length}</button>}
@@ -283,6 +286,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           }}
         />
       )}
+      {asking === 'queue' && <QueueDialog ctx={ctx} onClose={() => setAsking(null)} onSeated={(id) => { ctx.selectOrder(id); setAsking(null); }} />}
       {asking === 'web' && <WebOrdersDialog ctx={ctx} onClose={() => setAsking(null)} />}
       {asking === 'reservations' && (
         <ReservationDialog ctx={ctx} onClose={() => setAsking(null)} onSeated={(no) => (no ? void create('DINE_IN', { tableNo: no }) : setAsking('tables'))} />

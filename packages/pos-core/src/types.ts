@@ -127,6 +127,8 @@ export interface OrderRecord {
   /** Order dari platform pesan-antar: kanal dan nomor pesanan di platform. Dibayar platform; tanpa diskon. */
   channel?: { channel: OnlineChannel; ref: string };
   /** Order dibuat dari pesanan toko web: nomor pesanan, kode pendek untuk pelanggan, dan nama pemesan. Dibayar di kasir seperti biasa. */
+  /** Order dibuat untuk tamu yang didudukkan dari antrian: nomor tiket di server dan nomor yang dipanggil. */
+  queue?: { id: number; label: string };
   webOrder?: { id: number; code: string; name: string };
   /** Member yang dikaitkan ke order ini beserta saldo poin yang diketahui saat dicari (saldo resmi ada di server). */
   member?: { id: string; name: string; points: number };

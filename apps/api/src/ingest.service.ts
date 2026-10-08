@@ -97,6 +97,7 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     return badItems(p);
   },
   'attendance.clocked': (p) => (oneOf(p, 'kind', ['IN', 'OUT']) ? null : 'kind harus IN atau OUT'),
+  'order.queue_linked': (p) => (str(p, 'orderId') && Number.isInteger(p['ticketId']) && (p['ticketId'] as number) > 0 ? null : 'orderId/ticketId tidak valid'),
   'order.web_linked': (p) => (str(p, 'orderId') && Number.isInteger(p['webOrderId']) && (p['webOrderId'] as number) > 0 ? null : 'orderId/webOrderId tidak valid'),
   'order.channel_linked': (p) => (str(p, 'orderId') && oneOf(p, 'channel', ['GOFOOD', 'GRABFOOD', 'SHOPEEFOOD']) && typeof p['ref'] === 'string' && /^[A-Za-z0-9._-]{3,30}$/.test(p['ref']) ? null : 'orderId/channel/ref tidak valid'),
   'order.member_linked': (p) => (str(p, 'orderId') && str(p, 'memberId') && (p['memberId'] as string).length <= 40 ? null : 'orderId/memberId tidak valid'),

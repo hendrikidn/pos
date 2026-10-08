@@ -5,7 +5,7 @@ import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { CLOCK, type Clock } from './pipeline.service';
-import { buildStock, stockAt, varianceFlagged, type IngredientInfo, type Movement, type MovementKind, type StockRow } from './stock';
+import { buildStock, earliestBaseline, stockAt, varianceFlagged, type IngredientInfo, type Movement, type MovementKind, type StockRow } from './stock';
 
 const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const UNITS = ['g', 'ml', 'pcs'] as const;
@@ -172,8 +172,8 @@ export class StockService {
       await this.assertOutlet(q, outletId);
       const ingredients = (await this.listIngredientsTx(q)).filter((i) => i.active);
       const movements = await this.loadMovements(q, outletId);
-      const baselines = movements.filter((m) => m.kind === 'COUNT').map((m) => m.at);
-      const consumption = baselines.length ? await this.consumptionSince(q, outletId, Math.min(...baselines), now) : [];
+      const from = earliestBaseline(movements);
+      const consumption = from === null ? [] : await this.consumptionSince(q, outletId, from, now);
       return buildStock({ ingredients, movements, consumption, recipes: await this.loadRecipes(q), now });
     });
   }

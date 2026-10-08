@@ -90,8 +90,11 @@ export interface Runtime {
   posture(): Posture | null;
   config: PosConfig & { demoPins?: Record<string, string> };
   settings: Settings;
-  /** Alamat struk digital untuk QR: alamat dasar dari server (dashboard publik), atau alamat API terminal bila belum ada. */
-  receiptUrl(token: string): string;
+  /**
+   * Alamat struk digital untuk QR; null bila server belum memberi alamat dasarnya (`DASHBOARD_URL` belum diatur) atau terminal
+   * dalam mode demo. API sendiri tidak menyajikan halaman struk, jadi alamat tebakan hanya akan menghasilkan 404 bagi customer.
+   */
+  receiptUrl(token: string): string | null;
   configStatus(): ConfigStatus;
   refreshConfig(): Promise<void>;
   syncStatus(): SyncStatus;
@@ -257,7 +260,7 @@ export async function createRuntime(): Promise<Boot> {
 
   const runtime: Runtime = {
     engine, printer, sim, escpos, config: engine.config, settings,
-    receiptUrl: (token) => `${engine.config.receiptBaseUrl ?? `${baseUrl}/r/`}${token}`,
+    receiptUrl: (token) => (engine.config.receiptBaseUrl ? `${engine.config.receiptBaseUrl}${token}` : null),
     printerState: () => (sim ? (sim.paper ? 'ok' : 'paperOut') : printerState),
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,

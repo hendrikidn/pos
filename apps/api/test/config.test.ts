@@ -150,6 +150,15 @@ describe('konfigurasi terminal: staf, menu, pengaturan', () => {
       expect((await h.http('GET', '/v1/menu', ops)).body.find((m: { id: string }) => m.id === 'matcha').modifierGroups).toEqual([]);
     });
 
+    it('id opsi harus unik di seluruh menu: "sedang" di grup ukuran dan grup level pedas ditolak', async () => {
+      const g = (id: string, optId: string) => ({ id, name: id, min: 1, max: 1, options: [{ id: optId, name: optId, price: 0 }, { id: `${optId}-2`, name: 'x', price: 0 }] });
+      const r = await post('/v1/menu', owner, { ...base, id: 'dup', modifierGroups: [g('ukuran', 'sedang'), g('pedas', 'sedang')] });
+      expect(r.status).toBe(400);
+      expect(r.body.message).toMatch(/id opsi ganda pada menu ini/);
+      expect((await post('/v1/menu', owner, { ...base, id: 'dup', modifierGroups: [g('ukuran', 'sedang'), g('pedas', 'pedas-sedang')] })).status).toBe(201);
+      await put('/v1/menu/dup', owner, { active: false });
+    });
+
     it('menolak definisi yang cacat dengan pesan yang menjelaskan', async () => {
       const cases: [string, unknown, RegExp][] = [
         ['bukan daftar', 'x', /daftar/],

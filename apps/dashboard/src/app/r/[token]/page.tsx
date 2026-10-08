@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { API_URL } from '@/lib/api';
 import { wibDateTime } from '@/lib/format';
 
@@ -33,7 +34,9 @@ export default async function ReceiptPage({ params }: { params: Promise<{ token:
   let data = null as { merchantName: string; receipt: Receipt } | null;
   let busy = false;
   try {
-    const res = await fetch(`${API_URL}/v1/receipts/${encodeURIComponent(token)}`, { cache: 'no-store' });
+    // Alamat customer dari nginx diteruskan ke API: pembatas laju struk bekerja per alamat, bukan per server dashboard (yang sama untuk semua).
+    const xff = (await headers()).get('x-forwarded-for');
+    const res = await fetch(`${API_URL}/v1/receipts/${encodeURIComponent(token)}`, { cache: 'no-store', headers: xff ? { 'x-forwarded-for': xff } : {} });
     if (res.ok) data = (await res.json()) as { merchantName: string; receipt: Receipt };
     else busy = res.status === 429;
   } catch {

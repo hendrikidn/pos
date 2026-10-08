@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { verifyChain, type PosEvent } from '@pos/events';
+import { MAX_EVENT_LINES, MAX_LINE_QTY } from '@pos/events';
 import { DEFAULT_POLICY, verifyCashCount } from '@pos/order';
 import { demoConfig, MemoryStore, PosEngine, Recorder, SimPrinter } from '../src';
 
@@ -824,15 +825,26 @@ describe('status dapur dari layar dapur', () => {
     expect((await c.engine.voidOrder(a, 'WRONG_ORDER', [{ userId: 'owner', pin: c.pins.owner }])).ok).toBe(true);
   });
 
-  it('idempoten, mengabaikan order yang tidak dikenal atau sudah di-void, dan status server menimpa status lokal', async () => {
+  it('idempoten, mengabaikan order tidak dikenal atau yang sudah di-void, dan HANYA memajukan status (papan yang tertinggal tidak menurunkan)', async () => {
     const a = await sentOrder();
     must(await c.engine.setKitchenStatus(a, 'READY'));
     expect(await c.engine.applyKitchenStatuses({ [a]: 'READY', tidak_ada: 'SERVED' })).toBe(0);
-    expect(await c.engine.applyKitchenStatuses({ [a]: 'COOKING' })).toBe(1); // item susulan membuat dapur memasak lagi
-    expect(c.engine.getOrder(a)!).toMatchObject({ kitchen: 'COOKING', state: { kitchen: 'COOKING' } });
+    // papan server belum menerima event READY dari terminal ini dan masih menunjukkan COOKING: tidak boleh menurunkan
     expect(await c.engine.applyKitchenStatuses({ [a]: 'COOKING' })).toBe(0);
-    must(await c.engine.voidOrder(a, 'WRONG_ORDER', [{ userId: 'hendra', pin: c.pins.hendra }]));
+    expect(c.engine.getOrder(a)!).toMatchObject({ kitchen: 'READY', state: { kitchen: 'READY' } });
+    expect(await c.engine.applyKitchenStatuses({ [a]: 'SERVED' })).toBe(1); // maju: diterapkan
     expect(await c.engine.applyKitchenStatuses({ [a]: 'SERVED' })).toBe(0);
+    expect(await c.engine.applyKitchenStatuses({ [a]: 'COOKING' })).toBe(0);
+    expect(c.engine.getOrder(a)!.kitchen).toBe('SERVED');
+    must(await c.engine.voidOrder(a, 'WRONG_ORDER', [{ userId: 'owner', pin: c.pins.owner }]));
+    expect(await c.engine.applyKitchenStatuses({ [a]: 'SERVED' })).toBe(0);
+  });
+
+  it('kunci void tidak longgar karena papan tertinggal: terminal sudah menandai SERVED, papan masih COOKING → void tetap wajib owner', async () => {
+    const a = await sentOrder();
+    must(await c.engine.setKitchenStatus(a, 'SERVED'));
+    await c.engine.applyKitchenStatuses({ [a]: 'COOKING' });
+    expect(await c.engine.voidOrder(a, 'WRONG_ORDER', [{ userId: 'hendra', pin: c.pins.hendra }])).toMatchObject({ ok: false, code: 'OWNER_REQUIRED' });
   });
 });
 
@@ -963,6 +975,76 @@ describe('kas laci: terminal dan server menghitung sama', () => {
     expect(c.engine.currentShift()).toMatchObject({ cashIn: 24_200, cashOut: 0 });
     const stored = await c.store.get<{ cashIn: number }>('shift');
     expect(stored?.cashIn).toBe(24_200);
+  });
+});
+
+describe('batas isi order (sama dengan yang ditegakkan server)', () => {
+  let c: Ctx;
+  beforeEach(async () => {
+    c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+    // menu besar agar bisa membuat banyak baris berbeda: setiap baris berbeda lewat catatan
+  });
+  const order = async () => must(await c.engine.createOrder('TAKE_AWAY')).id;
+
+  it('jumlah per baris maksimal 999: addItem dan setQty menolak, tidak ada yang berubah', async () => {
+    const id = await order();
+    must(await c.engine.addItem(id, 'kopi-susu', 990));
+    expect(await c.engine.addItem(id, 'kopi-susu', 10)).toMatchObject({ code: 'QTY_TOO_LARGE' });
+    expect(await c.engine.setQty(id, 'kopi-susu', 1000)).toMatchObject({ code: 'QTY_TOO_LARGE' });
+    expect(c.engine.getOrder(id)!.items[0]!.qty).toBe(990);
+    must(await c.engine.setQty(id, 'kopi-susu', MAX_LINE_QTY));
+  });
+
+  it('maksimal 100 baris berbeda; baris yang sama tetap bisa ditambah', async () => {
+    const id = await order();
+    for (let i = 0; i < MAX_EVENT_LINES; i++) must(await c.engine.addItem(id, 'kopi-susu', 1, { note: `catatan ${i}` }));
+    expect(await c.engine.addItem(id, 'kopi-susu', 1, { note: 'catatan baru' })).toMatchObject({ code: 'TOO_MANY_LINES' });
+    expect(c.engine.getOrder(id)!.items).toHaveLength(MAX_EVENT_LINES);
+    must(await c.engine.addItem(id, 'kopi-susu', 1, { note: 'catatan 5' })); // baris yang sudah ada
+  });
+
+  it('event yang dihasilkan pada batas (100 baris, qty 999) tetap diterima ingest server', async () => {
+    const { parseEvent } = await import('../../../apps/api/src/ingest.service');
+    const id = await order();
+    for (let i = 0; i < MAX_EVENT_LINES - 1; i++) must(await c.engine.addItem(id, 'kopi-susu', 1, { note: `n${i}` }));
+    must(await c.engine.addItem(id, 'latte', MAX_LINE_QTY));
+    must(await c.engine.sendToKitchen(id));
+    must(await c.engine.printBill(id));
+    for (const e of await c.events()) expect(typeof parseEvent(e), `${e.type}`).not.toBe('string');
+  });
+
+  it('gabung yang hasilnya melebihi batas ditolak seluruhnya (tidak ada yang berpindah, tidak ada event)', async () => {
+    const a = await order();
+    const b = await order();
+    must(await c.engine.addItem(a, 'kopi-susu', 600));
+    must(await c.engine.addItem(b, 'kopi-susu', 600));
+    const before = (await c.events()).length;
+    expect(await c.engine.mergeOrders(a, b)).toMatchObject({ ok: false, code: 'QTY_TOO_LARGE' });
+    expect(c.engine.getOrder(b)!.items).toHaveLength(1);
+    expect(c.engine.getOrder(b)!.state.status).toBe('DRAFT');
+    expect((await c.events()).length).toBe(before);
+    // baris: 60 + 60 baris berbeda → 120 > 100
+    const x = await order(); const y = await order();
+    for (let i = 0; i < 60; i++) { must(await c.engine.addItem(x, 'kopi-susu', 1, { note: `x${i}` })); must(await c.engine.addItem(y, 'latte', 1, { note: `y${i}` })); }
+    expect(await c.engine.mergeOrders(x, y)).toMatchObject({ ok: false, code: 'TOO_MANY_LINES' });
+  });
+});
+
+describe('struk digital: panggilan bersamaan', () => {
+  it('banyak panggilan serentak untuk order yang sama menghasilkan satu token dan satu event', async () => {
+    const c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+    const id = must(await c.engine.createOrder('TAKE_AWAY')).id;
+    must(await c.engine.addItem(id, 'kopi-susu', 1));
+    must(await c.engine.printBill(id));
+    must(await c.engine.pay(id, { method: 'CASH' }));
+    const results = await Promise.all(Array.from({ length: 8 }, () => c.engine.digitalReceipt(id)));
+    const tokens = new Set(results.map((r) => must(r).token));
+    expect(tokens.size).toBe(1);
+    expect((await c.types()).filter((t) => t === 'receipt.digital')).toHaveLength(1);
   });
 });
 

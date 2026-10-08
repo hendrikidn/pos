@@ -28,11 +28,11 @@ const toDraft = (g: ModifierGroup): Draft => ({ ...g, options: g.options.map((o)
 /** Mengubah draf menjadi bentuk API (id dibuat dari nama). Mengembalikan pesan kesalahan bila ada yang kurang. */
 export function buildGroups(drafts: Draft[]): ModifierGroup[] | string {
   const gIds = new Set<string>();
+  const oIds = new Set<string>(); // unik di seluruh menu, bukan per grup
   const out: ModifierGroup[] = [];
   for (const [gi, d] of drafts.entries()) {
     if (!d.name.trim()) return `Grup ${gi + 1}: nama wajib diisi.`;
     if (d.options.length === 0) return `Grup "${d.name}": tambahkan minimal satu opsi.`;
-    const oIds = new Set<string>();
     const options: ModifierGroup['options'] = [];
     for (const o of d.options) {
       if (!o.name.trim()) return `Grup "${d.name}": ada opsi tanpa nama.`;

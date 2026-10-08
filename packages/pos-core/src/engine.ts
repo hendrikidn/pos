@@ -1,4 +1,4 @@
-import type { KitchenStatus, LineItem, OrderType, PaymentMethod, PosEvent, PrinterState } from '@pos/events';
+import { MAX_EVENT_LINES, MAX_LINE_QTY, type KitchenStatus, type LineItem, type OrderType, type PaymentMethod, type PosEvent, type PrinterState } from '@pos/events';
 import { DEFAULT_POLICY, decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, isHoldReason, MAX_NOTE_LENGTH, reduceOrder, resolveSelection, type Ctx } from '@pos/order';
 import { Directory } from './directory';
 import type { Printer } from './printer';
@@ -50,17 +50,30 @@ const signature = (itemId: string, optionIds: string[], note: string | undefined
  * sebuah menu memakai itemId sebagai lineId (sama dengan order lama); berikutnya diberi nomor.
  */
 function placeLine(o: OrderRecord, l: CartLine): void {
+  placeLineIn(o.items, l);
+}
+
+/** Batas isi order yang sama dengan yang ditegakkan server pada event (jika dilanggar, sinkronisasi terminal macet): 100 baris, 999 per baris. */
+function fitsOrder(items: CartLine[], l: CartLine): { code: 'TOO_MANY_LINES' | 'QTY_TOO_LARGE'; message: string } | null {
   const sig = signature(l.itemId, (l.options ?? []).map((x) => x.optionId), l.note);
-  const same = o.items.find((x) => signature(x.itemId, (x.options ?? []).map((y) => y.optionId), x.note) === sig);
+  const same = items.find((x) => signature(x.itemId, (x.options ?? []).map((y) => y.optionId), x.note) === sig);
+  if (same ? same.qty + l.qty > MAX_LINE_QTY : l.qty > MAX_LINE_QTY) return { code: 'QTY_TOO_LARGE', message: `Jumlah per baris maksimal ${MAX_LINE_QTY}.` };
+  if (!same && items.length >= MAX_EVENT_LINES) return { code: 'TOO_MANY_LINES', message: `Satu order maksimal ${MAX_EVENT_LINES} baris berbeda. Bayar atau pisahkan order ini dulu.` };
+  return null;
+}
+
+function placeLineIn(items: CartLine[], l: CartLine): void {
+  const sig = signature(l.itemId, (l.options ?? []).map((x) => x.optionId), l.note);
+  const same = items.find((x) => signature(x.itemId, (x.options ?? []).map((y) => y.optionId), x.note) === sig);
   if (same) {
     same.qty += l.qty;
     same.sentQty += l.sentQty;
     return;
   }
-  const taken = new Set(o.items.map(lineKey));
+  const taken = new Set(items.map(lineKey));
   let lineId = l.itemId;
   for (let n = 2; taken.has(lineId); n++) lineId = `${l.itemId}#${n}`;
-  o.items.push({ ...l, lineId });
+  items.push({ ...l, lineId });
 }
 
 const KITCHEN_RANK: Record<KitchenStatus, number> = { COOKING: 1, READY: 2, SERVED: 3 };
@@ -226,6 +239,7 @@ export class PosEngine {
 
     // Shift baru melacak kas sendiri (sama dengan hitungan ulang server); shift lama (sebelum pelacakan) dihitung dari order-nya.
     let { cashIn, cashOut } = this.shift;
+    const tracked = cashIn !== undefined && cashOut !== undefined;
     if (cashIn === undefined || cashOut === undefined) {
       const mine = this.listOrders().filter((o) => o.shiftId === this.shift!.id);
       cashIn = mine.flatMap((o) => o.payments).filter((p) => p.method === 'CASH').reduce((s, p) => s + p.amount, 0);
@@ -233,7 +247,7 @@ export class PosEngine {
     }
     const expected = this.shift.openingCash + cashIn - cashOut;
 
-    await this.emit({ type: 'cash.counted', payload: { shiftId: this.shift.id, counted, expected } });
+    await this.emit({ type: 'cash.counted', payload: { shiftId: this.shift.id, counted, expected, ...(tracked ? { tracked: true } : {}) } });
     await this.emit({ type: 'shift.closed', payload: { shiftId: this.shift.id } });
     this.shift = null;
     await this.d.store.write({}, ['shift']);
@@ -340,6 +354,8 @@ export class PosEngine {
     const fresh: CartLine = { itemId, name: item.name, qty, unitPrice: item.price + sel.extra, sentQty: 0 };
     if (sel.options.length > 0) fresh.options = sel.options;
     if (note) fresh.note = note;
+    const over = fitsOrder(o.items, fresh);
+    if (over) return fail(over.code, over.message);
     placeLine(o, fresh);
     await this.save(o);
     return ok(o);
@@ -354,6 +370,7 @@ export class PosEngine {
     const line = o.items.find((l) => lineKey(l) === lineId);
     if (!line) return fail('ITEM_NOT_FOUND', 'Item tidak ada di order.');
     if (!Number.isInteger(qty) || qty < 0) return fail('QTY_INVALID', 'Jumlah tidak valid.');
+    if (qty > MAX_LINE_QTY) return fail('QTY_TOO_LARGE', `Jumlah per baris maksimal ${MAX_LINE_QTY}.`);
     if (qty < line.sentQty) return fail('ITEM_SENT', 'Item sudah dikirim ke dapur. Gunakan void dengan persetujuan.');
     if (qty === 0) o.items = o.items.filter((l) => l !== line);
     else line.qty = qty;
@@ -491,6 +508,13 @@ export class PosEngine {
     }
     if (from.items.length === 0) return fail('EMPTY_ORDER', `Order #${from.number} masih kosong.`);
 
+    // Hasil gabungan harus muat dalam batas event; diperiksa pada salinan sebelum ada yang diubah.
+    const trial = into.items.map((l) => ({ ...l }));
+    for (const l of from.items) {
+      const over = fitsOrder(trial, l);
+      if (over) return fail(over.code, `Tidak bisa digabung: ${over.message}`);
+      placeLineIn(trial, { ...l });
+    }
     const moved = from.items.map((l) => eventLine(l, l.qty, l.sentQty));
     const sent = from.items.some((l) => l.sentQty > 0);
     const kitchen = furthest(into.kitchen, from.kitchen);
@@ -666,7 +690,19 @@ export class PosEngine {
    * Struk digital (QR) untuk order lunas. Idempoten: satu order satu token dan satu event; memanggilnya lagi hanya mengembalikan
    * token yang sama. Struk digital dihitung sebagai struk yang diberikan (kecuali sudah dicetak), dan tidak memerlukan nomor HP.
    */
-  async digitalReceipt(orderId: string): Promise<Result<{ token: string; order: OrderRecord }>> {
+  digitalReceipt(orderId: string): Promise<Result<{ token: string; order: OrderRecord }>> {
+    // Panggilan bersamaan (mis. render ulang saat event masih ditulis) berbagi satu pekerjaan: tanpa ini keduanya melihat "belum ada
+    // token" dan mencatat dua event dengan token berbeda.
+    const running = this.receiptJobs.get(orderId);
+    if (running) return running;
+    const job = this.makeDigitalReceipt(orderId).finally(() => this.receiptJobs.delete(orderId));
+    this.receiptJobs.set(orderId, job);
+    return job;
+  }
+
+  private readonly receiptJobs = new Map<string, Promise<Result<{ token: string; order: OrderRecord }>>>();
+
+  private async makeDigitalReceipt(orderId: string): Promise<Result<{ token: string; order: OrderRecord }>> {
     const r = this.order(orderId);
     if (!r.ok) return r;
     const o = r.value;
@@ -745,13 +781,16 @@ export class PosEngine {
 
   /**
    * Menerapkan status dapur yang diketahui server (dari layar dapur). Terminal hanya tahu status yang ia ubah sendiri; tanpa ini,
-   * kunci void ("sudah disajikan → owner") tidak berlaku bila status SERVED dicatat dari layar dapur. Server dianggap benar.
+   * kunci void ("sudah disajikan → owner") tidak berlaku bila status SERVED dicatat dari layar dapur. Status hanya dimajukan.
    */
   async applyKitchenStatuses(statuses: Record<string, KitchenStatus>): Promise<number> {
     let changed = 0;
     for (const [id, st] of Object.entries(statuses)) {
       const o = this.orders.get(id);
       if (!o || o.state.status === 'VOIDED' || o.state.status === 'MERGED' || o.kitchen === st) continue;
+      // Hanya maju: event status dari terminal ini mungkin belum sampai ke server, dan papan yang tertinggal tidak boleh membatalkan
+      // "sudah disajikan" (kunci void: owner). Item susulan yang membuka tiket lagi justru membuat kunci lebih ketat, bukan lebih longgar.
+      if (o.kitchen && KITCHEN_RANK[o.kitchen] >= KITCHEN_RANK[st]) continue;
       o.kitchen = st;
       o.state = { ...o.state, kitchen: st };
       await this.save(o);

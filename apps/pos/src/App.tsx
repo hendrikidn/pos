@@ -62,8 +62,9 @@ function Pos() {
     const send = () => {
       const v = rt.engine.customerView(selected);
       const token = selected ? rt.engine.getOrder(selected)?.receiptToken : undefined;
+      const receiptUrl = token ? rt.receiptUrl(token) : null;
       const view = v
-        ? ({ ...v, paperClaim: rt.engine.paperClaimActive(), ...(token && v.status === 'PAID' ? { receiptUrl: rt.receiptUrl(token) } : {}) } satisfies DisplayView)
+        ? ({ ...v, paperClaim: rt.engine.paperClaimActive(), ...(receiptUrl && v.status === 'PAID' ? { receiptUrl } : {}) } satisfies DisplayView)
         : null;
       channel.current?.postMessage(view);
       if (isNative) void hardware.displayShow({ view: JSON.stringify(view) }).catch(() => undefined);
@@ -77,8 +78,9 @@ function Pos() {
   useEffect(() => {
     if (!rt || !selected) return;
     const o = rt.engine.getOrder(selected);
-    if (o && o.state.status === 'PAID' && o.receipt === 'NONE' && (rt.engine.paperClaimActive() || rt.printerState() === 'paperOut')) {
-      void rt.engine.digitalReceipt(o.id).then(bump);
+    // Hanya bila alamat struk tersedia dari server; tanpa itu QR tidak akan terbuka di ponsel customer.
+    if (rt.receiptUrl('x') !== null && o && o.state.status === 'PAID' && o.receipt === 'NONE' && (rt.engine.paperClaimActive() || rt.printerState() === 'paperOut')) {
+      void rt.engine.digitalReceipt(o.id).then(bump, () => undefined);
     }
   });
 

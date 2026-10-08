@@ -47,6 +47,44 @@ describe('pemakaian bahan per order', () => {
     expect(summary(r)).toEqual(['m@1:1xkopi', 'y@5:3xkopi']);
   });
 
+  it('pisah bill lalu order ASAL di-void: kopi yang sudah pindah dihitung di tagihan tujuan saja (tidak dua kali)', () => {
+    const r = new Rec();
+    r.created(0, 'a'); r.sent(1, 'a', [kopi(2)]);
+    r.created(2, 'b');
+    r.at(3, { type: 'order.items_moved', payload: { fromOrderId: 'a', toOrderId: 'b', kind: 'SPLIT', items: [kopi(1, { sentQty: 1 })], sent: true } });
+    r.bill(5, 'b', [kopi(1)]);
+    r.void(8, 'a');
+    expect(summary(r)).toEqual(['a@1:1xkopi', 'b@5:1xkopi']); // total 2, bukan 3
+  });
+
+  it('pisah bill lalu order TUJUAN di-void: item terkirim yang ia terima tetap dihitung (sudah dibuat di dapur)', () => {
+    const r = new Rec();
+    r.created(0, 'a'); r.sent(1, 'a', [kopi(2)]);
+    r.created(2, 'b');
+    r.at(3, { type: 'order.items_moved', payload: { fromOrderId: 'a', toOrderId: 'b', kind: 'SPLIT', items: [kopi(1, { sentQty: 1 })], sent: true } });
+    r.void(6, 'b');
+    r.bill(7, 'a', [kopi(1)]);
+    expect(summary(r)).toEqual(['b@1:1xkopi', 'a@7:1xkopi']); // b mewarisi waktu masak dari a (menit 1)
+  });
+
+  it('item yang dipindah belum terkirim (sentQty 0) tidak mengubah buku terkirim', () => {
+    const r = new Rec();
+    r.created(0, 'a'); r.sent(1, 'a', [kopi(1)]);
+    r.created(2, 'b');
+    r.at(3, { type: 'order.items_moved', payload: { fromOrderId: 'a', toOrderId: 'b', kind: 'SPLIT', items: [kopi(1, { sentQty: 0 })], sent: false } });
+    r.void(6, 'a');
+    expect(summary(r)).toEqual(['a@1:1xkopi']);
+  });
+
+  it('gabung lalu order TUJUAN di-void: item terkirim dari order yang digabung ikut terhitung', () => {
+    const r = new Rec();
+    r.created(0, 'x'); r.sent(1, 'x', [kopi(2)]);
+    r.created(0, 'y'); r.sent(2, 'y', [kopi(1)]);
+    r.at(4, { type: 'order.items_moved', payload: { fromOrderId: 'x', toOrderId: 'y', kind: 'MERGE', items: [kopi(2, { sentQty: 2 })], sent: true } });
+    r.void(6, 'y');
+    expect(summary(r)).toEqual(['y@2:3xkopi']);
+  });
+
   it('event terminal lama tanpa rincian item tidak menghasilkan pemakaian', () => {
     const r = new Rec();
     r.created(0, 'a'); r.sent(1, 'a'); r.bill(2, 'a');

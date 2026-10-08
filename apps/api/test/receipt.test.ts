@@ -122,3 +122,22 @@ describe('struk digital', () => {
     expect(await engine.digitalReceipt(o.id)).toMatchObject({ ok: false, code: 'RECEIPT_DONE' });
   });
 });
+
+describe('struk digital: pembatas laju per alamat klien', () => {
+  let h: Harness;
+  beforeAll(async () => { h = await createHarness(WIB('12:00:00'), { trustProxy: 1 }); });
+  afterAll(() => h.close());
+  const getFrom = async (ip: string) => {
+    const res = await fetch(`http://127.0.0.1:${(h.app.getHttpServer().address() as { port: number }).port}/v1/receipts/${'C'.repeat(22)}`, { headers: { 'x-forwarded-for': ip } });
+    return res.status;
+  };
+
+  it('satu alamat yang melewati batas tidak menghalangi alamat lain (diteruskan lewat X-Forwarded-For, seperti dari dashboard)', async () => {
+    let last = 0;
+    for (let i = 0; i < 61; i++) last = await getFrom('203.0.113.7');
+    expect(last).toBe(429);
+    expect(await getFrom('203.0.113.7')).toBe(429);
+    expect(await getFrom('198.51.100.20')).toBe(404); // alamat lain: ember sendiri
+  });
+});
+

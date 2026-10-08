@@ -28,7 +28,17 @@ const sumLines = (lists: LineItem[][]): LineItem[] => {
  * Event terminal lama tanpa rincian item tidak menghasilkan pemakaian.
  */
 export function consumptionByOrder(events: PosEvent[]): OrderConsumption[] {
-  const sent = new Map<string, { at: number; items: LineItem[][] }>();
+  // Buku besar item yang SUDAH terkirim ke dapur per order: kiriman ditambahkan, yang dipindah ke order lain (pisah bill) dikurangi di
+  // asal dan ditambahkan di tujuan, yang digabung berpindah seluruhnya. Dipakai untuk order yang di-void atau belum ditagih.
+  const sent = new Map<string, { at: number; lists: LineItem[][] }>();
+  // `at` hanya naik: kapan item terkirim terakhir dimasak. Pemindahan tidak mengubah waktu masak; yang menerima mewarisi waktu asalnya.
+  const ledger = (id: string, at?: number) => {
+    const l = sent.get(id) ?? { at: at ?? 0, lists: [] };
+    if (at !== undefined) l.at = Math.max(l.at, at);
+    sent.set(id, l);
+    return l;
+  };
+  const net = (id: string) => sumLines(sent.get(id)?.lists ?? []).filter((l) => l.qty > 0);
   const bill = new Map<string, { at: number; items: LineItem[] }>();
   const voided = new Set<string>();
   const merged = new Set<string>();
@@ -36,19 +46,31 @@ export function consumptionByOrder(events: PosEvent[]): OrderConsumption[] {
   for (const e of sorted) {
     const t = correctedTime(e);
     switch (e.type) {
-      case 'order.sent_to_kitchen': {
-        if (!e.payload.items) break;
-        const s = sent.get(e.payload.orderId) ?? { at: t, items: [] };
-        s.at = t;
-        s.items.push(e.payload.items);
-        sent.set(e.payload.orderId, s);
+      case 'order.sent_to_kitchen':
+        if (e.payload.items) ledger(e.payload.orderId, t).lists.push(e.payload.items);
         break;
-      }
       case 'bill.printed':
         if (e.payload.items) bill.set(e.payload.orderId, { at: t, items: e.payload.items });
         break;
       case 'void.approved': voided.add(e.payload.orderId); break;
-      case 'order.items_moved': if (e.payload.kind === 'MERGE') merged.add(e.payload.fromOrderId); break;
+      case 'order.items_moved': {
+        const p = e.payload;
+        if (p.kind === 'MERGE') {
+          const items = net(p.fromOrderId);
+          if (items.length > 0) {
+            ledger(p.toOrderId, sent.get(p.fromOrderId)?.at ?? t).lists.push(items);
+            ledger(p.fromOrderId).lists.push(items.map((l) => ({ ...l, qty: -l.qty })));
+          }
+          merged.add(p.fromOrderId);
+        } else {
+          const out = p.items.filter((l) => (l.sentQty ?? 0) > 0).map((l) => ({ ...l, qty: l.sentQty! }));
+          if (out.length > 0) {
+            ledger(p.toOrderId, sent.get(p.fromOrderId)?.at ?? t).lists.push(out);
+            ledger(p.fromOrderId).lists.push(out.map((l) => ({ ...l, qty: -l.qty })));
+          }
+        }
+        break;
+      }
       default: break;
     }
   }
@@ -56,12 +78,12 @@ export function consumptionByOrder(events: PosEvent[]): OrderConsumption[] {
   const ids = new Set([...sent.keys(), ...bill.keys()]);
   for (const id of ids) {
     if (merged.has(id)) continue;
-    const s = sent.get(id);
     const b = bill.get(id);
+    const items = net(id);
     if (voided.has(id)) {
-      if (s) out.push({ orderId: id, at: s.at, items: sumLines(s.items) });
+      if (items.length > 0) out.push({ orderId: id, at: sent.get(id)!.at, items });
     } else if (b) out.push({ orderId: id, at: b.at, items: b.items });
-    else if (s) out.push({ orderId: id, at: s.at, items: sumLines(s.items) });
+    else if (items.length > 0) out.push({ orderId: id, at: sent.get(id)!.at, items });
   }
   return out.sort((a, b) => a.at - b.at || a.orderId.localeCompare(b.orderId));
 }

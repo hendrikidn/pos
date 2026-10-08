@@ -76,11 +76,12 @@ export function evaluatePatternRules(input: PatternInput): RuleHit[] {
 }
 
 /**
- * R30: `expected` yang dilaporkan terminal berbeda dari hitungan ulang server. Terminal yang jujur selalu cocok (aturan hitungnya
- * sama), jadi perbedaan berarti klien dimodifikasi atau event diubah. Hit dilaporkan hanya untuk kejadian sejak `emitFrom`.
+ * R30: `expected` yang dilaporkan terminal berbeda dari hitungan ulang server. Terminal yang jujur dengan pelacakan kas (`tracked`) selalu cocok
+ * (aturan hitungnya sama), jadi perbedaan berarti klien dimodifikasi atau event diubah (bobot penuh). Tanpa `tracked` (shift yang melintasi
+ * pembaruan aplikasi, atau klien yang menyembunyikannya) tetap dilaporkan tetapi berbobot rendah. Hit dilaporkan hanya untuk kejadian sejak `emitFrom`.
  */
 export function evaluateCashMismatch(input: { events: PosEvent[]; checks: CashCheckInfo[]; emitFrom: number; config?: Partial<RuleConfig> }): RuleHit[] {
-  const weight = { ...DEFAULT_CONFIG.weights, ...input.config?.weights }.R30 ?? 0;
+  const weights = { ...DEFAULT_CONFIG.weights, ...input.config?.weights };
   const byKey = new Map(input.checks.filter((c) => c.status === 'MISMATCH' && c.serverExpected !== null).map((c) => [checkKey(c.deviceId, c.seq), c]));
   const hits: RuleHit[] = [];
   for (const e of input.events) {
@@ -90,9 +91,9 @@ export function evaluateCashMismatch(input: { events: PosEvent[]; checks: CashCh
     if (!c || at < input.emitFrom) continue;
     const rp = (n: number) => `Rp${Math.abs(n).toLocaleString('id-ID')}`;
     hits.push({
-      rule: 'R30', key: `R30:${e.deviceId}:${e.seq}`, weight, modalities: ['POS'], outletId: e.outletId, terminalId: e.deviceId, orderId: null,
+      rule: 'R30', key: `R30:${e.deviceId}:${e.seq}`, weight: (e.payload.tracked ? weights.R30 : weights.R30_UNTRACKED) ?? 0, modalities: ['POS'], outletId: e.outletId, terminalId: e.deviceId, orderId: null,
       actorIds: e.actorId ? [e.actorId] : [], at, windowStart: at, windowEnd: at, context: false, confidence: 'HIGH',
-      note: `terminal melaporkan kas seharusnya ${rp(c.claimed)}, hitungan server ${rp(c.serverExpected!)} (beda ${c.claimed > c.serverExpected! ? 'lebih' : 'kurang'} ${rp(c.claimed - c.serverExpected!)}); hitung fisik ${rp(e.payload.counted)}`,
+      note: `terminal melaporkan kas seharusnya ${rp(c.claimed)}, hitungan server ${rp(c.serverExpected!)} (beda ${c.claimed > c.serverExpected! ? 'lebih' : 'kurang'} ${rp(c.claimed - c.serverExpected!)}); hitung fisik ${rp(e.payload.counted)}${e.payload.tracked ? '' : ' (terminal tanpa pelacakan kas: bisa juga karena shift melintasi pembaruan aplikasi, bobot rendah)'}`,
     });
   }
   return hits.sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));

@@ -1,6 +1,6 @@
 import { createPublicKey, verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
-import { GENESIS_HASH, hashEvent, isEventType, RECEIPT_TOKEN, type EventType, type PosEvent } from '@pos/events';
+import { GENESIS_HASH, hashEvent, isEventType, MAX_EVENT_LINES, MAX_LINE_QTY, RECEIPT_TOKEN, type EventType, type PosEvent } from '@pos/events';
 import type { DeviceAuth } from './auth';
 import { Database } from './db/database';
 import { clampShadowStart, GO_LIVE_TYPES } from './shadow';
@@ -33,7 +33,7 @@ const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const;
 /** Layar dapur hanya mengubah status tiket (dan heartbeat); token yang bocor tidak boleh bisa memalsukan pembayaran. */
 const KDS_EVENT_TYPES: readonly EventType[] = ['kitchen.status_changed', 'device.heartbeat'];
 
-const MAX_LINE_ITEMS = 100;
+const MAX_LINE_ITEMS = MAX_EVENT_LINES;
 
 /** Item pesanan opsional: dibatasi jumlah dan panjangnya agar satu event tidak bisa membengkak. */
 function badItems(p: Payload): string | null {
@@ -45,7 +45,7 @@ function badItems(p: Payload): string | null {
     const l = raw as Payload;
     if (!str(l, 'itemId') || (l['itemId'] as string).length > 64) return 'itemId tidak valid';
     if (!str(l, 'name') || (l['name'] as string).length > 120) return 'nama item tidak valid';
-    if (!Number.isInteger(l['qty']) || (l['qty'] as number) < 1 || (l['qty'] as number) > 999) return 'qty harus bilangan bulat 1–999';
+    if (!Number.isInteger(l['qty']) || (l['qty'] as number) < 1 || (l['qty'] as number) > MAX_LINE_QTY) return `qty harus bilangan bulat 1–${MAX_LINE_QTY}`;
     if (!Number.isInteger(l['unitPrice']) || (l['unitPrice'] as number) < 0) return 'unitPrice harus bilangan bulat ≥ 0';
     if (l['sentQty'] !== undefined && (!Number.isInteger(l['sentQty']) || (l['sentQty'] as number) < 0 || (l['sentQty'] as number) > (l['qty'] as number))) return 'sentQty harus bilangan bulat 0..qty';
     if (l['note'] !== undefined && (typeof l['note'] !== 'string' || l['note'].length > 140)) return 'note harus teks maks. 140';
@@ -115,7 +115,8 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     bool(p, 'autoTime') && bool(p, 'adb') && bool(p, 'devOptions') && bool(p, 'kiosk') && bool(p, 'rooted') && str(p, 'appVersion') && (p['appVersion'] as string).length <= 40
       ? null : 'field posture tidak valid',
   'shift.opened': (p) => (str(p, 'shiftId') && num(p, 'openingCash') ? null : 'shiftId/openingCash tidak valid'),
-  'cash.counted': (p) => (str(p, 'shiftId') && num(p, 'counted') && num(p, 'expected') ? null : 'shiftId/counted/expected tidak valid'),
+  'cash.counted': (p) =>
+    str(p, 'shiftId') && num(p, 'counted') && num(p, 'expected') && (p['tracked'] === undefined || bool(p, 'tracked')) ? null : 'shiftId/counted/expected/tracked tidak valid',
   'shift.closed': (p) => (str(p, 'shiftId') ? null : 'shiftId wajib'),
   'presence.session': (p) =>
     num(p, 'start') && num(p, 'end') && num(p, 'peakMove') && num(p, 'peakStatic') && (p['end'] as number) >= (p['start'] as number)

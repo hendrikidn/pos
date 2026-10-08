@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Sim } from '@pos/sim';
+import { CASH_VERIFY_RETRY_MS, verifyWindowStart } from '../src/cash-check';
 import { createHarness, type Harness } from './harness';
 
 const DAY = '2026-10-01';
@@ -102,4 +103,33 @@ describe('verifikasi kas oleh server (R14 dan R30)', () => {
     expect((await checks()).length).toBe(before + 1);
     expect((await checks()).at(-1)).toMatchObject({ status: 'OK', server_expected: 200_000 });
   });
+
+  it('bobot R30: terminal dengan pelacakan kas (tracked) = 60; tanpa pelacakan (shift lintas pembaruan atau disembunyikan) = 20 dengan keterangan', async () => {
+    const t = (min: number) => T('10:00:00') + min * 60_000;
+    const forged = (id: string, start: number, tracked: boolean) => {
+      sim.pos({ type: 'shift.opened', payload: { shiftId: id, openingCash: 100_000 } }, t(start), 'sari');
+      sim.pos({ type: 'payment.received', payload: { orderId: `${id}-a`, method: 'CASH', amount: 100_000 } }, t(start + 5), 'sari');
+      sim.pos({ type: 'cash.counted', payload: { shiftId: id, counted: 200_000, expected: 180_000, ...(tracked ? { tracked: true } : {}) } }, t(start + 20), 'sari');
+    };
+    forged('W1', 0, true);
+    forged('W2', 60, false);
+    await flush();
+    h.setNow(T('13:00:00'));
+    await h.http('POST', '/v1/outlets/o1/evaluate', owner);
+    const all = (await h.http('GET', '/v1/outlets/o1/incidents', owner)).body as { hits: { rule: string; weight: number; note: string; key: string }[] }[];
+    // dua shift ini satu-satunya yang melaporkan kas seharusnya Rp180.000
+    const r30 = all.flatMap((i) => i.hits).filter((x) => x.rule === 'R30' && x.note.includes('seharusnya Rp180.000'));
+    expect(r30).toHaveLength(2);
+    const byTracked = (tracked: boolean) => r30.filter((x) => /tanpa pelacakan/.test(x.note) === !tracked);
+    expect(byTracked(true).map((x) => x.weight)).toEqual([60]);
+    expect(byTracked(false).map((x) => x.weight)).toEqual([20]);
+    expect(byTracked(false)[0]!.note).toMatch(/melintasi pembaruan aplikasi/);
+  });
+
+  it('jendela verifikasi: tidak lebih lama dari masa coba-ulang 4 hari, sehingga hitungan yang selamanya tak terverifikasi tidak diperiksa terus', () => {
+    const now = T('12:00:00');
+    expect(verifyWindowStart(now - 30 * 86_400_000, now)).toBe(now - CASH_VERIFY_RETRY_MS);
+    expect(verifyWindowStart(now - 1_000, now)).toBe(now - 1_000); // yang lebih baru dipakai apa adanya
+  });
 });
+

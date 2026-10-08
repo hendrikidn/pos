@@ -20,7 +20,14 @@ export interface CashCheckRow {
  * Yang tidak dapat diverifikasi (tanpa pembukaan shift, atau rantai event belum utuh karena ada kiriman yang tertunda) tidak
  * disimpan sehingga dicoba lagi pada evaluasi berikutnya. Aman dipanggil berulang.
  */
-export async function verifyPendingCashCounts(q: Queryable, tenantId: string, outletId: string, fromMs: number): Promise<void> {
+/** Hitungan yang tidak dapat diverifikasi hanya dicoba ulang selama ini sejak terjadi; setelahnya dibiarkan memakai angka terminal. */
+export const CASH_VERIFY_RETRY_MS = 4 * 86_400_000;
+
+/** Awal jendela verifikasi: tidak lebih lama dari masa coba-ulang, agar hitungan yang selamanya tak terverifikasi tidak diperiksa terus. */
+export const verifyWindowStart = (fromMs: number, now: number): number => Math.max(fromMs, now - CASH_VERIFY_RETRY_MS);
+
+export async function verifyPendingCashCounts(q: Queryable, tenantId: string, outletId: string, fromMs: number, now: number): Promise<void> {
+  fromMs = verifyWindowStart(fromMs, now);
   const counts = (
     await q.query<EventRow>(`select ${EVENT_COLUMNS} from event where outlet_id = $1 and type = 'cash.counted' and device_time_ms >= $2 order by device_id, seq`, [outletId, fromMs])
   ).rows.map(rowToEvent) as EventOf<'cash.counted'>[];

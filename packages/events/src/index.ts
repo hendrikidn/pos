@@ -113,8 +113,11 @@ export type EventBody =
   | { type: 'shift.opened'; payload: { shiftId: string; openingCash: number } }
   | {
       type: 'cash.counted';
-      /** Hitungan buta kasir. `expected` dicatat untuk audit dan tidak ditampilkan ke kasir. */
-      payload: { shiftId: string; counted: number; expected: number };
+      /**
+       * Hitungan buta kasir. `expected` dicatat untuk audit dan tidak ditampilkan ke kasir. `tracked`: terminal menghitungnya dari
+       * pelacakan kas shift (aturan yang sama dengan hitungan ulang server); tidak ada pada shift yang dibuka sebelum pelacakan itu.
+       */
+      payload: { shiftId: string; counted: number; expected: number; tracked?: boolean };
     }
   | { type: 'shift.closed'; payload: { shiftId: string } }
   | {
@@ -165,6 +168,10 @@ export type EventOf<T extends EventType> = Extract<PosEvent, { type: T }>;
 export type NewEvent = EventBody & { deviceTime: number; actorId?: string | null; clockOffsetMs?: number };
 
 type DistOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** Batas isi satu event pesanan: server menolak (400) event yang melebihinya, dan 400 memacetkan sinkronisasi terminal, jadi terminal menegakkan batas yang sama. */
+export const MAX_EVENT_LINES = 100;
+export const MAX_LINE_QTY = 999;
 
 /** Token struk digital: 22 karakter base64url (128 bit). */
 export const RECEIPT_TOKEN = /^[A-Za-z0-9_-]{22}$/;

@@ -19,6 +19,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
   const final = order.state.status === 'VOIDED' || order.state.status === 'MERGED' || paid;
   const open = order.state.status === 'DRAFT' || order.state.status === 'SENT';
   const splittable = open && order.type !== 'EMPLOYEE';
+  const digitalOk = ctx.rt.receiptUrl('x') !== null;
   const itemCount = order.items.reduce((s, l) => s + l.qty, 0);
   const mergeable = order.type === 'EMPLOYEE' || !open ? [] : engine.listOrders().filter(
     (o) => o.id !== order.id && o.type === order.type && o.shiftId === order.shiftId && (o.state.status === 'DRAFT' || o.state.status === 'SENT') && o.items.length > 0,
@@ -158,11 +159,15 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
             {order.receipt === 'NONE' ? (
               <>
                 {(ctx.rt.engine.paperClaimActive() || ctx.rt.printerState() === 'paperOut') && (
-                  <p className="notice">Kertas habis. Struk digital (QR) dibuat otomatis dan tampil di layar customer; atau catat bahwa struk tidak diberikan.</p>
+                  <p className="notice">
+                    {digitalOk
+                      ? 'Kertas habis. Struk digital (QR) dibuat otomatis dan tampil di layar customer; atau catat bahwa struk tidak diberikan.'
+                      : 'Kertas habis dan struk digital belum tersedia di terminal ini. Catat bahwa struk tidak diberikan.'}
+                  </p>
                 )}
                 <div className="actions wrap">
                   <button onClick={() => void run(ctx, () => engine.printReceipt(order.id))}>Cetak struk</button>
-                  <button className="secondary" onClick={() => void run(ctx, () => engine.digitalReceipt(order.id)).then((r) => r.ok && setDlg('qr'))}>Struk digital (QR)</button>
+                  {digitalOk && <button className="secondary" onClick={() => void run(ctx, () => engine.digitalReceipt(order.id)).then((r) => r.ok && setDlg('qr'))}>Struk digital (QR)</button>}
                   <button className="secondary" onClick={() => setDlg('decline')}>Struk tidak diberikan…</button>
                   <button className="secondary danger" onClick={() => setDlg('refund')}>Refund</button>
                   <button className="secondary danger" onClick={() => setDlg('void')}>Void</button>
@@ -174,7 +179,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
                   {order.receipt === 'PRINTED' ? 'Struk dicetak.' : order.receipt === 'DIGITAL' ? 'Struk digital dibuat (QR di layar customer).' : 'Struk tidak diberikan (tercatat).'}
                 </p>
                 <div className="actions wrap">
-                  {order.receipt !== 'DECLINED' && (
+                  {order.receipt !== 'DECLINED' && digitalOk && (
                     <button className="secondary" onClick={() => void run(ctx, () => engine.digitalReceipt(order.id)).then((r) => r.ok && setDlg('qr'))}>
                       {order.receiptToken ? 'Tampilkan QR' : 'Struk digital (QR)'}
                     </button>
@@ -210,10 +215,10 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
           }}
         />
       )}
-      {dlg === 'qr' && order.receiptToken && (
+      {dlg === 'qr' && order.receiptToken && ctx.rt.receiptUrl(order.receiptToken) && (
         <Modal title="Struk digital" onClose={() => setDlg(null)}>
           <div className="qr-box">
-            <Qr value={ctx.rt.receiptUrl(order.receiptToken)} size={260} label="Kode QR struk digital" />
+            <Qr value={ctx.rt.receiptUrl(order.receiptToken)!} size={260} label="Kode QR struk digital" />
             <p className="muted">Customer memindai dengan kamera ponsel. Tidak perlu nomor HP. QR yang sama tampil di layar customer.</p>
             <p className="small mono">{ctx.rt.receiptUrl(order.receiptToken)}</p>
           </div>

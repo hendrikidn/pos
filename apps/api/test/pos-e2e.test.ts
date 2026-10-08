@@ -142,6 +142,6 @@ describe('POS → API → insiden', () => {
       (await q.query<{ payload: { counted: number; expected: number } }>("select payload from event where type = 'cash.counted'")).rows,
     );
     // 100.000 modal + 28.600 (latte 26.000 + PBJT) dari order sah = 128.600 yang diharapkan; kasir menghitung 130.000
-    expect(counted[0]!.payload).toEqual({ shiftId: expect.any(String), counted: 130_000, expected: 128_600 });
+    expect(counted[0]!.payload).toEqual({ shiftId: expect.any(String), counted: 130_000, expected: 128_600, tracked: true });
   });
 });

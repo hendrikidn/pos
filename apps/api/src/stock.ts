@@ -97,3 +97,16 @@ export function buildStock(input: {
     };
   });
 }
+
+/**
+ * Waktu paling awal yang masih diperlukan untuk menghitung pemakaian: hitung fisik TERBARU dari setiap bahan, lalu yang paling lama
+ * di antara itu. Opname lama yang sudah digantikan tidak perlu dibaca lagi (riwayat penjualan sejak opname pertama bisa berbulan-bulan).
+ * Null bila belum ada hitung fisik sama sekali.
+ */
+export function earliestBaseline(movements: Pick<Movement, 'ingredientId' | 'kind' | 'at'>[]): number | null {
+  const latest = new Map<string, number>();
+  for (const m of movements) if (m.kind === 'COUNT') latest.set(m.ingredientId, Math.max(latest.get(m.ingredientId) ?? -Infinity, m.at));
+  let min: number | null = null;
+  for (const at of latest.values()) if (min === null || at < min) min = at;
+  return min;
+}

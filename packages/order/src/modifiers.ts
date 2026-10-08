@@ -39,6 +39,8 @@ export function checkModifierGroups(groups: unknown): string | null {
   if (!Array.isArray(groups)) return 'modifierGroups harus berupa daftar';
   if (groups.length > MAX_GROUPS) return `maksimal ${MAX_GROUPS} grup opsi per menu`;
   const groupIds = new Set<string>();
+  // Id opsi harus unik di SELURUH menu (bukan hanya per grup): pilihan kasir, kunci resep `menu|opsi`, dan KDS memperlakukannya demikian.
+  const optionIds = new Set<string>();
   for (const g of groups as Record<string, unknown>[]) {
     if (typeof g !== 'object' || g === null) return 'grup opsi tidak valid';
     if (typeof g['id'] !== 'string' || !ID.test(g['id'])) return 'id grup: huruf kecil, angka, - atau _ (maks. 32)';
@@ -51,11 +53,10 @@ export function checkModifierGroups(groups: unknown): string | null {
     if (!Number.isInteger(min) || !Number.isInteger(max) || (min as number) < 0 || (max as number) < 1 || (min as number) > (max as number) || (max as number) > opts.length) {
       return `grup "${g['name']}": batas pilihan tidak valid (0 ≤ min ≤ max ≤ jumlah opsi, max ≥ 1)`;
     }
-    const optionIds = new Set<string>();
     for (const o of opts as Record<string, unknown>[]) {
       if (typeof o !== 'object' || o === null) return 'opsi tidak valid';
       if (typeof o['id'] !== 'string' || !ID.test(o['id'])) return 'id opsi: huruf kecil, angka, - atau _ (maks. 32)';
-      if (optionIds.has(o['id'])) return `id opsi ganda di grup "${g['name']}": ${o['id']}`;
+      if (optionIds.has(o['id'])) return `id opsi ganda pada menu ini (harus unik di semua grup): ${o['id']}`;
       optionIds.add(o['id']);
       if (typeof o['name'] !== 'string' || o['name'].trim() === '' || o['name'].length > 40) return 'nama opsi wajib (maks. 40)';
       if (!Number.isInteger(o['price']) || (o['price'] as number) < 0 || (o['price'] as number) > MAX_OPTION_PRICE) return `harga opsi "${o['name']}" harus bilangan bulat rupiah 0–${MAX_OPTION_PRICE}`;

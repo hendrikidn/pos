@@ -77,7 +77,7 @@ export class ReportService {
       ).rows;
 
       // Hitung ulang kas yang belum diperiksa agar laporan selalu memakai angka server (idempoten).
-      await verifyPendingCashCounts(q, auth.tenantId, outletId, fromMs - 2 * DAY_MS);
+      await verifyPendingCashCounts(q, auth.tenantId, outletId, fromMs - 2 * DAY_MS, now);
       return buildSalesReport({
         events: [...rows, ...voids].map(rowToEvent), fromMs, toMs, from, to, utcOffsetMinutes: off, now, cashChecks: await loadCashChecks(q, outletId),
       });

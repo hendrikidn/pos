@@ -85,7 +85,7 @@ export class GuardService {
       ).rows.map((r) => r.hit);
 
       // Kas yang seharusnya dihitung ulang dari rantai event, tidak dipercaya dari kiriman terminal (R14 dan R30).
-      await verifyPendingCashCounts(q, tenantId, outletId, from - DEFAULT_CONFIG.r14WindowMs);
+      await verifyPendingCashCounts(q, tenantId, outletId, from - DEFAULT_CONFIG.r14WindowMs, now);
       const cashChecks = await loadCashChecks(q, outletId);
       const cashCounts = (
         await q.query<EventRow>(

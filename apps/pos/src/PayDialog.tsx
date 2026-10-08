@@ -185,7 +185,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
 
           <dl className="totals pay-summary">
             <div><dt>Subtotal</dt><dd>{rp(totals.subtotal)}</dd></div>
-            {totals.discount > 0 && <div><dt>Diskon</dt><dd>−{rp(totals.discount)}</dd></div>}
+            {totals.discount > 0 && <div><dt>Diskon{order.promoId ? ` · ${config.promos?.find((p) => p.id === order.promoId)?.name ?? order.promoId}` : ''}</dt><dd>−{rp(totals.discount)}</dd></div>}
             {totals.service > 0 && <div><dt>Service {config.serviceChargePercent}%</dt><dd>{rp(totals.service)}</dd></div>}
             {totals.tax > 0 && <div><dt>PBJT {config.taxPercent}%</dt><dd>{rp(totals.tax)}</dd></div>}
             {totals.rounding !== 0 && <div><dt>Pembulatan</dt><dd>{totals.rounding < 0 ? '−' : ''}{rp(Math.abs(totals.rounding))}</dd></div>}

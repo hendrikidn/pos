@@ -335,3 +335,9 @@ main { flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch
 .menu-photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: var(--surface-2); }
 .menu-item .menu-photo-empty { display: grid; place-items: center; font-size: 34px; font-weight: 800; color: rgba(0, 0, 0, .45); padding: 0; -webkit-line-clamp: unset; }
 .menu-photos .menu-item .qty-badge { box-shadow: 0 0 0 2px var(--surface); }
+
+/* Promo */
+.promo-list { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 8px; }
+.promo-card { width: 100%; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; min-height: 64px; padding: 10px 14px; }
+.promo-card small { font-weight: 500; color: var(--muted); }
+.promo-card small.need { color: var(--warn); font-weight: 600; }

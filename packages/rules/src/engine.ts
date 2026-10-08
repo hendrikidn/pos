@@ -444,6 +444,28 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
     }
   }
 
+  // ---- R32: diskon promo tidak sesuai aturan promo ----
+  // Besar diskon promo ditetapkan server. Terminal yang dimodifikasi bisa mengarang id promo atau menggelembungkan potongannya; keduanya terlihat
+  // di sini karena aturan promo (jenis dan nilai) diketahui server. Pembatasan jadwal/minimum tidak diperiksa: terminal offline memakai salinan
+  // lama dan jam perangkat bisa bergeser, sehingga hasilnya akan salah-positif.
+  if (input.promos) {
+    const defs = new Map(input.promos.map((p) => [p.id, p]));
+    for (const e of events) {
+      if (e.type !== 'discount.applied' || e.payload.kind !== 'PROMO') continue;
+      const d = e.payload;
+      const def = d.promoId ? defs.get(d.promoId) : undefined;
+      const why = !def ? `promo ${d.promoId ?? '(tanpa id)'} tidak dikenal server`
+        : def.kind === 'PERCENT' && d.percent > def.value + 0.1 ? `potongan ${d.percent}% melebihi promo ${def.id} (${def.value}%)`
+        : def.kind === 'AMOUNT' && d.amount > def.value ? `potongan Rp ${d.amount.toLocaleString('id-ID')} melebihi promo ${def.id} (Rp ${def.value.toLocaleString('id-ID')})`
+        : null;
+      if (!why) continue;
+      hit({
+        rule: 'R32', key: `R32:${e.deviceId}:${e.seq}`, weight: w('R32'), modalities: POS_ONLY, terminalId: e.deviceId, orderId: d.orderId,
+        actorIds: e.actorId ? [e.actorId] : [], at: t(e), windowStart: t(e), windowEnd: t(e), note: why,
+      });
+    }
+  }
+
   // ---- R24: integritas event ----
   for (const [deviceId, list] of byDevice) {
     for (const issue of verifyChain(list)) {

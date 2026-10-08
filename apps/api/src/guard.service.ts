@@ -94,9 +94,12 @@ export class GuardService {
         )
       ).rows.map(rowToEvent);
 
+      // Promo yang berlaku di outlet ini (termasuk yang sudah dinonaktifkan, karena diskon lama merujuknya).
+      const promos = (await q.query<{ id: string; kind: 'PERCENT' | 'AMOUNT'; value: number }>('select id, kind, value from promo where outlet_id is null or outlet_id = $1', [outletId])).rows;
+
       const hits = [
         ...evaluateRules({
-          events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity,
+          events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity, promos,
           utcOffsetMinutes: outlet.utc_offset_minutes,
           // Kuota makan karyawan diatur owner per outlet, dan sama dengan yang dipakai terminal.
           config: { r6DailyQuota: outlet.policy?.employeeMealQuota ?? DEFAULT_CONFIG.r6DailyQuota },

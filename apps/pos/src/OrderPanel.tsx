@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { MenuItem, OrderRecord } from '@pos/pos-core';
+import { promoApplicable, promoDiscount, type Promo } from '@pos/order';
 import { lineKey, VOID_REASONS } from '@pos/pos-core';
 import { Qr } from './Qr';
 import { MergeDialog, Modal, ModifierDialog, MoveTableDialog, NoteDialog, PinPad, SplitDialog } from './dialogs';
@@ -141,7 +142,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
 
         <dl className="totals">
           <div><dt>Subtotal</dt><dd>{rp(totals.subtotal)}</dd></div>
-          {totals.discount > 0 && <div><dt>Diskon</dt><dd>−{rp(totals.discount)}</dd></div>}
+          {totals.discount > 0 && <div><dt>Diskon{order.promoId ? ` · ${config.promos?.find((p) => p.id === order.promoId)?.name ?? order.promoId}` : ''}</dt><dd>−{rp(totals.discount)}</dd></div>}
           {totals.service > 0 && <div><dt>Service {config.serviceChargePercent}%</dt><dd>{rp(totals.service)}</dd></div>}
           {totals.tax > 0 && <div><dt>PBJT {config.taxPercent}%</dt><dd>{rp(totals.tax)}</dd></div>}
           {totals.rounding !== 0 && <div><dt>Pembulatan</dt><dd>{totals.rounding < 0 ? '−' : ''}{rp(Math.abs(totals.rounding))}</dd></div>}
@@ -355,36 +356,84 @@ type WithApproval = (
   need: number,
 ) => Promise<{ ok: boolean } | undefined>;
 
+const promoText = (p: Promo): string => {
+  const base = p.kind === 'PERCENT' ? `${p.value}%${p.maxDiscount ? `, maks. ${rp(p.maxDiscount)}` : ''}` : `potong ${rp(p.value)}`;
+  const rules = [
+    p.minSubtotal ? `min. belanja ${rp(p.minSubtotal)}` : '',
+    p.startHour !== undefined && p.endHour !== undefined ? `pukul ${String(p.startHour).padStart(2, '0')}.00–${String(p.endHour).padStart(2, '0')}.00` : '',
+    p.days?.length ? p.days.map((d) => ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'][d]).join(' ') : '',
+  ].filter(Boolean);
+  return [base, ...rules].join(' · ');
+};
+
 function DiscountDialog({ ctx, order, onClose, withApproval }: { ctx: Ctx; order: OrderRecord; onClose: () => void; withApproval: WithApproval }) {
-  const [kind, setKind] = useState<'MANUAL' | 'MEMBER' | 'COUPON'>('MANUAL');
+  const { engine } = ctx.rt;
+  const promos = engine.config.promos ?? [];
+  const [tab, setTab] = useState<'PROMO' | 'MANUAL' | 'MEMBER' | 'COUPON'>(promos.length > 0 && !order.promoId ? 'PROMO' : 'MANUAL');
   const [percent, setPercent] = useState('10');
   const [verified, setVerified] = useState(false);
+  const subtotal = engine.totals(order).subtotal;
+  const kind = tab === 'PROMO' ? 'MANUAL' : tab;
+  const tabs: ['PROMO' | 'MANUAL' | 'MEMBER' | 'COUPON', string][] = [...(promos.length > 0 ? [['PROMO', 'Promo'] as ['PROMO', string]] : []), ['MANUAL', 'Manual'], ['MEMBER', 'Member'], ['COUPON', 'Kupon']];
   return (
     <Modal title="Diskon" onClose={onClose}>
       <div className="seg">
-        {([['MANUAL', 'Manual'], ['MEMBER', 'Member'], ['COUPON', 'Kupon']] as const).map(([k, l]) => (
-          <button key={k} className={kind === k ? 'on' : ''} onClick={() => { setKind(k); setVerified(k !== 'MANUAL'); }}>{l}</button>
+        {tabs.map(([k, l]) => (
+          <button key={k} className={tab === k ? 'on' : ''} onClick={() => { setTab(k); setVerified(k !== 'MANUAL' && k !== 'PROMO'); }}>{l}</button>
         ))}
       </div>
-      <label className="field">Persen diskon
-        <input inputMode="numeric" value={percent} onChange={(e) => setPercent(e.target.value.replace(/\D/g, ''))} />
-      </label>
-      {kind !== 'MANUAL' && (
-        <label className="check"><input type="checkbox" checked={verified} onChange={(e) => setVerified(e.target.checked)} /> Member/kupon sudah diverifikasi (scan atau OTP)</label>
+      {tab === 'PROMO' ? (
+        <>
+          {order.promoId && <p className="notice">Order ini sudah memakai promo {promos.find((p) => p.id === order.promoId)?.name ?? order.promoId}.</p>}
+          {order.discount > 0 && !order.promoId && <p className="notice">Order ini sudah diberi diskon; promo tidak digabung dengan diskon lain.</p>}
+          <ul className="promo-list">
+            {promos.map((p) => {
+              const chk = promoApplicable(p, { nowMs: Date.now(), utcOffsetMinutes: engine.config.utcOffsetMinutes ?? 420, subtotal });
+              const off = promoDiscount(p, subtotal);
+              const blocked = !!order.promoId || order.discount > 0 || !chk.ok || off <= 0;
+              return (
+                <li key={p.id}>
+                  <button
+                    className="secondary promo-card" disabled={blocked}
+                    onClick={async () => {
+                      const r = await withApproval((a) => engine.applyPromo(order.id, p.id, { approver: a[0] }), 1);
+                      if (r?.ok) onClose();
+                    }}
+                  >
+                    <b>{p.name}</b>
+                    <small>{promoText(p)}</small>
+                    {!chk.ok ? <small className="need">{chk.message}</small> : off > 0 ? <small>Potongan {rp(off)} untuk order ini</small> : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="muted">Besar potongan ditentukan promo, bukan kasir. Setelah tagihan dicetak, promo memerlukan persetujuan supervisor.</p>
+        </>
+      ) : (
+        <>
+          <label className="field">Persen diskon
+            <input inputMode="numeric" value={percent} onChange={(e) => setPercent(e.target.value.replace(/\D/g, ''))} />
+          </label>
+          {tab !== 'MANUAL' && (
+            <label className="check"><input type="checkbox" checked={verified} onChange={(e) => setVerified(e.target.checked)} /> Member/kupon sudah diverifikasi (scan atau OTP)</label>
+          )}
+          {order.promoId && <p className="notice">Order ini sudah memakai promo; diskon lain tidak bisa ditambahkan.</p>}
+          <p className="muted">Diskon manual di atas 15% tanpa verifikasi, atau diskon setelah tagihan dicetak, memerlukan persetujuan supervisor.</p>
+          <div className="actions">
+            <button className="secondary" onClick={onClose}>Batal</button>
+            <button
+              disabled={!percent || Number(percent) < 1 || Number(percent) > 100}
+              onClick={async () => {
+                const r = await withApproval((a) => engine.applyDiscount(order.id, { kind, percent: Number(percent), verified, approver: a[0] }), 1);
+                if (r?.ok) onClose();
+              }}
+            >
+              Terapkan
+            </button>
+          </div>
+        </>
       )}
-      <p className="muted">Diskon manual di atas 15% tanpa verifikasi, atau diskon setelah tagihan dicetak, memerlukan persetujuan supervisor.</p>
-      <div className="actions">
-        <button className="secondary" onClick={onClose}>Batal</button>
-        <button
-          disabled={!percent || Number(percent) < 1 || Number(percent) > 100}
-          onClick={async () => {
-            const r = await withApproval((a) => ctx.rt.engine.applyDiscount(order.id, { kind, percent: Number(percent), verified, approver: a[0] }), 1);
-            if (r?.ok) onClose();
-          }}
-        >
-          Terapkan
-        </button>
-      </div>
     </Modal>
   );
 }

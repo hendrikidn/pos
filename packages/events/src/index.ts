@@ -91,12 +91,14 @@ export type EventBody =
       type: 'discount.applied';
       payload: {
         orderId: string;
-        kind: 'MANUAL' | 'MEMBER' | 'COUPON';
+        kind: 'MANUAL' | 'MEMBER' | 'COUPON' | 'PROMO';
         amount: number;
         percent: number;
-        /** true jika member/kupon diverifikasi (scan barcode atau OTP) */
+        /** true jika member/kupon diverifikasi (scan barcode atau OTP); promo selalu true karena besarnya ditetapkan aturan di server */
         verified: boolean;
         approverId?: string;
+        /** Hanya untuk kind PROMO: id promo yang dipilih kasir dari daftar di server. */
+        promoId?: string;
       };
     }
   | {

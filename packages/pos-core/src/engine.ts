@@ -1,5 +1,5 @@
 import { MAX_EVENT_LINES, MAX_LINE_QTY, type KitchenStatus, type LineItem, type OrderType, type PaymentMethod, type PosEvent, type PrinterState } from '@pos/events';
-import { DEFAULT_POLICY, decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, isHoldReason, MAX_NOTE_LENGTH, reduceOrder, resolveSelection, type Ctx } from '@pos/order';
+import { DEFAULT_POLICY, decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, isHoldReason, MAX_NOTE_LENGTH, promoApplicable, promoDiscount, reduceOrder, resolveSelection, type Ctx } from '@pos/order';
 import { Directory } from './directory';
 import type { Printer } from './printer';
 import type { Recorder } from './recorder';
@@ -695,6 +695,45 @@ export class PosEngine {
     orderId: string,
     cmd: { kind: 'MANUAL' | 'MEMBER' | 'COUPON'; percent?: number; amount?: number; verified: boolean; approver?: ApproverInput },
   ): Promise<Result<OrderRecord>> {
+    const r = this.order(orderId);
+    if (r.ok && r.value.promoId) return fail('PROMO_STACK', 'Order ini sudah memakai promo; promo tidak digabung dengan diskon lain.');
+    return this.discountCore(orderId, cmd);
+  }
+
+  /**
+   * Memakai promo dari daftar server. Besar potongan dihitung aturan promo (bukan diketik kasir), hanya berlaku pada jadwal dan belanja
+   * minimum promo, satu promo per order, dan tidak digabung dengan diskon lain. Setelah tagihan dicetak tetap perlu persetujuan supervisor,
+   * seperti diskon lain.
+   */
+  async applyPromo(orderId: string, promoId: string, opts: { approver?: ApproverInput } = {}): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    const promo = (this.cfg.promos ?? []).find((p) => p.id === promoId);
+    if (!promo) return fail('PROMO_UNKNOWN', 'Promo tidak dikenal atau sudah tidak aktif.');
+    if (o.promoId) return fail('PROMO_STACK', 'Order ini sudah memakai promo.');
+    if (o.discount > 0) return fail('PROMO_STACK', 'Order ini sudah diberi diskon; promo tidak digabung dengan diskon lain.');
+    if (o.type === 'EMPLOYEE') return fail('PROMO_EMPLOYEE', 'Order makan karyawan tidak bisa memakai promo.');
+    const subtotal = this.totals(o).subtotal;
+    if (subtotal === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
+    const ok1 = promoApplicable(promo, { nowMs: this.d.now(), utcOffsetMinutes: this.cfg.utcOffsetMinutes ?? 420, subtotal });
+    if (!ok1.ok) return fail(ok1.code, ok1.message);
+    const amount = promoDiscount(promo, subtotal);
+    if (amount <= 0) return fail('AMOUNT_INVALID', 'Promo ini tidak memberi potongan untuk order ini.');
+    const res = await this.discountCore(orderId, { kind: 'PROMO', amount, verified: true, approver: opts.approver, promoId });
+    if (res.ok) {
+      res.value.promoId = promoId;
+      await this.save(res.value);
+    }
+    return res;
+  }
+
+  private async discountCore(
+    orderId: string,
+    cmd: { kind: 'MANUAL' | 'MEMBER' | 'COUPON' | 'PROMO'; percent?: number; amount?: number; verified: boolean; approver?: ApproverInput; promoId?: string },
+  ): Promise<Result<OrderRecord>> {
     const w = this.who();
     if (!w.ok) return w;
     const r = this.order(orderId);
@@ -714,7 +753,7 @@ export class PosEngine {
       if (!a.ok) return a;
       approverId = a.value[0];
     }
-    const decision = decideDiscount(o.state, { actorId: w.value, kind: cmd.kind, amount, percent, verified: cmd.verified, approverId }, this.ctx());
+    const decision = decideDiscount(o.state, { actorId: w.value, kind: cmd.kind, amount, percent, verified: cmd.verified, approverId, ...(cmd.promoId ? { promoId: cmd.promoId } : {}) }, this.ctx());
     if (!decision.ok) return fail(decision.code, decision.message);
 
     const e = await this.emit(decision.body);

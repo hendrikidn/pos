@@ -1,5 +1,5 @@
 import type { KitchenStatus, LineItem, OrderType, PaymentMethod } from '@pos/events';
-import type { ChosenOption, ModifierGroup, OrderState, Policy, Role, TableDef } from '@pos/order';
+import type { ChosenOption, ModifierGroup, OrderState, Policy, Promo, Role, TableDef } from '@pos/order';
 
 export interface MenuItem {
   id: string;
@@ -44,6 +44,10 @@ export interface PosConfig {
   taxOnService?: boolean;
   roundingUnit?: number;
   edcs: Edc[];
+  /** Promo aktif outlet (dari server). Kasir hanya memilih dari sini; kosong = tidak ada promo. */
+  promos?: Promo[];
+  /** Zona waktu outlet (menit dari UTC), dipakai jadwal promo; bawaan WIB. */
+  utcOffsetMinutes?: number;
   /** Denah meja outlet; tidak ada = kasir mengetik nomor meja bebas. */
   tables?: TableDef[];
   staff: Staff[];
@@ -110,6 +114,8 @@ export interface OrderRecord {
   mergedInto?: string;
   /** Order ini diserahkan ke terminal lain dan belum selesai diurus: terkunci (status MERGED) sampai diambil atau ditarik kembali. */
   handedOff?: boolean;
+  /** Promo yang dipakai order ini (satu order, satu promo; tidak digabung dengan diskon lain). */
+  promoId?: string;
   /** Order ini dibuat dari order terminal lain yang diserahkan kepadanya. */
   takenFrom?: { deviceId: string; orderId: string };
 }

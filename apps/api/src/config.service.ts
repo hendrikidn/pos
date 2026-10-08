@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import type { ApiAuth, DeviceAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
-import { checkModifierGroups, type ModifierGroup } from '@pos/order';
+import { checkModifierGroups, checkPromo, type ModifierGroup, type Promo } from '@pos/order';
 import { DEFAULT_SHADOW_DAYS, shadowState } from './shadow';
 
 const pbkdf2Async = promisify(pbkdf2);
@@ -86,6 +86,32 @@ export interface SettingsInput {
   shadowRestart?: boolean;
 }
 
+/** Promo apa adanya dari tabel; kolom kosong dihilangkan agar bentuknya sama dengan `Promo` di terminal. */
+interface PromoRow {
+  id: string; outlet_id: string | null; name: string; kind: 'PERCENT' | 'AMOUNT'; value: number; min_subtotal: number | null; max_discount: number | null;
+  days: number[] | null; start_date: string | null; end_date: string | null; start_hour: number | null; end_hour: number | null; active: boolean;
+}
+const PROMO_COLUMNS = 'id, outlet_id, name, kind, value, min_subtotal, max_discount, days, start_date, end_date, start_hour, end_hour, active';
+const rowToPromo = (r: PromoRow): Promo => ({
+  id: r.id, name: r.name, kind: r.kind, value: r.value,
+  ...(r.min_subtotal !== null ? { minSubtotal: r.min_subtotal } : {}), ...(r.max_discount !== null ? { maxDiscount: r.max_discount } : {}),
+  ...(r.days && r.days.length > 0 ? { days: r.days } : {}), ...(r.start_date ? { startDate: r.start_date } : {}), ...(r.end_date ? { endDate: r.end_date } : {}),
+  ...(r.start_hour !== null && r.end_hour !== null ? { startHour: r.start_hour, endHour: r.end_hour } : {}),
+});
+
+export interface PromoInput extends Partial<Omit<Promo, 'minSubtotal' | 'maxDiscount' | 'days' | 'startDate' | 'endDate' | 'startHour' | 'endHour'>> {
+  /** null = hapus batasan; tidak ada = tidak diubah. */
+  minSubtotal?: number | null;
+  maxDiscount?: number | null;
+  days?: number[] | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  startHour?: number | null;
+  endHour?: number | null;
+  outletId?: string | null;
+  active?: boolean;
+}
+
 export interface OutletInput {
   name?: string;
   terminals?: string[];
@@ -127,11 +153,15 @@ export interface DeviceConfig {
     taxOnService?: boolean;
     roundingUnit?: number;
     edcs: { tid: string; bank: string; label: string }[];
+    /** Zona waktu outlet (menit dari UTC); hanya dikirim bersama promo karena jadwal promo memakainya. */
+    utcOffsetMinutes?: number;
     /** Hanya bila outlet punya denah meja. */
     tables?: { no: string; area: string; seats: number }[];
     policy: Record<string, number> | null;
   };
   staff: { id: string; name: string; role: StaffRole; salt: string; hash: string; iterations: number }[];
+  /** Promo aktif yang berlaku di outlet ini; ada hanya bila ada. Jadwalnya dihitung dengan `outlet.utcOffsetMinutes`. */
+  promos?: Promo[];
   menu: { id: string; name: string; price: number; category: string; modifierGroups?: ModifierGroup[]; /** Versi foto (sidik jari); ada hanya bila menu punya foto. */ image?: string }[];
 }
 
@@ -292,6 +322,75 @@ export class ConfigService {
     });
   }
 
+  // ---------- promo ----------
+
+  listPromos(auth: ApiAuth) {
+    return this.db.tenantTx(auth.tenantId, async (q) =>
+      (await q.query<PromoRow>(`select ${PROMO_COLUMNS} from promo order by active desc, name`)).rows.map((r) => ({ ...rowToPromo(r), outletId: r.outlet_id, active: r.active })),
+    );
+  }
+
+  async createPromo(auth: ApiAuth, input: PromoInput): Promise<void> {
+    const promo = this.promoFrom({}, input);
+    await this.db.tenantTx(auth.tenantId, async (q) => {
+      if ((await q.query('select 1 from promo where id = $1', [promo.promo.id])).rowCount > 0) throw new BadRequestException('id promo sudah dipakai');
+      await this.checkPromoOutlet(q, promo.outletId);
+      await this.writePromo(q, auth.tenantId, promo, true);
+      await this.audit(q, auth, 'promo.create', { id: promo.promo.id, kind: promo.promo.kind, value: promo.promo.value });
+    });
+  }
+
+  async updatePromo(auth: ApiAuth, id: string, input: PromoInput): Promise<void> {
+    await this.db.tenantTx(auth.tenantId, async (q) => {
+      const row = (await q.query<PromoRow>(`select ${PROMO_COLUMNS} from promo where id = $1`, [id])).rows[0];
+      if (!row) throw new NotFoundException('promo tidak ditemukan');
+      if (input.id !== undefined && input.id !== id) throw new BadRequestException('id promo tidak bisa diubah');
+      const next = this.promoFrom({ ...rowToPromo(row), outletId: row.outlet_id, active: row.active }, { ...input, id });
+      await this.checkPromoOutlet(q, next.outletId);
+      await this.writePromo(q, auth.tenantId, next, false);
+      await this.audit(q, auth, 'promo.update', { id, fields: Object.keys(input) });
+    });
+  }
+
+  /** Menggabungkan perubahan ke promo lama lalu memeriksa hasil akhirnya secara utuh. */
+  private promoFrom(base: Partial<Promo> & { outletId?: string | null; active?: boolean }, input: PromoInput): { promo: Promo; outletId: string | null; active: boolean } {
+    const merged: Record<string, unknown> = { ...base };
+    for (const [k, v] of Object.entries(input)) {
+      if (v === null) delete merged[k];
+      else if (v !== undefined) merged[k] = v;
+    }
+    const { outletId, active, ...rest } = merged as Partial<Promo> & { outletId?: string; active?: boolean };
+    const err = checkPromo(rest);
+    if (err) throw new BadRequestException(err);
+    if (active !== undefined && typeof active !== 'boolean') throw new BadRequestException('active harus true atau false');
+    return { promo: rest as Promo, outletId: outletId ?? null, active: active ?? true };
+  }
+
+  private async checkPromoOutlet(q: Queryable, outletId: string | null) {
+    if (outletId && (await q.query('select 1 from outlet where id = $1', [outletId])).rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
+  }
+
+  private async writePromo(q: Queryable, tenantId: string, x: { promo: Promo; outletId: string | null; active: boolean }, insert: boolean) {
+    const p = x.promo;
+    const fields = [
+      x.outletId, p.name.trim(), p.kind, p.value, p.minSubtotal ?? null, p.maxDiscount ?? null,
+      p.days && p.days.length > 0 ? JSON.stringify(p.days) : null, p.startDate ?? null, p.endDate ?? null, p.startHour ?? null, p.endHour ?? null, x.active,
+    ];
+    if (insert) {
+      await q.query(
+        `insert into promo (tenant_id, id, outlet_id, name, kind, value, min_subtotal, max_discount, days, start_date, end_date, start_hour, end_hour, active)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14)`,
+        [tenantId, p.id, ...fields],
+      );
+    } else {
+      await q.query(
+        `update promo set outlet_id = $2, name = $3, kind = $4, value = $5, min_subtotal = $6, max_discount = $7, days = $8::jsonb, start_date = $9,
+                end_date = $10, start_hour = $11, end_hour = $12, active = $13, updated_at = now() where id = $1`,
+        [p.id, ...fields],
+      );
+    }
+  }
+
   // ---------- pengaturan outlet ----------
 
   async getSettings(auth: ApiAuth, outletId: string, now = Date.now()) {
@@ -420,8 +519,8 @@ export class ConfigService {
   async deviceConfig(device: DeviceAuth): Promise<DeviceConfig> {
     return this.db.tenantTx(device.tenantId, async (q) => {
       const o = (
-        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; tables: NonNullable<DeviceConfig['outlet']['tables']>; policy: Record<string, number> | null }>(
-          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, tables, policy from outlet where id = $1',
+        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; tables: NonNullable<DeviceConfig['outlet']['tables']>; utc_offset_minutes: number; policy: Record<string, number> | null }>(
+          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, tables, policy, utc_offset_minutes from outlet where id = $1',
           [device.outletId],
         )
       ).rows[0];
@@ -446,6 +545,9 @@ export class ConfigService {
         ...(modifier_groups.length > 0 ? { modifierGroups: modifier_groups } : {}),
         ...(image_version ? { image: image_version } : {}),
       }));
+      const promos = isKds ? [] : (
+        await q.query<PromoRow>(`select ${PROMO_COLUMNS} from promo where active and (outlet_id is null or outlet_id = $1) order by name, id`, [device.outletId])
+      ).rows.map(rowToPromo);
       const receiptBaseUrl = this.dashboardUrl ? `${this.dashboardUrl.replace(/\/$/, '')}/r/` : undefined;
       const body = {
         ...(receiptBaseUrl ? { receiptBaseUrl } : {}),
@@ -455,9 +557,11 @@ export class ConfigService {
           ...(o.service_charge_percent > 0 ? { serviceChargePercent: o.service_charge_percent } : {}),
           ...(o.tax_on_service === false ? { taxOnService: false } : {}),
           ...(o.rounding_unit > 0 ? { roundingUnit: o.rounding_unit } : {}),
+          ...(promos.length > 0 ? { utcOffsetMinutes: o.utc_offset_minutes } : {}),
           edcs: o.edcs, ...(o.tables.length > 0 ? { tables: o.tables } : {}), policy: o.policy,
         },
         staff: staff.map((s) => ({ id: s.id, name: s.name, role: s.role, salt: s.pin_salt, hash: s.pin_hash, iterations: s.pin_iterations })),
+        ...(promos.length > 0 ? { promos } : {}),
         menu,
       };
       const version = createHash('sha256').update(JSON.stringify(body)).digest('hex').slice(0, 16);

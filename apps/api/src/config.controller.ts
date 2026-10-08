@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { requireApi, requireDevice, type AuthedRequest } from './auth';
 import { CLOCK, type Clock } from './pipeline.service';
-import { ConfigService, type MenuInput, type OutletInput, type SettingsInput, type StaffInput } from './config.service';
+import { ConfigService, type MenuInput, type PromoInput, type OutletInput, type SettingsInput, type StaffInput } from './config.service';
 
 @Controller('v1')
 export class ConfigController {
@@ -56,6 +56,25 @@ export class ConfigController {
   @Put('menu/:id')
   async updateMenu(@Req() req: AuthedRequest, @Param('id') id: string, @Body() body: MenuInput) {
     await this.config.updateMenu(requireApi(req, ['OWNER', 'OPS']), id, body ?? {});
+    return { ok: true };
+  }
+
+  // ----- promo (OWNER, OPS menulis; MANAGER membaca) -----
+
+  @Get('promos')
+  listPromos(@Req() req: AuthedRequest) {
+    return this.config.listPromos(requireApi(req, ['OWNER', 'OPS', 'MANAGER']));
+  }
+
+  @Post('promos')
+  async createPromo(@Req() req: AuthedRequest, @Body() body: PromoInput) {
+    await this.config.createPromo(requireApi(req, ['OWNER', 'OPS']), body ?? {});
+    return { ok: true };
+  }
+
+  @Put('promos/:id')
+  async updatePromo(@Req() req: AuthedRequest, @Param('id') id: string, @Body() body: PromoInput) {
+    await this.config.updatePromo(requireApi(req, ['OWNER', 'OPS']), id, body ?? {});
     return { ok: true };
   }
 

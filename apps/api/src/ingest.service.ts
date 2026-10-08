@@ -105,9 +105,11 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
       ? badItems(p) : 'field pemindahan item tidak valid',
   'kitchen.status_changed': (p) => (str(p, 'orderId') && oneOf(p, 'status', ['COOKING', 'READY', 'SERVED']) ? null : 'orderId/status tidak valid'),
   'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? badItems(p) ?? badBreakdown(p) : 'orderId/total tidak valid'),
-  'discount.applied': (p) =>
-    str(p, 'orderId') && oneOf(p, 'kind', ['MANUAL', 'MEMBER', 'COUPON']) && num(p, 'amount') && num(p, 'percent') && bool(p, 'verified')
-      ? null : 'field diskon tidak valid',
+  'discount.applied': (p) => {
+    if (!(str(p, 'orderId') && oneOf(p, 'kind', ['MANUAL', 'MEMBER', 'COUPON', 'PROMO']) && num(p, 'amount') && num(p, 'percent') && bool(p, 'verified'))) return 'field diskon tidak valid';
+    if (p['kind'] === 'PROMO' ? !str(p, 'promoId') || (p['promoId'] as string).length > 32 : p['promoId'] !== undefined) return 'promoId wajib untuk diskon PROMO dan hanya untuk itu';
+    return null;
+  },
   'payment.received': (p) => (str(p, 'orderId') && oneOf(p, 'method', METHODS) && num(p, 'amount') ? null : 'orderId/method/amount tidak valid'),
   'payment.method_changed': (p) => (str(p, 'orderId') && oneOf(p, 'from', METHODS) && oneOf(p, 'to', METHODS) ? null : 'field tidak valid'),
   'receipt.printed': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),

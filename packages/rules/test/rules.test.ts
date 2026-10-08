@@ -580,3 +580,47 @@ describe('R31: order berpindah antar-terminal di luar serah-terima', () => {
     expect(r31(run(unseen, '13:00:00', NO_SENSOR))).toEqual([]);
   });
 });
+
+describe('R32: diskon promo tidak sesuai aturan promo', () => {
+  const promos = [{ id: 'hemat10', kind: 'PERCENT' as const, value: 10 }, { id: 'potong15', kind: 'AMOUNT' as const, value: 15_000 }];
+  const r32 = (hits: RuleHit[]) => hits.filter((h) => h.rule === 'R32');
+  const promoDiscount = (s: Sim, id: string, payload: Record<string, unknown>) => {
+    s.pos({ type: 'order.created', payload: { orderId: id, orderType: 'TAKE_AWAY' } }, '12:00:00', 'budi');
+    s.pos({ type: 'discount.applied', payload: { orderId: id, kind: 'PROMO', verified: true, ...payload } } as EventBody, '12:00:30', 'budi');
+  };
+  const run32 = (s: Sim, withPromos = true) =>
+    evaluateRules({ events: s.events, now: s.t('13:00:00'), terminals: [s.terminalId], capabilities: NO_SENSOR, ...(withPromos ? { promos } : {}) });
+
+  it('promo yang dikenal dan sesuai aturan (persen efektif lebih kecil karena batas atas pun sah) tidak memicu apa pun', () => {
+    const s = new Sim();
+    promoDiscount(s, 'a', { promoId: 'hemat10', amount: 7_400, percent: 10 });
+    promoDiscount(s, 'b', { promoId: 'hemat10', amount: 5_000, percent: 5.7 });
+    promoDiscount(s, 'c', { promoId: 'potong15', amount: 15_000, percent: 20 });
+    promoDiscount(s, 'd', { promoId: 'potong15', amount: 9_000, percent: 100 }); // subtotal lebih kecil dari potongan
+    expect(r32(run32(s))).toEqual([]);
+  });
+
+  it('id promo karangan memicu R32', () => {
+    const s = new Sim();
+    promoDiscount(s, 'a', { promoId: 'gratis-semua', amount: 50_000, percent: 100 });
+    const hits = r32(run32(s));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ orderId: 'a', actorIds: ['budi'], weight: 45 });
+    expect(hits[0]!.note).toContain('gratis-semua');
+  });
+
+  it('potongan melebihi aturan promo memicu R32 (persen maupun nominal)', () => {
+    const s = new Sim();
+    promoDiscount(s, 'a', { promoId: 'hemat10', amount: 25_000, percent: 50 });
+    promoDiscount(s, 'b', { promoId: 'potong15', amount: 40_000, percent: 80 });
+    expect(r32(run32(s)).map((h) => [h.orderId, h.note.includes('melebihi')])).toEqual([['a', true], ['b', true]]);
+  });
+
+  it('tanpa daftar promo dari server aturan tidak dijalankan; diskon non-PROMO tidak disentuh', () => {
+    const s = new Sim();
+    promoDiscount(s, 'a', { promoId: 'gratis-semua', amount: 50_000, percent: 100 });
+    s.pos({ type: 'discount.applied', payload: { orderId: 'a', kind: 'MANUAL', amount: 1_000, percent: 5, verified: true } }, '12:01:00', 'budi');
+    expect(r32(run32(s, false))).toEqual([]);
+    expect(r32(run32(s)).map((h) => h.orderId)).toEqual(['a']); // hanya yang PROMO
+  });
+});

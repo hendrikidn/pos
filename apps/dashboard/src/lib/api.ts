@@ -164,6 +164,22 @@ export interface MenuRow {
   image: string | null;
 }
 
+export interface PromoRow {
+  id: string;
+  name: string;
+  kind: 'PERCENT' | 'AMOUNT';
+  value: number;
+  minSubtotal?: number;
+  maxDiscount?: number;
+  days?: number[];
+  startDate?: string;
+  endDate?: string;
+  startHour?: number;
+  endHour?: number;
+  outletId: string | null;
+  active: boolean;
+}
+
 export interface OutletSettings {
   id: string;
   name: string;

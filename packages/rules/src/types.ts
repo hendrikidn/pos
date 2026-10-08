@@ -75,7 +75,7 @@ export const DEFAULT_CONFIG: RuleConfig = {
   r14WindowMs: 7 * 24 * 3_600_000,
   weights: {
     R1: 15, R1_DRAWER: 30, R2: 30, R2_PROXY: 20, R3: 35, R4: 40, R5: 20, R5B: 25, R6: 25, R6_APPROVED: 10, R14: 20,
-    R18: 30, R18_APPROVED: 10, R21: 30, R22: 30, R23: 20, R24: 40, R25: 25, R30: 60, R30_UNTRACKED: 20, R31: 50, R29_TIME: 30, R29_DEBUG: 15, R29_ROOT: 40,
+    R18: 30, R18_APPROVED: 10, R21: 30, R22: 30, R23: 20, R24: 40, R25: 25, R30: 60, R30_UNTRACKED: 20, R31: 50, R32: 45, R29_TIME: 30, R29_DEBUG: 15, R29_ROOT: 40,
   },
 };
 
@@ -89,6 +89,11 @@ export interface RuleInput {
   config?: Partial<RuleConfig>;
   /** Offset zona waktu outlet (menit) untuk batas "hari" pada kuota R6. Default WIB. */
   utcOffsetMinutes?: number;
+  /**
+   * Promo yang berlaku di outlet ini menurut server (termasuk yang sudah dinonaktifkan; diskon lama merujuknya). Bila diberikan, diskon PROMO
+   * dengan id tak dikenal atau besar melebihi aturan promo menjadi temuan R32. Tidak diberikan = aturan R32 tidak dijalankan.
+   */
+  promos?: { id: string; kind: 'PERCENT' | 'AMOUNT'; value: number }[];
   /** Masalah integritas yang hanya diketahui server (mis. tanda tangan perangkat tidak sah). */
   extraIntegrity?: { deviceId: string; seq: number; kind: string; at: number; actorId?: string | null }[];
 }

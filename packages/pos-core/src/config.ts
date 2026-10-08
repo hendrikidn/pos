@@ -1,4 +1,4 @@
-import type { Policy } from '@pos/order';
+import type { Policy, Promo } from '@pos/order';
 import { DEFAULT_POLICY } from '@pos/order';
 import type { KeyValueStore } from './store';
 import type { MenuItem, PosConfig, Staff } from './types';
@@ -20,9 +20,11 @@ export interface DeviceConfig {
     taxOnService?: boolean;
     roundingUnit?: number;
     tables?: { no: string; area: string; seats: number }[];
+    utcOffsetMinutes?: number;
     edcs: { tid: string; bank: string; label: string }[];
     policy: Partial<Policy> | null;
   };
+  promos?: Promo[];
   staff: Staff[];
   menu: MenuItem[];
 }
@@ -39,6 +41,7 @@ export function toPosConfig(c: DeviceConfig): PosConfig {
     ...(c.outlet.roundingUnit ? { roundingUnit: c.outlet.roundingUnit } : {}),
     edcs: c.outlet.edcs,
     ...(c.outlet.tables?.length ? { tables: c.outlet.tables } : {}),
+    ...(c.promos?.length ? { promos: c.promos, ...(c.outlet.utcOffsetMinutes !== undefined ? { utcOffsetMinutes: c.outlet.utcOffsetMinutes } : {}) } : {}),
     staff: c.staff,
     menu: c.menu,
     policy: { ...DEFAULT_POLICY, ...(c.outlet.policy ?? {}) },

@@ -117,6 +117,9 @@ async function main() {
     ['rina', 'Rina (Manager)', 'MANAGER'], ['owner', 'Owner', 'OWNER'],
   ] as const;
   for (const [id, name, role] of people) await config.createStaff(seeder, { id, name, role, pin: demoPins[id] });
+  await config.createPromo(seeder, { id: 'hemat10', name: 'Hemat 10%', kind: 'PERCENT', value: 10, maxDiscount: 10_000 });
+  await config.createPromo(seeder, { id: 'happy-hour', name: 'Happy hour', kind: 'PERCENT', value: 20, days: [1, 2, 3, 4, 5], startHour: 14, endHour: 17 });
+  await config.createPromo(seeder, { id: 'belanja-60', name: 'Potong 15rb', kind: 'AMOUNT', value: 15_000, minSubtotal: 60_000 });
   const photos: Record<string, [[number, number, number], [number, number, number]]> = {
     'kopi-susu': [[120, 80, 50], [200, 150, 100]], americano: [[40, 30, 25], [110, 80, 60]],
     matcha: [[90, 150, 70], [190, 220, 140]], croissant: [[200, 140, 50], [240, 200, 120]],

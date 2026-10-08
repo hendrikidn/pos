@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import type { OrderRecord } from '@pos/pos-core';
-import { VOID_REASONS } from '@pos/pos-core';
-import { Modal, PayDialog, PinPad } from './dialogs';
+import type { MenuItem, OrderRecord } from '@pos/pos-core';
+import { lineKey, VOID_REASONS } from '@pos/pos-core';
+import { Modal, ModifierDialog, NoteDialog, PayDialog, PinPad } from './dialogs';
 import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, type Ctx } from './ui';
 
 type Dialog = 'pay' | 'discount' | 'void' | 'decline' | 'refund' | null;
@@ -10,6 +10,8 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
   const { engine, config } = ctx.rt;
   const [dlg, setDlg] = useState<Dialog>(null);
   const [category, setCategory] = useState(config.menu[0]?.category ?? '');
+  const [choosing, setChoosing] = useState<MenuItem | null>(null);
+  const [noteFor, setNoteFor] = useState<string | null>(null);
   const totals = engine.totals(order);
   const locked = order.state.status !== 'DRAFT' && order.state.status !== 'SENT';
   const paid = isPaid(order);
@@ -45,7 +47,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
     return r;
   }
 
-  const qtyOf = (id: string) => order.items.find((l) => l.itemId === id)?.qty ?? 0;
+  const qtyOf = (id: string) => order.items.filter((l) => l.itemId === id).reduce((s, l) => s + l.qty, 0);
 
   return (
     <section className={`order-panel ${locked ? 'locked' : ''}`} aria-label={`Order ${order.number}`}>
@@ -60,9 +62,13 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
             {config.menu.filter((m) => m.category === category).map((m) => {
               const n = qtyOf(m.id);
               return (
-                <button key={m.id} className={`menu-item ${n > 0 ? 'has' : ''}`} onClick={() => void run(ctx, () => engine.addItem(order.id, m.id, 1))}>
+                <button
+                  key={m.id}
+                  className={`menu-item ${n > 0 ? 'has' : ''}`}
+                  onClick={() => (m.modifierGroups?.length ? setChoosing(m) : void run(ctx, () => engine.addItem(order.id, m.id, 1)))}
+                >
                   <span>{m.name}</span>
-                  <b>{rp(m.price)}</b>
+                  <b>{m.modifierGroups?.length ? `mulai ${rp(m.price)}` : rp(m.price)}</b>
                   {n > 0 && <i className="qty-badge" aria-label={`${n} di keranjang`}>{n}</i>}
                 </button>
               );
@@ -83,21 +89,31 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
 
         <ul className="cart">
           {order.items.length === 0 && <li className="muted">Belum ada item. Ketuk menu untuk menambahkan.</li>}
-          {order.items.map((l) => (
-            <li key={l.itemId}>
-              <span className="name">{l.name}{l.sentQty > 0 && <small> · terkirim {l.sentQty}</small>}</span>
-              {!locked ? (
-                <span className="qty">
-                  <button aria-label="Kurangi" onClick={() => void run(ctx, () => engine.setQty(order.id, l.itemId, l.qty - 1))}>−</button>
-                  <b>{l.qty}</b>
-                  <button aria-label="Tambah" onClick={() => void run(ctx, () => engine.setQty(order.id, l.itemId, l.qty + 1))}>+</button>
+          {order.items.map((l) => {
+            const key = lineKey(l);
+            return (
+              <li key={key}>
+                <span className="name">
+                  {l.name}{l.sentQty > 0 && <small> · terkirim {l.sentQty}</small>}
+                  {l.options && l.options.length > 0 && <small className="line-opts">{l.options.map((o) => o.name).join(' · ')}</small>}
+                  {l.note && <small className="line-note">“{l.note}”</small>}
+                  {!locked && l.sentQty === 0 && (
+                    <button className="link-btn" onClick={() => setNoteFor(key)}>{l.note ? 'Ubah catatan' : '+ Catatan'}</button>
+                  )}
                 </span>
-              ) : (
-                <b>{l.qty}×</b>
-              )}
-              <span className="amt">{rp(l.qty * l.unitPrice)}</span>
-            </li>
-          ))}
+                {!locked ? (
+                  <span className="qty">
+                    <button aria-label="Kurangi" onClick={() => void run(ctx, () => engine.setQty(order.id, key, l.qty - 1))}>−</button>
+                    <b>{l.qty}</b>
+                    <button aria-label="Tambah" onClick={() => void run(ctx, () => engine.setQty(order.id, key, l.qty + 1))}>+</button>
+                  </span>
+                ) : (
+                  <b>{l.qty}×</b>
+                )}
+                <span className="amt">{rp(l.qty * l.unitPrice)}</span>
+              </li>
+            );
+          })}
         </ul>
 
         <dl className="totals">
@@ -149,6 +165,27 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
         )}
       </aside>
 
+      {choosing && (
+        <ModifierDialog
+          item={choosing}
+          onClose={() => setChoosing(null)}
+          onAdd={async (v) => {
+            const r = await run(ctx, () => engine.addItem(order.id, choosing.id, v.qty, { options: v.options, note: v.note }));
+            if (r.ok) setChoosing(null);
+          }}
+        />
+      )}
+      {noteFor && (
+        <NoteDialog
+          title="Catatan"
+          initial={order.items.find((l) => lineKey(l) === noteFor)?.note ?? ''}
+          onClose={() => setNoteFor(null)}
+          onSave={async (note) => {
+            const r = await run(ctx, () => engine.setNote(order.id, noteFor, note));
+            if (r.ok) setNoteFor(null);
+          }}
+        />
+      )}
       {dlg === 'pay' && <PayDialog ctx={ctx} order={order} onClose={() => setDlg(null)} />}
       {dlg === 'discount' && <DiscountDialog ctx={ctx} order={order} onClose={() => setDlg(null)} withApproval={withApproval} />}
       {dlg === 'void' && (

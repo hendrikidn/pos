@@ -12,7 +12,12 @@ export interface LineItem {
   itemId: string;
   name: string;
   qty: number;
+  /** Harga satuan akhir, sudah termasuk harga opsi. `qty × unitPrice` selalu nilai baris. */
   unitPrice: number;
+  /** Varian dan tambahan yang dipilih; harganya sudah termasuk di `unitPrice`. */
+  options?: { group: string; name: string; price: number }[];
+  /** Catatan kasir untuk dapur. */
+  note?: string;
 }
 
 /** Isi event menurut tipe. Menambah tipe event = menambah satu baris di sini. */

@@ -1,3 +1,4 @@
+export * from './modifiers';
 import type { EventBody, KitchenStatus, OrderType, PosEvent } from '@pos/events';
 
 export type Role = 'CASHIER' | 'SUPERVISOR' | 'MANAGER' | 'OWNER';

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
-import type { OrderRecord, StaffPublic } from '@pos/pos-core';
+import type { MenuItem, OrderRecord, StaffPublic } from '@pos/pos-core';
+import { resolveSelection } from '@pos/order';
 import { METHOD_LABEL, rp, type Ctx } from './ui';
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -142,6 +143,99 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
       <div className="actions">
         <button className="secondary" onClick={onClose}>Batal</button>
         <button disabled={busy || (method === 'CASH' && cash > 0 && cash < due)} onClick={submit}>Konfirmasi</button>
+      </div>
+    </Modal>
+  );
+}
+
+const NOTE_MAX = 140;
+
+/**
+ * Memilih varian dan tambahan untuk satu menu. Grup wajib (min ≥ 1) ditandai; tombol Tambah baru aktif bila semua batas
+ * terpenuhi, dan harga akhir per porsi ditampilkan langsung. Pilihan satu-satunya (max 1) bersifat radio, selebihnya centang.
+ */
+export function ModifierDialog({
+  item, onClose, onAdd,
+}: {
+  item: MenuItem;
+  onClose: () => void;
+  onAdd: (v: { options: string[]; note: string; qty: number }) => void;
+}) {
+  const groups = item.modifierGroups ?? [];
+  const [picked, setPicked] = useState<string[]>([]);
+  const [note, setNote] = useState('');
+  const [qty, setQty] = useState(1);
+  const sel = resolveSelection(groups, picked);
+  const unit = item.price + (sel.ok ? sel.extra : picked.reduce((a, id) => a + (groups.flatMap((g) => g.options).find((o) => o.id === id)?.price ?? 0), 0));
+
+  function toggle(groupId: string, optionId: string) {
+    const g = groups.find((x) => x.id === groupId)!;
+    setPicked((cur) => {
+      if (cur.includes(optionId)) return cur.filter((x) => x !== optionId);
+      if (g.max === 1) return [...cur.filter((x) => !g.options.some((o) => o.id === x)), optionId];
+      const inGroup = cur.filter((x) => g.options.some((o) => o.id === x)).length;
+      return inGroup >= g.max ? cur : [...cur, optionId];
+    });
+  }
+
+  return (
+    <Modal title={item.name} onClose={onClose}>
+      {groups.map((g) => {
+        const n = picked.filter((x) => g.options.some((o) => o.id === x)).length;
+        return (
+          <fieldset key={g.id} className="opt-group">
+            <legend>
+              {g.name}
+              <small className={g.min > 0 && n < g.min ? 'need' : ''}>
+                {g.min > 0 ? (g.max === 1 ? 'Wajib pilih satu' : `Pilih ${g.min}–${g.max}`) : g.max === 1 ? 'Opsional' : `Opsional, maks. ${g.max}`}
+              </small>
+            </legend>
+            <div className="opts">
+              {g.options.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role={g.max === 1 ? 'radio' : 'checkbox'}
+                  aria-checked={picked.includes(o.id)}
+                  className={`opt ${picked.includes(o.id) ? 'on' : ''}`}
+                  onClick={() => toggle(g.id, o.id)}
+                >
+                  <span>{o.name}</span>
+                  {o.price > 0 && <b>+{rp(o.price)}</b>}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        );
+      })}
+      <label className="field">Catatan untuk dapur (opsional)
+        <input value={note} maxLength={NOTE_MAX} placeholder="mis. tanpa es, gula sedikit" onChange={(e) => setNote(e.target.value)} />
+      </label>
+      <div className="opt-foot">
+        <span className="qty">
+          <button type="button" aria-label="Kurangi" disabled={qty <= 1} onClick={() => setQty(qty - 1)}>−</button>
+          <b>{qty}</b>
+          <button type="button" aria-label="Tambah" disabled={qty >= 99} onClick={() => setQty(qty + 1)}>+</button>
+        </span>
+        <button type="button" className="pay" disabled={!sel.ok} onClick={() => sel.ok && onAdd({ options: picked, note, qty })}>
+          {sel.ok ? `Tambah · ${rp(unit * qty)}` : sel.message}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Catatan untuk dapur pada satu baris yang belum dikirim. */
+export function NoteDialog({ title, initial, onClose, onSave }: { title: string; initial: string; onClose: () => void; onSave: (note: string) => void }) {
+  const [note, setNote] = useState(initial);
+  return (
+    <Modal title={title} onClose={onClose}>
+      <label className="field">Catatan untuk dapur
+        <input autoFocus value={note} maxLength={NOTE_MAX} placeholder="mis. tanpa es, gula sedikit" onChange={(e) => setNote(e.target.value)} />
+      </label>
+      <div className="actions">
+        <button className="secondary" onClick={onClose}>Batal</button>
+        <button onClick={() => onSave(note)}>Simpan</button>
       </div>
     </Modal>
   );

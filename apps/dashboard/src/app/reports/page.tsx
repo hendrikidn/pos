@@ -168,6 +168,25 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </p>
       </section>
 
+      {r.byOption.length > 0 && (
+        <section className="panel" aria-labelledby="opsi">
+          <h2 id="opsi">Varian dan tambahan terlaris</h2>
+          <table className="table">
+            <thead><tr><th>Opsi</th><th>Grup</th><th className="num">Dipilih</th><th className="num">Tambahan harga</th></tr></thead>
+            <tbody>
+              {r.byOption.slice(0, 20).map((o) => (
+                <tr key={`${o.group}|${o.name}`}>
+                  <td data-label="Opsi"><b>{o.name}</b></td>
+                  <td data-label="Grup">{o.group}</td>
+                  <td className="num" data-label="Dipilih">{o.qty.toLocaleString('id-ID')}×</td>
+                  <td className="num" data-label="Tambahan harga">{o.amount > 0 ? rp(o.amount) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
       <section className="panel" aria-labelledby="kasir">
         <h2 id="kasir">Per kasir</h2>
         {r.byCashier.length === 0 ? (

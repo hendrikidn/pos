@@ -1,7 +1,7 @@
 import type { Policy } from '@pos/order';
 import { DEFAULT_POLICY } from '@pos/order';
 import type { KeyValueStore } from './store';
-import type { PosConfig, Staff } from './types';
+import type { MenuItem, PosConfig, Staff } from './types';
 
 /** Bentuk konfigurasi dari GET /v1/device/config. */
 export interface DeviceConfig {
@@ -16,7 +16,7 @@ export interface DeviceConfig {
     policy: Partial<Policy> | null;
   };
   staff: Staff[];
-  menu: { id: string; name: string; price: number; category: string }[];
+  menu: MenuItem[];
 }
 
 export function toPosConfig(c: DeviceConfig): PosConfig {

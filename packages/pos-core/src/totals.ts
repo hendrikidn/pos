@@ -14,6 +14,11 @@ export function computeTotals(items: CartLine[], discount: number, taxPercent: n
   return { subtotal, discount, tax, total: taxable + tax };
 }
 
+/** Nama baris untuk tampilan dan cetak: "Kopi Susu (Large, Oat Milk)". */
+export function lineLabel(l: Pick<CartLine, 'name' | 'options'>): string {
+  return l.options && l.options.length > 0 ? `${l.name} (${l.options.map((o) => o.name).join(', ')})` : l.name;
+}
+
 export const paidTotal = (o: OrderRecord) => o.payments.reduce((s, p) => s + p.amount, 0);
 
 const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
@@ -26,7 +31,7 @@ export function renderBill(o: OrderRecord, cfg: PosConfig, title = 'BILL'): stri
     title,
     `Order ${o.id}${o.tableNo ? `  Meja ${o.tableNo}` : ''}`,
     '--------------------------------',
-    ...o.items.map((i) => line(`${i.qty}x ${i.name}`, rp(i.qty * i.unitPrice))),
+    ...o.items.map((i) => line(`${i.qty}x ${lineLabel(i)}`, rp(i.qty * i.unitPrice))),
     '--------------------------------',
     line('Subtotal', rp(t.subtotal)),
     ...(t.discount > 0 ? [line('Diskon', `-${rp(t.discount)}`)] : []),
@@ -41,5 +46,8 @@ export function renderReceipt(o: OrderRecord, cfg: PosConfig): string {
 }
 
 export function renderKitchenTicket(o: OrderRecord): string {
-  return [`DAPUR  ${o.id}${o.tableNo ? `  Meja ${o.tableNo}` : ''}`, ...o.items.map((i) => `${i.qty}x ${i.name}`)].join('\n');
+  return [
+    `DAPUR  ${o.id}${o.tableNo ? `  Meja ${o.tableNo}` : ''}`,
+    ...o.items.flatMap((i) => [`${i.qty}x ${lineLabel(i)}`, ...(i.note ? [`   * ${i.note}`] : [])]),
+  ].join('\n');
 }

@@ -39,6 +39,15 @@ export interface ProductRow {
   amount: number;
 }
 
+export interface OptionRow {
+  group: string;
+  name: string;
+  /** Berapa kali opsi ini dipilih (jumlah porsi). */
+  qty: number;
+  /** Tambahan harga dari opsi ini: harga opsi × porsi. */
+  amount: number;
+}
+
 export interface SalesReport {
   range: { from: string; to: string; days: number; utcOffsetMinutes: number; generatedAt: number };
   totals: {
@@ -60,6 +69,8 @@ export interface SalesReport {
   byCashier: CashierRow[];
   /** Produk terjual dari order yang dihitung sebagai penjualan, urut nilai terbesar. Nilai kotor: sebelum diskon dan pajak. */
   byProduct: ProductRow[];
+  /** Varian dan tambahan yang dipilih pada order yang dihitung, urut jumlah terbanyak. */
+  byOption: OptionRow[];
   /** Order terhitung yang tagihannya tidak membawa rincian item (terminal versi lama): tidak ada di `byProduct`. */
   ordersWithoutItems: number;
   cashCounts: {
@@ -155,6 +166,7 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
     employeeMeals: 0,
   };
   const products = new Map<string, ProductRow>();
+  const optionRows = new Map<string, OptionRow>();
   let ordersWithoutItems = 0;
   const ordered = [...events].sort((a, b) => t(a) - t(b) || a.seq - b.seq);
 
@@ -185,6 +197,13 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
               row.amount += l.qty * l.unitPrice;
               row.name = l.name;
               products.set(l.itemId, row);
+              for (const op of l.options ?? []) {
+                const key = `${op.group}\u0000${op.name}`;
+                const orow = optionRows.get(key) ?? { group: op.group, name: op.name, qty: 0, amount: 0 };
+                orow.qty += l.qty;
+                orow.amount += l.qty * op.price;
+                optionRows.set(key, orow);
+              }
             }
           }
           if (e.actorId) cashier(e.actorId).orders += 1;
@@ -266,6 +285,7 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
     byMethod: METHODS.map((m) => ({ method: m, ...methods.get(m)! })),
     byCashier: [...cashiers.values()].sort((a, b) => b.sales - a.sales || a.userId.localeCompare(b.userId)),
     byProduct: [...products.values()].sort((a, b) => b.amount - a.amount || b.qty - a.qty || a.name.localeCompare(b.name)),
+    byOption: [...optionRows.values()].sort((a, b) => b.qty - a.qty || a.group.localeCompare(b.group) || a.name.localeCompare(b.name)),
     ordersWithoutItems,
     cashCounts: { toleranceAmount: DEFAULT_CONFIG.r14ToleranceAmount, shifts },
     notes,

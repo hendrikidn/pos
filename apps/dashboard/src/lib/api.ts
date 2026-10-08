@@ -148,11 +148,15 @@ export interface StaffRow {
   active: boolean;
 }
 
+export interface ModifierOption { id: string; name: string; price: number }
+export interface ModifierGroup { id: string; name: string; min: number; max: number; options: ModifierOption[] }
+
 export interface MenuRow {
   id: string;
   name: string;
   price: number;
   category: string;
+  modifierGroups: ModifierGroup[];
   sort: number;
   outlet_id: string | null;
   active: boolean;
@@ -242,6 +246,7 @@ export interface SalesReport {
   byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT'; payments: number; amount: number }[];
   byCashier: CashierRow[];
   byProduct: { itemId: string; name: string; qty: number; amount: number }[];
+  byOption: { group: string; name: string; qty: number; amount: number }[];
   ordersWithoutItems: number;
   cashCounts: {
     toleranceAmount: number;

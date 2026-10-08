@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { MenuRow } from '@/lib/api';
 import { manage } from '@/lib/manage';
+import { ModifierEditor } from './ModifierEditor';
 
 const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
@@ -12,6 +13,7 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
   const [form, setForm] = useState({ id: '', name: '', price: '', category: '' });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
 
   async function run(fn: () => Promise<{ ok: true } | { ok: false; message: string }>) {
     setBusy(true);
@@ -30,13 +32,20 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
         <table className="table">
           <thead><tr><th>Menu</th><th>Kategori</th><th className="num">Harga</th><th>Status</th><th /></tr></thead>
           <tbody>
-            {items.map((m) => (
+            {items.flatMap((m) => [
               <tr key={m.id} className={m.active ? '' : 'off'}>
-                <td data-label="Menu">{m.name}<div className="muted small mono">{m.id}</div></td>
+                <td data-label="Menu">
+                  {m.name}
+                  <div className="muted small mono">{m.id}</div>
+                  {m.modifierGroups.length > 0 && <div className="muted small">{m.modifierGroups.map((g) => g.name).join(' · ')}</div>}
+                </td>
                 <td data-label="Kategori">{m.category}</td>
                 <td data-label="Harga" className="num">{rp(m.price)}</td>
                 <td data-label="Status">{m.active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="row-actions">
+                  <button className="secondary" disabled={busy} onClick={() => setEditing(editing === m.id ? null : m.id)}>
+                    Varian{m.modifierGroups.length > 0 ? ` (${m.modifierGroups.length})` : ''}
+                  </button>
                   <button
                     className="secondary"
                     disabled={busy}
@@ -52,12 +61,30 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
                     {m.active ? 'Nonaktifkan' : 'Aktifkan'}
                   </button>
                 </td>
-              </tr>
-            ))}
+              </tr>,
+              ...(editing === m.id
+                ? [
+                    <tr key={`${m.id}-mod`} className="mod-row">
+                      <td colSpan={5}>
+                        <ModifierEditor
+                          menuName={m.name}
+                          groups={m.modifierGroups}
+                          busy={busy}
+                          onCancel={() => setEditing(null)}
+                          onSave={async (modifierGroups) => {
+                            const r = await run(() => manage('PUT', `/v1/menu/${m.id}`, { modifierGroups }));
+                            if (r) setEditing(null);
+                          }}
+                        />
+                      </td>
+                    </tr>,
+                  ]
+                : []),
+            ])}
             {items.length === 0 && <tr><td colSpan={5} className="muted">Belum ada menu.</td></tr>}
           </tbody>
         </table>
-        <p className="muted small">Setiap perubahan harga dicatat di log audit beserta harga lama dan barunya.</p>
+        <p className="muted small">Setiap perubahan harga dicatat di log audit beserta harga lama dan barunya. Perubahan varian sampai ke terminal pada pembaruan konfigurasi berikutnya; order yang sedang berjalan tidak berubah.</p>
       </section>
 
       <section className="panel">

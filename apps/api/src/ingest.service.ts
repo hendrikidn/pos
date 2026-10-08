@@ -44,6 +44,16 @@ function badItems(p: Payload): string | null {
     if (!str(l, 'name') || (l['name'] as string).length > 120) return 'nama item tidak valid';
     if (!Number.isInteger(l['qty']) || (l['qty'] as number) < 1 || (l['qty'] as number) > 999) return 'qty harus bilangan bulat 1–999';
     if (!Number.isInteger(l['unitPrice']) || (l['unitPrice'] as number) < 0) return 'unitPrice harus bilangan bulat ≥ 0';
+    if (l['note'] !== undefined && (typeof l['note'] !== 'string' || l['note'].length > 140)) return 'note harus teks maks. 140';
+    if (l['options'] !== undefined) {
+      if (!Array.isArray(l['options']) || l['options'].length > 40) return 'options harus berisi maks. 40 baris';
+      for (const raw of l['options'] as unknown[]) {
+        const o = raw as Payload | null;
+        if (typeof o !== 'object' || o === null || Array.isArray(o)) return 'baris options bukan objek';
+        if (!str(o, 'group') || (o['group'] as string).length > 40 || !str(o, 'name') || (o['name'] as string).length > 40) return 'nama grup/opsi tidak valid';
+        if (!Number.isInteger(o['price']) || (o['price'] as number) < 0) return 'harga opsi harus bilangan bulat ≥ 0';
+      }
+    }
   }
   return null;
 }

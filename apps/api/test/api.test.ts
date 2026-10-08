@@ -169,15 +169,19 @@ describe('ingest event', () => {
 
   it('item pesanan di bill.printed: yang benar diterima dan tersimpan, yang cacat ditolak', async () => {
     const s = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');
-    const items = [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 22_000 }];
+    const items = [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 28_000, note: 'es sedikit', options: [{ group: 'Ukuran', name: 'Large', price: 6_000 }] }];
     s.pos({ type: 'order.created', payload: { orderId: 'i1', orderType: 'TAKE_AWAY' } }, '10:00:00', 'budi');
-    s.pos({ type: 'bill.printed', payload: { orderId: 'i1', total: 44_000, items } }, '10:01:00', 'budi');
+    s.pos({ type: 'bill.printed', payload: { orderId: 'i1', total: 56_000, items } }, '10:01:00', 'budi');
     expect((await h.postEvents(dev, s.events)).status).toBe(201);
 
     const bad: unknown[] = [
       [], 'kopi', [{ ...items[0], qty: 0 }], [{ ...items[0], qty: 1.5 }], [{ ...items[0], qty: 1000 }],
       [{ ...items[0], unitPrice: -1 }], [{ ...items[0], name: '' }], [{ ...items[0], name: 'x'.repeat(121) }],
       [{ ...items[0], itemId: undefined }], [null], Array.from({ length: 101 }, () => items[0]),
+      [{ ...items[0], note: 'x'.repeat(141) }], [{ ...items[0], note: 5 }],
+      [{ ...items[0], options: 'besar' }], [{ ...items[0], options: [{ group: 'Ukuran', name: 'L', price: -1 }] }],
+      [{ ...items[0], options: [{ group: '', name: 'L', price: 0 }] }], [{ ...items[0], options: [{ group: 'U', name: 'x'.repeat(41), price: 0 }] }],
+      [{ ...items[0], options: Array.from({ length: 41 }, () => ({ group: 'U', name: 'L', price: 0 })) }],
     ];
     for (const [i, v] of bad.entries()) {
       const t = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');

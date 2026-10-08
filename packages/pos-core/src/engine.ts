@@ -1,12 +1,12 @@
-import type { KitchenStatus, OrderType, PaymentMethod, PosEvent, PrinterState } from '@pos/events';
-import { decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, reduceOrder, type Ctx } from '@pos/order';
+import type { KitchenStatus, LineItem, OrderType, PaymentMethod, PosEvent, PrinterState } from '@pos/events';
+import { decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, MAX_NOTE_LENGTH, reduceOrder, resolveSelection, type Ctx } from '@pos/order';
 import { Directory } from './directory';
 import type { Printer } from './printer';
 import type { Recorder } from './recorder';
 import type { KeyValueStore } from './store';
-import { computeTotals, paidTotal, renderBill, renderKitchenTicket, renderReceipt, type Totals } from './totals';
+import { computeTotals, lineLabel, paidTotal, renderBill, renderKitchenTicket, renderReceipt, type Totals } from './totals';
 import {
-  fail, ok, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic,
+  fail, lineKey, ok, type CartLine, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic,
 } from './types';
 
 export interface EngineDeps {
@@ -29,6 +29,17 @@ export const VOID_REASONS = [
   { code: 'DUPLICATE', label: 'Order ganda' },
   { code: 'KITCHEN_ERROR', label: 'Kesalahan dapur' },
 ] as const;
+
+/** Dua baris sama bila menu, himpunan opsi, dan catatannya sama. */
+const signature = (itemId: string, optionIds: string[], note: string | undefined) =>
+  JSON.stringify([itemId, [...optionIds].sort(), note ?? '']);
+
+/** Baris pesanan untuk payload event: nama dan harga disalin saat kejadian. */
+const eventLine = (l: CartLine, qty: number): LineItem => ({
+  itemId: l.itemId, name: l.name, qty, unitPrice: l.unitPrice,
+  ...(l.options ? { options: l.options.map((x) => ({ group: x.group, name: x.name, price: x.price })) } : {}),
+  ...(l.note ? { note: l.note } : {}),
+});
 
 const ACTIVE = new Set(['DRAFT', 'SENT', 'BILLED']);
 
@@ -262,7 +273,11 @@ export class PosEngine {
     return ok(o);
   }
 
-  async addItem(orderId: string, itemId: string, qty = 1): Promise<Result<OrderRecord>> {
+  /**
+   * Menambah menu ke order. Menu dengan varian/tambahan memerlukan `options` (id opsi) sesuai batas tiap grup; harga satuan
+   * akhir = harga menu + harga opsi. Baris dengan menu, opsi, dan catatan yang sama digabung; selain itu menjadi baris baru.
+   */
+  async addItem(orderId: string, itemId: string, qty = 1, opts: { options?: string[]; note?: string } = {}): Promise<Result<OrderRecord>> {
     const r = this.order(orderId);
     if (!r.ok) return r;
     const o = r.value;
@@ -270,25 +285,61 @@ export class PosEngine {
     const item = this.cfg.menu.find((m) => m.id === itemId);
     if (!item) return fail('ITEM_NOT_FOUND', 'Menu tidak ditemukan.');
     if (!Number.isInteger(qty) || qty < 1) return fail('QTY_INVALID', 'Jumlah tidak valid.');
-    const line = o.items.find((l) => l.itemId === itemId);
+    const note = opts.note?.trim() || undefined;
+    if (note && note.length > MAX_NOTE_LENGTH) return fail('NOTE_TOO_LONG', `Catatan maksimal ${MAX_NOTE_LENGTH} karakter.`);
+    const sel = resolveSelection(item.modifierGroups, opts.options ?? []);
+    if (!sel.ok) return fail(sel.code, sel.message);
+
+    const sig = signature(itemId, sel.options.map((x) => x.optionId), note);
+    const line = o.items.find((l) => signature(l.itemId, (l.options ?? []).map((x) => x.optionId), l.note) === sig);
     if (line) line.qty += qty;
-    else o.items.push({ itemId, name: item.name, qty, unitPrice: item.price, sentQty: 0 });
+    else {
+      // Baris pertama sebuah menu memakai itemId sebagai lineId (sama dengan order lama); berikutnya diberi nomor.
+      const taken = new Set(o.items.map(lineKey));
+      let lineId = itemId;
+      for (let n = 2; taken.has(lineId); n++) lineId = `${itemId}#${n}`;
+      const fresh: CartLine = { lineId, itemId, name: item.name, qty, unitPrice: item.price + sel.extra, sentQty: 0 };
+      if (sel.options.length > 0) fresh.options = sel.options;
+      if (note) fresh.note = note;
+      o.items.push(fresh);
+    }
     await this.save(o);
     return ok(o);
   }
 
-  /** Mengubah jumlah. Item yang sudah dikirim ke dapur tidak boleh dikurangi di bawah jumlah yang terkirim. */
-  async setQty(orderId: string, itemId: string, qty: number): Promise<Result<OrderRecord>> {
+  /** Mengubah jumlah baris (`lineId`; untuk order lama sama dengan itemId). Baris yang sudah dikirim ke dapur tidak boleh dikurangi di bawah jumlah terkirim. */
+  async setQty(orderId: string, lineId: string, qty: number): Promise<Result<OrderRecord>> {
     const r = this.order(orderId);
     if (!r.ok) return r;
     const o = r.value;
     if (o.state.status !== 'DRAFT' && o.state.status !== 'SENT') return fail('ORDER_LOCKED', 'Order sudah ditagih atau selesai; item tidak bisa diubah.');
-    const line = o.items.find((l) => l.itemId === itemId);
+    const line = o.items.find((l) => lineKey(l) === lineId);
     if (!line) return fail('ITEM_NOT_FOUND', 'Item tidak ada di order.');
     if (!Number.isInteger(qty) || qty < 0) return fail('QTY_INVALID', 'Jumlah tidak valid.');
     if (qty < line.sentQty) return fail('ITEM_SENT', 'Item sudah dikirim ke dapur. Gunakan void dengan persetujuan.');
     if (qty === 0) o.items = o.items.filter((l) => l !== line);
     else line.qty = qty;
+    await this.save(o);
+    return ok(o);
+  }
+
+  /** Mengubah catatan baris. Hanya untuk baris yang belum dikirim ke dapur (catatan sesudahnya tidak akan terbaca dapur). */
+  async setNote(orderId: string, lineId: string, note: string): Promise<Result<OrderRecord>> {
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    if (o.state.status !== 'DRAFT' && o.state.status !== 'SENT') return fail('ORDER_LOCKED', 'Order sudah ditagih atau selesai; item tidak bisa diubah.');
+    const line = o.items.find((l) => lineKey(l) === lineId);
+    if (!line) return fail('ITEM_NOT_FOUND', 'Item tidak ada di order.');
+    if (line.sentQty > 0) return fail('ITEM_SENT', 'Item sudah dikirim ke dapur; catatan tidak bisa diubah.');
+    const next = note.trim();
+    if (next.length > MAX_NOTE_LENGTH) return fail('NOTE_TOO_LONG', `Catatan maksimal ${MAX_NOTE_LENGTH} karakter.`);
+    const sig = signature(line.itemId, (line.options ?? []).map((x) => x.optionId), next || undefined);
+    if (o.items.some((l) => l !== line && signature(l.itemId, (l.options ?? []).map((x) => x.optionId), l.note) === sig)) {
+      return fail('LINE_DUPLICATE', 'Sudah ada baris yang sama dengan catatan itu; ubah jumlahnya di baris tersebut.');
+    }
+    if (next) line.note = next;
+    else delete line.note;
     await this.save(o);
     return ok(o);
   }
@@ -303,7 +354,7 @@ export class PosEngine {
     await this.d.printer.print(renderKitchenTicket({ ...o, items: fresh.map((l) => ({ ...l, qty: l.qty - l.sentQty })) }));
     const e = await this.emit({
       type: 'order.sent_to_kitchen',
-      payload: { orderId, items: fresh.map((l) => ({ itemId: l.itemId, name: l.name, qty: l.qty - l.sentQty, unitPrice: l.unitPrice })) },
+      payload: { orderId, items: fresh.map((l) => eventLine(l, l.qty - l.sentQty)) },
     });
     for (const l of o.items) l.sentQty = l.qty;
     await this.apply(o, e);
@@ -339,7 +390,7 @@ export class PosEngine {
       type: 'bill.printed',
       payload: {
         orderId, total: this.totals(o).total,
-        items: o.items.map((l) => ({ itemId: l.itemId, name: l.name, qty: l.qty, unitPrice: l.unitPrice })),
+        items: o.items.map((l) => eventLine(l, l.qty)),
       },
     });
     await this.apply(o, e);
@@ -524,7 +575,7 @@ export class PosEngine {
     if (!o) return null;
     return {
       merchantName: this.cfg.merchantName,
-      lines: o.items.map((l) => ({ name: l.name, qty: l.qty, amount: l.qty * l.unitPrice })),
+      lines: o.items.map((l) => ({ name: lineLabel(l), qty: l.qty, amount: l.qty * l.unitPrice })),
       totals: this.totals(o),
       status: o.state.status,
     };

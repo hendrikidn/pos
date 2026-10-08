@@ -1,11 +1,13 @@
 import type { KitchenStatus, OrderType, PaymentMethod } from '@pos/events';
-import type { OrderState, Policy, Role } from '@pos/order';
+import type { ChosenOption, ModifierGroup, OrderState, Policy, Role } from '@pos/order';
 
 export interface MenuItem {
   id: string;
   name: string;
   price: number;
   category: string;
+  /** Varian dan tambahan. Tidak ada = menu polos. */
+  modifierGroups?: ModifierGroup[];
 }
 
 /** Staf beserta hash PIN (PBKDF2-HMAC-SHA256, 32 byte, hex). PIN polos tidak pernah ada di perangkat. */
@@ -40,13 +42,23 @@ export interface PosConfig {
 }
 
 export interface CartLine {
+  /**
+   * Identitas baris di dalam order. Menu yang sama dengan pilihan atau catatan berbeda menjadi baris berbeda. Order lama
+   * (sebelum varian) tidak punya `lineId`; identitasnya `itemId` (lihat `lineKey`).
+   */
+  lineId?: string;
   itemId: string;
   name: string;
   qty: number;
+  /** Harga satuan akhir: harga menu + harga semua opsi terpilih. */
   unitPrice: number;
+  options?: ChosenOption[];
+  note?: string;
   /** Jumlah yang sudah dikirim ke dapur. Item yang sudah dikirim tidak boleh dikurangi tanpa void. */
   sentQty: number;
 }
+
+export const lineKey = (l: Pick<CartLine, 'lineId' | 'itemId'>): string => l.lineId ?? l.itemId;
 
 export interface PaymentRecord {
   method: PaymentMethod;

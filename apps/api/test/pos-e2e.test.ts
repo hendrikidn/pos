@@ -79,7 +79,7 @@ describe('POS → API → insiden', () => {
     // menuntut persetujuan owner (diuji di bawah), jadi kecurangan nyata cenderung tetap di bawah ambang.
     at('13:14:30');
     const ghost = ok<{ id: string }>(await engine.createOrder('TAKE_AWAY'));
-    ok(await engine.addItem(ghost.id, 'nasi-goreng', 1));
+    ok(await engine.addItem(ghost.id, 'nasi-goreng', 1, { options: ['sedang'] }));
     at('13:14:35');
     ok(await engine.sendToKitchen(ghost.id));
     at('13:14:40');

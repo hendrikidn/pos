@@ -121,6 +121,64 @@ describe('konfigurasi terminal: staf, menu, pengaturan', () => {
     });
   });
 
+  describe('varian dan tambahan menu', () => {
+    const size = { id: 'ukuran', name: 'Ukuran', min: 1, max: 1, options: [{ id: 'reg', name: 'Regular', price: 0 }, { id: 'lrg', name: 'Large', price: 6_000 }] };
+    const topping = { id: 'topping', name: 'Topping', min: 0, max: 2, options: [{ id: 'boba', name: 'Boba', price: 6_000 }, { id: 'oat', name: 'Oat Milk', price: 8_000 }] };
+    const base = { id: 'matcha', name: 'Matcha', price: 28_000, category: 'Non-kopi' };
+
+    it('menu dibuat dengan grup opsi, tersimpan utuh, dan ikut dalam konfigurasi terminal', async () => {
+      expect((await post('/v1/menu', ops, { ...base, modifierGroups: [size, topping] })).status).toBe(201);
+      const row = (await h.http('GET', '/v1/menu', ops)).body.find((m: { id: string }) => m.id === 'matcha');
+      expect(row.modifierGroups).toEqual([size, topping]);
+      const cfg = (await h.http('GET', '/v1/device/config', term)).body;
+      expect(cfg.menu.find((m: { id: string }) => m.id === 'matcha')).toEqual({ ...base, modifierGroups: [size, topping] });
+    });
+
+    it('menu tanpa opsi tidak memuat kunci modifierGroups di konfigurasi terminal (versi konfigurasi lama tidak berubah)', async () => {
+      const cfg = (await h.http('GET', '/v1/device/config', term)).body;
+      expect(cfg.menu.find((m: { id: string }) => m.id === 'kopi-susu')).not.toHaveProperty('modifierGroups');
+    });
+
+    it('mengubah opsi mengganti versi konfigurasi; mengosongkan dengan [] menghapus semuanya; field lain tidak disentuh', async () => {
+      const v1 = (await h.http('GET', '/v1/device/config', term)).body.version;
+      expect((await put('/v1/menu/matcha', owner, { modifierGroups: [size] })).status).toBe(200);
+      const v2 = (await h.http('GET', '/v1/device/config', term)).body.version;
+      expect(v2).not.toBe(v1);
+      expect((await put('/v1/menu/matcha', owner, { price: 29_000 })).status).toBe(200);
+      expect((await h.http('GET', '/v1/menu', ops)).body.find((m: { id: string }) => m.id === 'matcha').modifierGroups).toEqual([size]);
+      expect((await put('/v1/menu/matcha', owner, { modifierGroups: [] })).status).toBe(200);
+      expect((await h.http('GET', '/v1/menu', ops)).body.find((m: { id: string }) => m.id === 'matcha').modifierGroups).toEqual([]);
+    });
+
+    it('menolak definisi yang cacat dengan pesan yang menjelaskan', async () => {
+      const cases: [string, unknown, RegExp][] = [
+        ['bukan daftar', 'x', /daftar/],
+        ['id grup ganda', [size, size], /id grup ganda/],
+        ['id opsi ganda', [{ ...size, options: [size.options[0], size.options[0]] }], /id opsi ganda/],
+        ['tanpa opsi', [{ ...size, options: [] }], /1–20 opsi/],
+        ['min > max', [{ ...size, min: 2, max: 1 }], /batas pilihan/],
+        ['max > jumlah opsi', [{ ...size, max: 3 }], /batas pilihan/],
+        ['max 0', [{ ...topping, max: 0 }], /batas pilihan/],
+        ['harga negatif', [{ ...size, options: [{ id: 'a', name: 'A', price: -1 }] }], /harga opsi/],
+        ['harga pecahan', [{ ...size, options: [{ id: 'a', name: 'A', price: 1.5 }] }], /harga opsi/],
+        ['nama kosong', [{ ...size, name: ' ' }], /nama grup/],
+        ['id tidak sah', [{ ...size, id: 'Ukuran Besar' }], /id grup/],
+        ['terlalu banyak grup', Array.from({ length: 9 }, (_, i) => ({ ...size, id: `g${i}` })), /maksimal 8/],
+      ];
+      for (const [label, groups, msg] of cases) {
+        const r = await post('/v1/menu', owner, { ...base, id: 'bad', modifierGroups: groups });
+        expect(r.status, label).toBe(400);
+        expect(r.body.message, label).toMatch(msg);
+      }
+      expect((await put('/v1/menu/matcha', owner, { modifierGroups: 'x' })).status).toBe(400);
+      expect((await h.http('GET', '/v1/menu', ops)).body.some((m: { id: string }) => m.id === 'bad')).toBe(false);
+    });
+
+    it('dinonaktifkan agar tidak mengganggu pemeriksaan berikutnya', async () => {
+      expect((await put('/v1/menu/matcha', owner, { active: false })).status).toBe(200);
+    });
+  });
+
   describe('pengaturan outlet', () => {
     it('hanya OWNER; memvalidasi EDC, pajak, dan kebijakan', async () => {
       const path = '/v1/outlets/o1/settings';

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import type { ApiAuth, DeviceAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
+import { checkModifierGroups, type ModifierGroup } from '@pos/order';
 import { DEFAULT_SHADOW_DAYS, shadowState } from './shadow';
 
 const pbkdf2Async = promisify(pbkdf2);
@@ -46,6 +47,8 @@ export interface MenuInput {
   sort?: number;
   outletId?: string | null;
   active?: boolean;
+  /** Varian dan tambahan; `[]` menghapus semuanya. */
+  modifierGroups?: ModifierGroup[];
 }
 
 export interface SettingsInput {
@@ -103,7 +106,7 @@ export interface DeviceConfig {
     policy: Record<string, number> | null;
   };
   staff: { id: string; name: string; role: StaffRole; salt: string; hash: string; iterations: number }[];
-  menu: { id: string; name: string; price: number; category: string }[];
+  menu: { id: string; name: string; price: number; category: string; modifierGroups?: ModifierGroup[] }[];
 }
 
 @Injectable()
@@ -178,7 +181,8 @@ export class ConfigService {
 
   listMenu(auth: ApiAuth) {
     return this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query('select id, name, price, category, sort, outlet_id, active, updated_at from menu_item order by category, sort, name')).rows,
+      (await q.query(`select id, name, price, category, sort, outlet_id, active, updated_at, modifier_groups as "modifierGroups"
+         from menu_item order by category, sort, name`)).rows,
     );
   }
 
@@ -186,6 +190,10 @@ export class ConfigService {
     if (!partial || i.name !== undefined) need(typeof i.name === 'string' && i.name.trim().length > 0 && i.name.length <= 60, 'nama menu wajib (maks. 60)');
     if (!partial || i.price !== undefined) need(Number.isInteger(i.price) && i.price! >= 0 && i.price! <= 100_000_000, 'harga harus bilangan bulat rupiah ≥ 0');
     if (!partial || i.category !== undefined) need(typeof i.category === 'string' && i.category.trim().length > 0 && i.category.length <= 30, 'kategori wajib (maks. 30)');
+    if (i.modifierGroups !== undefined) {
+      const bad = checkModifierGroups(i.modifierGroups);
+      need(bad === null, bad ?? '');
+    }
   }
 
   async createMenu(auth: ApiAuth, input: MenuInput): Promise<void> {
@@ -195,8 +203,8 @@ export class ConfigService {
       if ((await q.query('select 1 from menu_item where id = $1', [input.id])).rowCount > 0) throw new BadRequestException('id menu sudah dipakai');
       if (input.outletId && (await q.query('select 1 from outlet where id = $1', [input.outletId])).rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
       await q.query(
-        'insert into menu_item (tenant_id, id, outlet_id, name, price, category, sort) values ($1, $2, $3, $4, $5, $6, $7)',
-        [auth.tenantId, input.id, input.outletId ?? null, input.name!.trim(), input.price, input.category!.trim(), input.sort ?? 0],
+        'insert into menu_item (tenant_id, id, outlet_id, name, price, category, sort, modifier_groups) values ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [auth.tenantId, input.id, input.outletId ?? null, input.name!.trim(), input.price, input.category!.trim(), input.sort ?? 0, JSON.stringify(input.modifierGroups ?? [])],
       );
       await this.audit(q, auth, 'menu.create', { id: input.id, price: input.price });
     });
@@ -209,8 +217,9 @@ export class ConfigService {
       if (!before) throw new NotFoundException('menu tidak ditemukan');
       await q.query(
         `update menu_item set name = coalesce($2, name), price = coalesce($3, price), category = coalesce($4, category),
-                sort = coalesce($5, sort), active = coalesce($6, active), updated_at = now() where id = $1`,
-        [id, input.name?.trim() ?? null, input.price ?? null, input.category?.trim() ?? null, input.sort ?? null, input.active ?? null],
+                sort = coalesce($5, sort), active = coalesce($6, active), modifier_groups = coalesce($7::jsonb, modifier_groups), updated_at = now() where id = $1`,
+        [id, input.name?.trim() ?? null, input.price ?? null, input.category?.trim() ?? null, input.sort ?? null, input.active ?? null,
+          input.modifierGroups === undefined ? null : JSON.stringify(input.modifierGroups)],
       );
       await this.audit(q, auth, 'menu.update', { id, ...(input.price !== undefined ? { priceFrom: before.price, priceTo: input.price } : {}), fields: Object.keys(input) });
     });
@@ -341,12 +350,12 @@ export class ConfigService {
         )
       ).rows;
       const menu = (
-        await q.query<DeviceConfig['menu'][number]>(
-          `select id, name, price, category from menu_item
+        await q.query<{ id: string; name: string; price: number; category: string; modifier_groups: ModifierGroup[] }>(
+          `select id, name, price, category, modifier_groups from menu_item
            where active and (outlet_id is null or outlet_id = $1) order by category, sort, name`,
           [device.outletId],
         )
-      ).rows;
+      ).rows.map(({ modifier_groups, ...m }): DeviceConfig['menu'][number] => (modifier_groups.length > 0 ? { ...m, modifierGroups: modifier_groups } : m));
       const body = {
         outlet: { id: o.id, merchantName: o.merchant_name ?? o.name, taxPercent: o.tax_percent, edcs: o.edcs, policy: o.policy },
         staff: staff.map((s) => ({ id: s.id, name: s.name, role: s.role, salt: s.pin_salt, hash: s.pin_hash, iterations: s.pin_iterations })),

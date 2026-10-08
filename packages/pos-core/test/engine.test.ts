@@ -428,3 +428,123 @@ describe('item pesanan di event', () => {
     expect(verifyChain(await c.events())).toEqual([]);
   });
 });
+
+describe('varian dan tambahan menu', () => {
+  let c: Ctx;
+  beforeEach(async () => {
+    c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+  });
+  const newOrder = async () => must(await c.engine.createOrder('TAKE_AWAY')).id;
+
+  it('menu dengan varian wajib ditolak tanpa pilihan, dan tidak ada yang tercatat di order', async () => {
+    const id = await newOrder();
+    expect(await c.engine.addItem(id, 'matcha', 1)).toMatchObject({ ok: false, code: 'OPTION_REQUIRED', message: 'Pilih Ukuran.' });
+    expect(c.engine.getOrder(id)!.items).toEqual([]);
+  });
+
+  it('harga satuan = harga menu + harga opsi: matcha Large + Boba + Oat = 28.000 + 6.000 + 6.000 + 8.000 = 48.000', async () => {
+    const id = await newOrder();
+    const o = must(await c.engine.addItem(id, 'matcha', 2, { options: ['large', 'boba', 'oat'] }));
+    expect(o.items[0]).toMatchObject({ itemId: 'matcha', qty: 2, unitPrice: 48_000 });
+    expect(c.engine.totals(o).subtotal).toBe(96_000);
+  });
+
+  it('batas pilihan: dua ukuran ditolak, tiga topping ditolak, opsi asing ditolak, opsi ganda ditolak', async () => {
+    const id = await newOrder();
+    expect(await c.engine.addItem(id, 'matcha', 1, { options: ['regular', 'large'] })).toMatchObject({ code: 'OPTION_TOO_MANY' });
+    expect(await c.engine.addItem(id, 'nasi-goreng', 1, { options: ['sedang', 'telur', 'sate', 'telur'] })).toMatchObject({ code: 'OPTION_UNKNOWN' });
+    expect(await c.engine.addItem(id, 'matcha', 1, { options: ['regular', 'telur'] })).toMatchObject({ code: 'OPTION_UNKNOWN' });
+    expect(await c.engine.addItem(id, 'kopi-susu', 1, { options: ['large'] })).toMatchObject({ code: 'OPTION_UNKNOWN' });
+    expect(c.engine.getOrder(id)!.items).toEqual([]);
+  });
+
+  it('pilihan yang sama (urutan berbeda) digabung; pilihan berbeda atau catatan berbeda menjadi baris baru', async () => {
+    const id = await newOrder();
+    must(await c.engine.addItem(id, 'matcha', 1, { options: ['large', 'boba'] }));
+    must(await c.engine.addItem(id, 'matcha', 1, { options: ['boba', 'large'] }));
+    must(await c.engine.addItem(id, 'matcha', 1, { options: ['regular'] }));
+    must(await c.engine.addItem(id, 'matcha', 1, { options: ['regular'], note: 'es sedikit' }));
+    must(await c.engine.addItem(id, 'kopi-susu', 1));
+    must(await c.engine.addItem(id, 'kopi-susu', 1));
+    const items = c.engine.getOrder(id)!.items;
+    expect(items.map((l) => [l.lineId, l.qty])).toEqual([['matcha', 2], ['matcha#2', 1], ['matcha#3', 1], ['kopi-susu', 2]]);
+  });
+
+  it('setQty memakai lineId: mengubah satu baris tidak menyentuh baris lain dari menu yang sama', async () => {
+    const id = await newOrder();
+    must(await c.engine.addItem(id, 'matcha', 1, { options: ['regular'] }));
+    must(await c.engine.addItem(id, 'matcha', 1, { options: ['large'] }));
+    must(await c.engine.setQty(id, 'matcha#2', 3));
+    expect(c.engine.getOrder(id)!.items.map((l) => [l.lineId, l.qty])).toEqual([['matcha', 1], ['matcha#2', 3]]);
+    must(await c.engine.setQty(id, 'matcha', 0));
+    expect(c.engine.getOrder(id)!.items.map((l) => l.lineId)).toEqual(['matcha#2']);
+  });
+
+  it('order lama tanpa lineId tetap bisa diubah memakai itemId', async () => {
+    const id = await newOrder();
+    must(await c.engine.addItem(id, 'kopi-susu', 1));
+    delete c.engine.getOrder(id)!.items[0]!.lineId; // bentuk tersimpan sebelum varian ada
+    must(await c.engine.setQty(id, 'kopi-susu', 4));
+    expect(c.engine.getOrder(id)!.items[0]!.qty).toBe(4);
+  });
+
+  it('catatan: dipangkas, dibatasi 140 karakter, bisa diubah sebelum dikirim ke dapur, tidak sesudahnya', async () => {
+    const id = await newOrder();
+    expect(await c.engine.addItem(id, 'kopi-susu', 1, { note: 'x'.repeat(141) })).toMatchObject({ code: 'NOTE_TOO_LONG' });
+    must(await c.engine.addItem(id, 'kopi-susu', 1, { note: '  tanpa gula  ' }));
+    expect(c.engine.getOrder(id)!.items[0]!.note).toBe('tanpa gula');
+    must(await c.engine.setNote(id, 'kopi-susu', 'gula sedikit'));
+    expect(c.engine.getOrder(id)!.items[0]!.note).toBe('gula sedikit');
+    must(await c.engine.sendToKitchen(id));
+    expect(await c.engine.setNote(id, 'kopi-susu', 'lain')).toMatchObject({ code: 'ITEM_SENT' });
+  });
+
+  it('mengosongkan catatan sampai sama dengan baris lain ditolak (tidak boleh ada dua baris kembar)', async () => {
+    const id = await newOrder();
+    must(await c.engine.addItem(id, 'kopi-susu', 1));
+    must(await c.engine.addItem(id, 'kopi-susu', 1, { note: 'panas' }));
+    expect(await c.engine.setNote(id, 'kopi-susu#2', '')).toMatchObject({ code: 'LINE_DUPLICATE' });
+  });
+
+  it('event membawa opsi dan catatan; unitPrice di event sudah termasuk harga opsi', async () => {
+    const id = await newOrder();
+    must(await c.engine.addItem(id, 'nasi-goreng', 2, { options: ['pedas', 'telur'], note: 'tanpa bawang' }));
+    must(await c.engine.sendToKitchen(id));
+    must(await c.engine.printBill(id));
+    const expected = {
+      itemId: 'nasi-goreng', name: 'Nasi Goreng', qty: 2, unitPrice: 43_000, note: 'tanpa bawang',
+      options: [{ group: 'Level pedas', name: 'Pedas', price: 0 }, { group: 'Tambahan', name: 'Telur', price: 5_000 }],
+    };
+    const evs = await c.events();
+    const sent = evs.find((e) => e.type === 'order.sent_to_kitchen');
+    const bill = evs.find((e) => e.type === 'bill.printed');
+    expect(sent?.type === 'order.sent_to_kitchen' && sent.payload.items).toEqual([expected]);
+    expect(bill?.type === 'bill.printed' && bill.payload.items).toEqual([expected]);
+    expect(bill?.type === 'bill.printed' && bill.payload.total).toBe(Math.round(86_000 * 1.1));
+  });
+
+  it('tiket dapur dan bill menampilkan opsi; catatan hanya di tiket dapur', async () => {
+    const id = await newOrder();
+    must(await c.engine.addItem(id, 'matcha', 1, { options: ['large', 'oat'], note: 'es sedikit' }));
+    must(await c.engine.sendToKitchen(id));
+    must(await c.engine.printBill(id));
+    const [ticket, bill] = c.printer.printed;
+    expect(ticket).toContain('1x Matcha Latte (Large, Oat Milk)');
+    expect(ticket).toContain('* es sedikit');
+    expect(bill).toContain('1x Matcha Latte (Large, Oat Milk)');
+    expect(bill).not.toContain('es sedikit');
+    expect(bill).toContain('Rp 42.000');
+  });
+
+  it('item yang sudah dikirim: menambah pilihan yang sama hanya mengirim selisihnya', async () => {
+    const id = await newOrder();
+    must(await c.engine.addItem(id, 'matcha', 1, { options: ['large'] }));
+    must(await c.engine.sendToKitchen(id));
+    must(await c.engine.addItem(id, 'matcha', 2, { options: ['large'] }));
+    must(await c.engine.sendToKitchen(id));
+    const sent = (await c.events()).filter((e) => e.type === 'order.sent_to_kitchen');
+    expect(sent.map((e) => (e.type === 'order.sent_to_kitchen' ? e.payload.items?.[0]?.qty : 0))).toEqual([1, 2]);
+  });
+});

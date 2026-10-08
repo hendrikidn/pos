@@ -1,3 +1,4 @@
+import { DEMO_MENU } from '@pos/pos-core';
 import { Sim } from '@pos/sim';
 import { AdminService } from './admin.service';
 import type { ApiAuth } from './auth';
@@ -8,12 +9,19 @@ import { hashPassword } from './password';
 import { Database } from './db/database';
 import { PgliteDriver } from './db/driver';
 
-const line = (itemId: string, name: string, qty: number, unitPrice: number) => ({ itemId, name, qty, unitPrice });
+const line = (itemId: string, name: string, qty: number, unitPrice: number, options?: { group: string; name: string; price: number }[]) => ({
+  itemId, name, qty, unitPrice, ...(options ? { options } : {}),
+});
+const LARGE = { group: 'Ukuran', name: 'Large', price: 6_000 };
+const BOBA = { group: 'Topping', name: 'Boba', price: 6_000 };
+const OAT = { group: 'Topping', name: 'Oat Milk', price: 8_000 };
 /** Campuran pesanan wajar untuk laporan produk di demo (harga sama dengan menu demo POS). */
 const MIXES = [
   [line('kopi-susu', 'Kopi Susu', 2, 22_000), line('croissant', 'Croissant', 1, 24_000)],
   [line('americano', 'Americano', 1, 20_000), line('latte', 'Latte', 1, 26_000)],
-  [line('matcha', 'Matcha Latte', 2, 28_000)],
+  [line('matcha', 'Matcha Latte', 2, 40_000, [LARGE, BOBA])],
+  [line('matcha', 'Matcha Latte', 1, 28_000, [{ group: 'Ukuran', name: 'Regular', price: 0 }]), line('nasi-goreng', 'Nasi Goreng', 1, 43_000, [{ group: 'Level pedas', name: 'Pedas', price: 0 }, { group: 'Tambahan', name: 'Telur', price: 5_000 }])],
+  [line('matcha', 'Matcha Latte', 1, 42_000, [LARGE, OAT])],
   [line('kopi-susu', 'Kopi Susu', 1, 22_000), line('latte', 'Latte', 2, 26_000)],
 ].map((items) => ({ items, total: items.reduce((a, l) => a + l.qty * l.unitPrice, 0) }));
 
@@ -61,12 +69,7 @@ async function main() {
     ['rina', 'Rina (Manager)', 'MANAGER'], ['owner', 'Owner', 'OWNER'],
   ] as const;
   for (const [id, name, role] of people) await config.createStaff(seeder, { id, name, role, pin: demoPins[id] });
-  const menu: [string, string, number, string][] = [
-    ['kopi-susu', 'Kopi Susu', 22_000, 'Kopi'], ['americano', 'Americano', 20_000, 'Kopi'], ['latte', 'Latte', 26_000, 'Kopi'],
-    ['matcha', 'Matcha Latte', 28_000, 'Non-kopi'], ['teh', 'Teh Tarik', 18_000, 'Non-kopi'], ['croissant', 'Croissant', 24_000, 'Makanan'],
-    ['nasi-goreng', 'Nasi Goreng', 38_000, 'Makanan'], ['mie-goreng', 'Mie Goreng', 35_000, 'Makanan'], ['wagyu-bowl', 'Wagyu Rice Bowl', 92_500, 'Makanan'],
-  ];
-  for (const [id, name, price, category] of menu) await config.createMenu(seeder, { id, name, price, category });
+  for (const m of DEMO_MENU) await config.createMenu(seeder, { id: m.id, name: m.name, price: m.price, category: m.category, modifierGroups: m.modifierGroups });
 
   const call = async (path: string, token: string, body?: unknown, method = body === undefined ? 'GET' : 'POST') => {
     const r = await fetch(`http://127.0.0.1:${port}${path}`, {

@@ -235,3 +235,29 @@ describe('laporan penjualan: rincian per produk', () => {
     expect(report(s).byProduct).toEqual([{ itemId: 'kopi', name: 'Kopi Susu Gula Aren', qty: 2, amount: 44_000 }]);
   });
 });
+
+describe('laporan penjualan: varian dan tambahan', () => {
+  const large = { group: 'Ukuran', name: 'Large', price: 6_000 };
+  const boba = { group: 'Topping', name: 'Boba', price: 6_000 };
+  const oat = { group: 'Topping', name: 'Oat Milk', price: 8_000 };
+  const bill = (s: Sim, id: string, at: string, items: object[], total: number) =>
+    s.pos({ type: 'bill.printed', payload: { orderId: id, total, items } } as never, at, 'budi');
+
+  it('opsi dijumlah per porsi: a = 2 matcha (Large+Boba) 40.000/porsi, b = 1 matcha (Large+Oat) 42.000; void tidak dihitung', () => {
+    const s = new Sim('o1', DAY);
+    created(s, 'a', '10:00:00'); bill(s, 'a', '10:04:00', [{ itemId: 'matcha', name: 'Matcha', qty: 2, unitPrice: 40_000, options: [large, boba] }], 80_000); pay(s, 'a', '10:05:00', 80_000);
+    created(s, 'b', '11:00:00'); bill(s, 'b', '11:04:00', [{ itemId: 'matcha', name: 'Matcha', qty: 1, unitPrice: 42_000, options: [large, oat] }], 42_000); pay(s, 'b', '11:05:00', 42_000);
+    created(s, 'c', '12:00:00'); bill(s, 'c', '12:04:00', [{ itemId: 'matcha', name: 'Matcha', qty: 5, unitPrice: 40_000, options: [large, boba] }], 200_000); pay(s, 'c', '12:05:00', 200_000); voidOrder(s, 'c', '12:30:00', 200_000);
+    const r = report(s);
+    expect(r.byProduct).toEqual([{ itemId: 'matcha', name: 'Matcha', qty: 3, amount: 80_000 + 42_000 }]);
+    expect(r.byOption).toEqual([
+      { group: 'Ukuran', name: 'Large', qty: 3, amount: 18_000 },
+      { group: 'Topping', name: 'Boba', qty: 2, amount: 12_000 },
+      { group: 'Topping', name: 'Oat Milk', qty: 1, amount: 8_000 },
+    ]);
+  });
+
+  it('tanpa opsi: daftar kosong', () => {
+    expect(report(busyDay()).byOption).toEqual([]);
+  });
+});

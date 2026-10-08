@@ -6,7 +6,7 @@ export const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const;
 type Method = (typeof METHODS)[number];
 
 export interface SalesReportInput {
-  /** payment.received, refund.created, discount.applied, cash.counted, order.created, dan void.approved. Tipe lain diabaikan. */
+  /** payment.received, refund.created, discount.applied, cash.counted, order.created, bill.printed, dan void.approved. Tipe lain diabaikan. */
   events: PosEvent[];
   /** Batas waktu terkoreksi, [fromMs, toMs). */
   fromMs: number;
@@ -31,6 +31,14 @@ export interface CashierRow {
   discountAmount: number;
 }
 
+export interface ProductRow {
+  itemId: string;
+  name: string;
+  qty: number;
+  /** Harga satuan × jumlah, sebelum diskon dan pajak. */
+  amount: number;
+}
+
 export interface SalesReport {
   range: { from: string; to: string; days: number; utcOffsetMinutes: number; generatedAt: number };
   totals: {
@@ -50,6 +58,10 @@ export interface SalesReport {
   byHour: { hour: number; orders: number; net: number }[];
   byMethod: { method: Method; payments: number; amount: number }[];
   byCashier: CashierRow[];
+  /** Produk terjual dari order yang dihitung sebagai penjualan, urut nilai terbesar. Nilai kotor: sebelum diskon dan pajak. */
+  byProduct: ProductRow[];
+  /** Order terhitung yang tagihannya tidak membawa rincian item (terminal versi lama): tidak ada di `byProduct`. */
+  ordersWithoutItems: number;
   cashCounts: {
     toleranceAmount: number;
     shifts: { shiftId: string; userId: string | null; terminalId: string; at: number; counted: number; expected: number; diff: number }[];
@@ -101,7 +113,13 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
   const employee = new Set<string>();
   const voided = new Map<string, EventOf<'void.approved'>>();
   const paidEver = new Set<string>();
+  /** Rincian item final per order: bill terakhir yang membawa item. */
+  const billItems = new Map<string, EventOf<'bill.printed'>>();
   for (const e of events) {
+    if (e.type === 'bill.printed' && e.payload.items) {
+      const prev = billItems.get(e.payload.orderId);
+      if (!prev || t(e) >= t(prev)) billItems.set(e.payload.orderId, e);
+    }
     if (e.type === 'order.created' && e.payload.orderType === 'EMPLOYEE') employee.add(e.payload.orderId);
     else if (e.type === 'void.approved' && !voided.has(e.payload.orderId)) voided.set(e.payload.orderId, e);
     else if (e.type === 'payment.received') paidEver.add(e.payload.orderId);
@@ -136,6 +154,8 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
     voids: { count: 0, amount: 0, afterPayment: { count: 0, amount: 0 } },
     employeeMeals: 0,
   };
+  const products = new Map<string, ProductRow>();
+  let ordersWithoutItems = 0;
   const ordered = [...events].sort((a, b) => t(a) - t(b) || a.seq - b.seq);
 
   for (const e of ordered) {
@@ -156,6 +176,17 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
           const d = days.get(localDate(t(e), off));
           if (d) d.orders += 1;
           hours[localHour(t(e), off)]!.orders += 1;
+          const lines = billItems.get(orderId)?.payload.items;
+          if (!lines) ordersWithoutItems += 1;
+          else {
+            for (const l of lines) {
+              const row = products.get(l.itemId) ?? { itemId: l.itemId, name: l.name, qty: 0, amount: 0 };
+              row.qty += l.qty;
+              row.amount += l.qty * l.unitPrice;
+              row.name = l.name;
+              products.set(l.itemId, row);
+            }
+          }
           if (e.actorId) cashier(e.actorId).orders += 1;
         }
         if (e.actorId) cashier(e.actorId).sales += amount;
@@ -222,7 +253,7 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
 
   const orders = countedOrders.size;
   const notes = [
-    'Laporan memakai event POS: rincian per produk belum tersedia karena event belum membawa item pesanan.',
+    'Rincian per produk dibaca dari tagihan yang dicetak, sebelum diskon dan pajak. Order dari terminal versi lama tidak membawa item dan tidak muncul di rincian produk.',
     'Order karyawan tidak dihitung sebagai penjualan. Order yang di-void tidak dihitung; uang yang sudah diterima untuk order itu muncul sebagai "void setelah dibayar".',
   ];
   if (futureIgnored > 0) notes.push(`${futureIgnored} event bertanggal lebih dari sehari di masa depan diabaikan (jam perangkat salah?).`);
@@ -234,6 +265,8 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
     byHour: hours,
     byMethod: METHODS.map((m) => ({ method: m, ...methods.get(m)! })),
     byCashier: [...cashiers.values()].sort((a, b) => b.sales - a.sales || a.userId.localeCompare(b.userId)),
+    byProduct: [...products.values()].sort((a, b) => b.amount - a.amount || b.qty - a.qty || a.name.localeCompare(b.name)),
+    ordersWithoutItems,
     cashCounts: { toleranceAmount: DEFAULT_CONFIG.r14ToleranceAmount, shifts },
     notes,
   };

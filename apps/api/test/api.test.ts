@@ -166,6 +166,27 @@ describe('ingest event', () => {
     const big = Array.from({ length: 501 }, () => good);
     expect((await h.postEvents(dev, big)).status).toBe(400);
   });
+
+  it('item pesanan di bill.printed: yang benar diterima dan tersimpan, yang cacat ditolak', async () => {
+    const s = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');
+    const items = [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 22_000 }];
+    s.pos({ type: 'order.created', payload: { orderId: 'i1', orderType: 'TAKE_AWAY' } }, '10:00:00', 'budi');
+    s.pos({ type: 'bill.printed', payload: { orderId: 'i1', total: 44_000, items } }, '10:01:00', 'budi');
+    expect((await h.postEvents(dev, s.events)).status).toBe(201);
+
+    const bad: unknown[] = [
+      [], 'kopi', [{ ...items[0], qty: 0 }], [{ ...items[0], qty: 1.5 }], [{ ...items[0], qty: 1000 }],
+      [{ ...items[0], unitPrice: -1 }], [{ ...items[0], name: '' }], [{ ...items[0], name: 'x'.repeat(121) }],
+      [{ ...items[0], itemId: undefined }], [null], Array.from({ length: 101 }, () => items[0]),
+    ];
+    for (const [i, v] of bad.entries()) {
+      const t = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');
+      t.pos({ type: 'bill.printed', payload: { orderId: `x${i}`, total: 1, items: v } } as never, '10:00:00', 'budi');
+      const r = await h.postEvents(dev, t.events);
+      expect(r.status, `kasus ${i}`).toBe(400);
+      expect(r.body.message).toMatch(/bill\.printed/);
+    }
+  });
 });
 
 describe('dari event sampai insiden', () => {

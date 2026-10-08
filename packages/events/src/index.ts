@@ -7,6 +7,14 @@ export type KitchenStatus = 'COOKING' | 'READY' | 'SERVED';
 export type PrinterState =
   | 'ok' | 'paperNearEnd' | 'paperOut' | 'coverOpen' | 'overheated' | 'disconnected' | 'unknown';
 
+/** Satu baris item pesanan di event. Nama dan harga disalin saat kejadian, karena menu bisa berubah kemudian. */
+export interface LineItem {
+  itemId: string;
+  name: string;
+  qty: number;
+  unitPrice: number;
+}
+
 /** Isi event menurut tipe. Menambah tipe event = menambah satu baris di sini. */
 export type EventBody =
   | {
@@ -14,9 +22,17 @@ export type EventBody =
       /** `approverId`: supervisor ke atas yang menyetujui makan karyawan di luar kuota atau untuk diri sendiri (hanya order EMPLOYEE). */
       payload: { orderId: string; orderType: OrderType; employeeId?: string; approverId?: string };
     }
-  | { type: 'order.sent_to_kitchen'; payload: { orderId: string } }
+  | {
+      type: 'order.sent_to_kitchen';
+      /** `items`: item baru yang dikirim kali ini (selisih dari kiriman sebelumnya). Tidak ada pada event lama. */
+      payload: { orderId: string; items?: LineItem[] };
+    }
   | { type: 'kitchen.status_changed'; payload: { orderId: string; status: KitchenStatus } }
-  | { type: 'bill.printed'; payload: { orderId: string; total: number } }
+  | {
+      type: 'bill.printed';
+      /** `items`: seluruh item pada tagihan; item terkunci sejak bill dicetak, jadi ini rincian final order. Tidak ada pada event lama. */
+      payload: { orderId: string; total: number; items?: LineItem[] };
+    }
   | {
       type: 'discount.applied';
       payload: {

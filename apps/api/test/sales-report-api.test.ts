@@ -31,6 +31,12 @@ describe('GET /v1/outlets/:id/reports/sales', () => {
     s.cashOrder('a', '10:00:00', '10:05:00', 50_000, 'budi');
     s.cashOrder('b', '11:00:00', '11:05:00', 30_000, 'sari');
     s.pos({ type: 'void.approved', payload: { orderId: 'b', reasonCode: 'CUSTOMER_CANCEL', approverIds: ['hendra'], amount: 30_000 } }, '11:30:00', 'sari');
+    // 2026-09-20: order dengan item pesanan, dikirim lewat ingest yang sama seperti terminal sungguhan (rantai yang sama).
+    const kopi = { itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 22_000 };
+    const latte = { itemId: 'latte', name: 'Latte', qty: 1, unitPrice: 26_000 };
+    s.pos({ type: 'order.created', payload: { orderId: 'm1', orderType: 'TAKE_AWAY' } }, WIB('2026-09-20T09:00:00'), 'budi');
+    s.pos({ type: 'bill.printed', payload: { orderId: 'm1', total: 70_000, items: [kopi, latte] } }, WIB('2026-09-20T09:03:00'), 'budi');
+    s.pos({ type: 'payment.received', payload: { orderId: 'm1', method: 'CASH', amount: 70_000 } }, WIB('2026-09-20T09:05:00'), 'budi');
     expect((await h.postEvents(device, s.events)).status).toBe(201);
   });
   afterAll(() => h.close());
@@ -52,6 +58,18 @@ describe('GET /v1/outlets/:id/reports/sales', () => {
     expect(r.body.totals.gross).toBe(50_000);
     const empty = await h.http('GET', url('?from=2026-09-30&to=2026-09-30'), owner);
     expect(empty.body.totals).toMatchObject({ gross: 0, orders: 0 });
+  });
+
+  it('rincian per produk dibaca dari event yang tersimpan; order tanpa item dilaporkan terpisah', async () => {
+    const r = await h.http('GET', url('?from=2026-09-20&to=2026-09-20'), owner);
+    expect(r.body.byProduct).toEqual([
+      { itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, amount: 44_000 },
+      { itemId: 'latte', name: 'Latte', qty: 1, amount: 26_000 },
+    ]);
+    expect(r.body.ordersWithoutItems).toBe(0);
+    const old = await h.http('GET', url('?from=2026-10-01&to=2026-10-01'), owner);
+    expect(old.body.byProduct).toEqual([]);
+    expect(old.body.ordersWithoutItems).toBe(1);
   });
 
   it('OWNER, OPS, dan MANAGER boleh; SUPERVISOR, perangkat, dan tanpa token ditolak', async () => {

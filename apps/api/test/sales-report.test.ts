@@ -92,8 +92,9 @@ describe('laporan penjualan: satu hari', () => {
     expect(r.byCashier.reduce((a, c) => a + c.sales, 0)).toBe(r.totals.gross);
   });
 
-  it('mencatat batasan: tanpa rincian produk', () => {
-    expect(r.notes.join(' ')).toMatch(/per produk belum tersedia/);
+  it('tanpa item pada tagihan: rincian produk kosong dan 3 order terhitung "tanpa rincian"', () => {
+    expect(r.byProduct).toEqual([]);
+    expect(r.ordersWithoutItems).toBe(3);
   });
 });
 
@@ -171,5 +172,66 @@ describe('laporan penjualan: batas dan kasus tepi', () => {
     expect(addDays('2026-10-31', 1)).toBe('2026-11-01');
     expect(addDays('2026-03-01', -1)).toBe('2026-02-28');
     expect(localDate(Date.parse('2026-10-01T17:30:00Z'), 420)).toBe('2026-10-02');
+  });
+});
+
+
+describe('laporan penjualan: rincian per produk', () => {
+  const line = (itemId: string, name: string, qty: number, unitPrice: number) => ({ itemId, name, qty, unitPrice });
+  const bill = (s: Sim, id: string, at: string | number, items: ReturnType<typeof line>[], actor = 'budi') =>
+    s.pos({ type: 'bill.printed', payload: { orderId: id, total: items.reduce((a, l) => a + l.qty * l.unitPrice, 0), items } }, at, actor);
+
+  // a: 2 kopi (22.000) + 1 matcha (28.000) = 72.000, lunas
+  // b: 1 kopi = 22.000, lunas
+  // c: 3 matcha = 84.000, lunas lalu di-void -> tidak dihitung
+  // d: 1 latte, tanpa pembayaran -> tidak dihitung
+  // e: order karyawan 2 kopi -> tidak dihitung
+  // f: tagihan lama tanpa item, lunas 10.000 -> "tanpa rincian"
+  function menuDay(): Sim {
+    const s = new Sim('o1', DAY);
+    created(s, 'a', '10:00:00'); bill(s, 'a', '10:04:00', [line('kopi', 'Kopi Susu', 2, 22_000), line('matcha', 'Matcha Latte', 1, 28_000)]); pay(s, 'a', '10:05:00', 72_000);
+    created(s, 'b', '11:00:00'); bill(s, 'b', '11:04:00', [line('kopi', 'Kopi Susu', 1, 22_000)]); pay(s, 'b', '11:05:00', 22_000);
+    created(s, 'c', '12:00:00'); bill(s, 'c', '12:04:00', [line('matcha', 'Matcha Latte', 3, 28_000)]); pay(s, 'c', '12:05:00', 84_000); voidOrder(s, 'c', '12:30:00', 84_000);
+    created(s, 'd', '13:00:00'); bill(s, 'd', '13:04:00', [line('latte', 'Latte', 1, 26_000)]);
+    created(s, 'e', '14:00:00', 'budi', 'EMPLOYEE', 'andi'); bill(s, 'e', '14:04:00', [line('kopi', 'Kopi Susu', 2, 22_000)]); pay(s, 'e', '14:05:00', 44_000);
+    created(s, 'f', '15:00:00'); s.pos({ type: 'bill.printed', payload: { orderId: 'f', total: 10_000 } }, '15:04:00', 'budi'); pay(s, 'f', '15:05:00', 10_000);
+    return s;
+  }
+
+  it('kopi 3 × 22.000 = 66.000 dan matcha 1 × 28.000; order void, belum bayar, dan karyawan tidak masuk; urut nilai', () => {
+    const r = report(menuDay());
+    expect(r.byProduct).toEqual([
+      { itemId: 'kopi', name: 'Kopi Susu', qty: 3, amount: 66_000 },
+      { itemId: 'matcha', name: 'Matcha Latte', qty: 1, amount: 28_000 },
+    ]);
+  });
+
+  it('order lama tanpa item dihitung sebagai penjualan tetapi dilaporkan sebagai tanpa rincian', () => {
+    const r = report(menuDay());
+    expect(r.totals).toMatchObject({ orders: 3, gross: 104_000 });
+    expect(r.ordersWithoutItems).toBe(1);
+  });
+
+  it('tagihan dicetak ulang: yang terakhir yang dipakai, tidak dihitung dua kali', () => {
+    const s = new Sim('o1', DAY);
+    created(s, 'a', '10:00:00');
+    bill(s, 'a', '10:03:00', [line('kopi', 'Kopi Susu', 1, 22_000)]);
+    bill(s, 'a', '10:04:00', [line('kopi', 'Kopi Susu', 2, 22_000)]);
+    pay(s, 'a', '10:05:00', 44_000);
+    expect(report(s).byProduct).toEqual([{ itemId: 'kopi', name: 'Kopi Susu', qty: 2, amount: 44_000 }]);
+  });
+
+  it('produk dihitung pada rentang pembayaran: order dibayar di luar rentang tidak masuk', () => {
+    const s = new Sim('o1', DAY);
+    created(s, 'a', '10:00:00'); bill(s, 'a', '10:04:00', [line('kopi', 'Kopi Susu', 1, 22_000)]); pay(s, 'a', s.t('10:05:00') + DAY_MS, 22_000);
+    expect(report(s).byProduct).toEqual([]);
+    expect(report(s, { from: '2026-10-02', to: '2026-10-02', now: s.t('12:00:00') + DAY_MS }).byProduct).toHaveLength(1);
+  });
+
+  it('harga berubah di tengah hari: dua baris dengan harga berbeda dijumlah per itemId, nama terbaru dipakai', () => {
+    const s = new Sim('o1', DAY);
+    created(s, 'a', '09:00:00'); bill(s, 'a', '09:04:00', [line('kopi', 'Kopi Susu', 1, 20_000)]); pay(s, 'a', '09:05:00', 20_000);
+    created(s, 'b', '16:00:00'); bill(s, 'b', '16:04:00', [line('kopi', 'Kopi Susu Gula Aren', 1, 24_000)]); pay(s, 'b', '16:05:00', 24_000);
+    expect(report(s).byProduct).toEqual([{ itemId: 'kopi', name: 'Kopi Susu Gula Aren', qty: 2, amount: 44_000 }]);
   });
 });

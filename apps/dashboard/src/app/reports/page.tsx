@@ -41,6 +41,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const afterBy = r.byCashier.filter((c) => c.voidsAfterPayment > 0);
   const methodTotal = r.byMethod.reduce((s, m) => s + Math.max(0, m.amount), 0);
   const tol = r.cashCounts.toleranceAmount;
+  const productTotal = r.byProduct.reduce((s, p) => s + p.amount, 0);
 
   const dayBars: Bar[] = r.byDay.map((d) => ({
     axis: r.byDay.length <= 8 || d.date === r.range.from || d.date === r.range.to || r.byDay.indexOf(d) % Math.ceil(r.byDay.length / 6) === 0 ? shortDate(d.date) : '',
@@ -139,6 +140,32 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </ul>
         )}
         <p className="muted small" style={{ marginBottom: 0 }}>Nilai sudah dikurangi refund pada metode yang sama.</p>
+      </section>
+
+      <section className="panel" aria-labelledby="produk">
+        <h2 id="produk">Produk terlaris</h2>
+        {r.byProduct.length === 0 ? (
+          <p className="muted" style={{ margin: 0 }}>Belum ada rincian produk pada rentang ini.</p>
+        ) : (
+          <table className="table">
+            <thead><tr><th>Produk</th><th className="num">Terjual</th><th className="num">Nilai</th><th className="num">Porsi</th></tr></thead>
+            <tbody>
+              {r.byProduct.slice(0, 20).map((p) => (
+                <tr key={p.itemId}>
+                  <td data-label="Produk"><b>{p.name}</b></td>
+                  <td className="num" data-label="Terjual">{p.qty.toLocaleString('id-ID')}</td>
+                  <td className="num" data-label="Nilai">{rp(p.amount)}</td>
+                  <td className="num" data-label="Porsi">{productTotal > 0 ? Math.round((p.amount / productTotal) * 100) : 0}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <p className="muted small" style={{ marginBottom: 0 }}>
+          Nilai kotor, sebelum diskon dan pajak.
+          {r.byProduct.length > 20 && ` Menampilkan 20 dari ${r.byProduct.length} produk.`}
+          {r.ordersWithoutItems > 0 && ` ${r.ordersWithoutItems} order dari terminal versi lama tidak memuat rincian item dan tidak ikut dihitung di sini.`}
+        </p>
       </section>
 
       <section className="panel" aria-labelledby="kasir">

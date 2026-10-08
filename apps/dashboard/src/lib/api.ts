@@ -241,6 +241,8 @@ export interface SalesReport {
   byHour: { hour: number; orders: number; net: number }[];
   byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT'; payments: number; amount: number }[];
   byCashier: CashierRow[];
+  byProduct: { itemId: string; name: string; qty: number; amount: number }[];
+  ordersWithoutItems: number;
   cashCounts: {
     toleranceAmount: number;
     shifts: { shiftId: string; userId: string | null; terminalId: string; at: number; counted: number; expected: number; diff: number }[];

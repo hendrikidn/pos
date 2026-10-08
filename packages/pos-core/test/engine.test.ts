@@ -388,3 +388,43 @@ describe('makan karyawan: kuota dan persetujuan', () => {
     expect(await c.engine.createOrder('EMPLOYEE')).toMatchObject({ ok: false, code: 'EMPLOYEE_REQUIRED' });
   });
 });
+
+describe('item pesanan di event', () => {
+  let c: Ctx;
+  beforeEach(async () => {
+    c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+  });
+
+  it('bill.printed membawa seluruh item dengan nama dan harga saat kejadian', async () => {
+    const id = await billedOrder(c);
+    const bill = (await c.events()).find((e) => e.type === 'bill.printed' && e.payload.orderId === id);
+    expect(bill?.type === 'bill.printed' && bill.payload).toMatchObject({
+      total: 44_000 + 4_400,
+      items: [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 22_000 }],
+    });
+  });
+
+  it('order.sent_to_kitchen hanya membawa selisih: kiriman kedua memuat item baru dan tambahan jumlah', async () => {
+    const o = must(await c.engine.createOrder('DINE_IN', { tableNo: '3' }));
+    must(await c.engine.addItem(o.id, 'kopi-susu', 1));
+    must(await c.engine.sendToKitchen(o.id));
+    must(await c.engine.addItem(o.id, 'kopi-susu', 2));
+    must(await c.engine.addItem(o.id, 'latte', 1));
+    must(await c.engine.sendToKitchen(o.id));
+    const sent = (await c.events()).filter((e) => e.type === 'order.sent_to_kitchen');
+    expect(sent.map((e) => (e.type === 'order.sent_to_kitchen' ? e.payload.items : null))).toEqual([
+      [{ itemId: 'kopi-susu', name: 'Kopi Susu', qty: 1, unitPrice: 22_000 }],
+      [
+        { itemId: 'kopi-susu', name: 'Kopi Susu', qty: 2, unitPrice: 22_000 },
+        { itemId: 'latte', name: 'Latte', qty: 1, unitPrice: 26_000 },
+      ],
+    ]);
+  });
+
+  it('rantai hash tetap utuh dengan payload yang lebih besar', async () => {
+    await billedOrder(c);
+    expect(verifyChain(await c.events())).toEqual([]);
+  });
+});

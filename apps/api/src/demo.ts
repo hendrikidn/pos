@@ -8,6 +8,15 @@ import { hashPassword } from './password';
 import { Database } from './db/database';
 import { PgliteDriver } from './db/driver';
 
+const line = (itemId: string, name: string, qty: number, unitPrice: number) => ({ itemId, name, qty, unitPrice });
+/** Campuran pesanan wajar untuk laporan produk di demo (harga sama dengan menu demo POS). */
+const MIXES = [
+  [line('kopi-susu', 'Kopi Susu', 2, 22_000), line('croissant', 'Croissant', 1, 24_000)],
+  [line('americano', 'Americano', 1, 20_000), line('latte', 'Latte', 1, 26_000)],
+  [line('matcha', 'Matcha Latte', 2, 28_000)],
+  [line('kopi-susu', 'Kopi Susu', 1, 22_000), line('latte', 'Latte', 2, 26_000)],
+].map((items) => ({ items, total: items.reduce((a, l) => a + l.qty * l.unitPrice, 0) }));
+
 /**
  * Menjalankan API dengan data simulasi untuk mencoba dashboard tanpa hardware.
  * Waktu kejadian dihitung relatif terhadap sekarang, sehingga selalu berada dalam jendela evaluasi 72 jam.
@@ -113,7 +122,8 @@ async function main() {
   for (let i = 0; i < 6; i++) {
     const t0 = at(150 - i * 12);
     s.presence(t0 - 20_000, t0 + 25_000);
-    s.cashOrder(`N-${i}`, t0, t0 + 20_000, 35_000 + i * 5_000, 'budi');
+    const m = MIXES[i % MIXES.length]!;
+    s.cashOrder(`N-${i}`, t0, t0 + 20_000, m.total, 'budi', m.items);
   }
   s.heartbeat('terminal', at(2));
 
@@ -145,7 +155,8 @@ async function main() {
   for (let i = 0; i < 8; i++) {
     const t0 = at(70 * 60 - i * 70); // setiap 70 menit
     k.presence(t0 - 20_000, t0 + 25_000);
-    k.cashOrder(`KN-${i}`, t0, t0 + 20_000, 30_000 + i * 4_000, 'dewi');
+    const m = MIXES[(i + 2) % MIXES.length]!;
+    k.cashOrder(`KN-${i}`, t0, t0 + 20_000, m.total, 'dewi', m.items);
   }
   k.heartbeat('terminal', at(2));
   for (const [dev, tk] of [['sensor-kem', sensorKem], ['term-kem', termKem]] as const) {

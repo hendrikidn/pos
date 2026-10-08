@@ -1,4 +1,4 @@
-import { EventChain, type EventBody, type PosEvent } from '@pos/events';
+import { EventChain, type EventBody, type LineItem, type PosEvent } from '@pos/events';
 
 /**
  * Simulator sederhana untuk menyusun aliran event satu outlet dalam test dan demo.
@@ -73,10 +73,10 @@ export class Sim {
   }
 
   /** Order tunai lengkap: dibuat, dikirim ke dapur, ditagih, dibayar. */
-  cashOrder(orderId: string, createdHms: string | number, paidHms: string | number, total = 50_000, actor = 'budi'): void {
+  cashOrder(orderId: string, createdHms: string | number, paidHms: string | number, total = 50_000, actor = 'budi', items?: LineItem[]): void {
     this.pos({ type: 'order.created', payload: { orderId, orderType: 'TAKE_AWAY' } }, createdHms, actor);
-    this.pos({ type: 'order.sent_to_kitchen', payload: { orderId } }, createdHms, actor);
-    this.pos({ type: 'bill.printed', payload: { orderId, total } }, createdHms, actor);
+    this.pos({ type: 'order.sent_to_kitchen', payload: { orderId, ...(items ? { items } : {}) } }, createdHms, actor);
+    this.pos({ type: 'bill.printed', payload: { orderId, total, ...(items ? { items } : {}) } }, createdHms, actor);
     this.pos({ type: 'payment.received', payload: { orderId, method: 'CASH', amount: total } }, paidHms, actor);
   }
 }

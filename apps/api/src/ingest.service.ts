@@ -30,6 +30,24 @@ const bool = (p: Payload, k: string) => typeof p[k] === 'boolean';
 const oneOf = (p: Payload, k: string, values: readonly string[]) => typeof p[k] === 'string' && values.includes(p[k] as string);
 const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT'] as const;
 
+const MAX_LINE_ITEMS = 100;
+
+/** Item pesanan opsional: dibatasi jumlah dan panjangnya agar satu event tidak bisa membengkak. */
+function badItems(p: Payload): string | null {
+  const v = p['items'];
+  if (v === undefined) return null;
+  if (!Array.isArray(v) || v.length === 0 || v.length > MAX_LINE_ITEMS) return `items harus berisi 1–${MAX_LINE_ITEMS} baris`;
+  for (const raw of v as unknown[]) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return 'baris items bukan objek';
+    const l = raw as Payload;
+    if (!str(l, 'itemId') || (l['itemId'] as string).length > 64) return 'itemId tidak valid';
+    if (!str(l, 'name') || (l['name'] as string).length > 120) return 'nama item tidak valid';
+    if (!Number.isInteger(l['qty']) || (l['qty'] as number) < 1 || (l['qty'] as number) > 999) return 'qty harus bilangan bulat 1–999';
+    if (!Number.isInteger(l['unitPrice']) || (l['unitPrice'] as number) < 0) return 'unitPrice harus bilangan bulat ≥ 0';
+  }
+  return null;
+}
+
 /**
  * Pemeriksaan isi per tipe event. Tanpa ini, satu event dengan field hilang (bug firmware atau perangkat nakal)
  * bisa membuat mesin aturan gagal untuk seluruh outlet.
@@ -41,9 +59,9 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     if (p['approverId'] !== undefined && (!str(p, 'approverId') || p['orderType'] !== 'EMPLOYEE')) return 'approverId hanya untuk order karyawan';
     return null;
   },
-  'order.sent_to_kitchen': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
+  'order.sent_to_kitchen': (p) => (str(p, 'orderId') ? badItems(p) : 'orderId wajib'),
   'kitchen.status_changed': (p) => (str(p, 'orderId') && oneOf(p, 'status', ['COOKING', 'READY', 'SERVED']) ? null : 'orderId/status tidak valid'),
-  'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? null : 'orderId/total tidak valid'),
+  'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? badItems(p) : 'orderId/total tidak valid'),
   'discount.applied': (p) =>
     str(p, 'orderId') && oneOf(p, 'kind', ['MANUAL', 'MEMBER', 'COUPON']) && num(p, 'amount') && num(p, 'percent') && bool(p, 'verified')
       ? null : 'field diskon tidak valid',

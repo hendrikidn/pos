@@ -301,7 +301,10 @@ export class PosEngine {
     const fresh = o.items.filter((l) => l.qty > l.sentQty);
     if (fresh.length === 0) return fail('NOTHING_TO_SEND', 'Tidak ada item baru untuk dikirim.');
     await this.d.printer.print(renderKitchenTicket({ ...o, items: fresh.map((l) => ({ ...l, qty: l.qty - l.sentQty })) }));
-    const e = await this.emit({ type: 'order.sent_to_kitchen', payload: { orderId } });
+    const e = await this.emit({
+      type: 'order.sent_to_kitchen',
+      payload: { orderId, items: fresh.map((l) => ({ itemId: l.itemId, name: l.name, qty: l.qty - l.sentQty, unitPrice: l.unitPrice })) },
+    });
     for (const l of o.items) l.sentQty = l.qty;
     await this.apply(o, e);
     return ok(o);
@@ -332,7 +335,13 @@ export class PosEngine {
     if (o.items.length === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
     const printed = await this.d.printer.print(renderBill(o, this.cfg));
     if (!printed && !opts.onScreen) return fail('PRINT_FAILED', 'Bill gagal dicetak. Tampilkan di layar customer atau periksa printer.');
-    const e = await this.emit({ type: 'bill.printed', payload: { orderId, total: this.totals(o).total } });
+    const e = await this.emit({
+      type: 'bill.printed',
+      payload: {
+        orderId, total: this.totals(o).total,
+        items: o.items.map((l) => ({ itemId: l.itemId, name: l.name, qty: l.qty, unitPrice: l.unitPrice })),
+      },
+    });
     await this.apply(o, e);
     return ok(o);
   }

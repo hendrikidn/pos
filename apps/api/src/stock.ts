@@ -1,6 +1,6 @@
 import { usageByIngredient, type OrderConsumption, type Recipes } from '@pos/order';
 
-export type MovementKind = 'PURCHASE' | 'WASTE' | 'COUNT';
+export type MovementKind = 'PURCHASE' | 'WASTE' | 'COUNT' | 'TRANSFER_IN' | 'TRANSFER_OUT';
 
 export interface Movement {
   id: number;
@@ -30,9 +30,12 @@ export interface StockPosition {
   baseline: { at: number; counted: number } | null;
   purchased: number;
   wasted: number;
+  /** Masuk dan keluar lewat transfer antar-outlet sejak baseline. */
+  transferIn: number;
+  transferOut: number;
   /** Pemakaian teoretis dari penjualan sejak baseline. */
   used: number;
-  /** baseline + beli − buang − pakai; null tanpa baseline. Bisa negatif bila pencatatan tertinggal. */
+  /** baseline + beli + transfer masuk − buang − transfer keluar − pakai; null tanpa baseline. Bisa negatif bila pencatatan tertinggal. */
   expected: number | null;
 }
 
@@ -50,13 +53,15 @@ export function stockAt(
   let b: Movement | undefined;
   for (const m of mine) if (m.kind === 'COUNT') b = m;
   if (!b) {
-    return { baseline: null, purchased: sum(mine, 'PURCHASE'), wasted: sum(mine, 'WASTE'), used: 0, expected: null };
+    return { baseline: null, purchased: sum(mine, 'PURCHASE'), wasted: sum(mine, 'WASTE'), transferIn: sum(mine, 'TRANSFER_IN'), transferOut: sum(mine, 'TRANSFER_OUT'), used: 0, expected: null };
   }
   const after = mine.filter((m) => m.at > b!.at || (m.at === b!.at && m.id > b!.id));
   const purchased = sum(after, 'PURCHASE');
   const wasted = sum(after, 'WASTE');
+  const transferIn = sum(after, 'TRANSFER_IN');
+  const transferOut = sum(after, 'TRANSFER_OUT');
   const used = usageByIngredient(consumption, recipes, b.at, at).get(ingredientId) ?? 0;
-  return { baseline: { at: b.at, counted: b.qty }, purchased, wasted, used, expected: b.qty + purchased - wasted - used };
+  return { baseline: { at: b.at, counted: b.qty }, purchased, wasted, transferIn, transferOut, used, expected: b.qty + purchased + transferIn - wasted - transferOut - used };
 }
 
 const sum = (list: Movement[], kind: MovementKind) => list.filter((m) => m.kind === kind).reduce((s, m) => s + m.qty, 0);

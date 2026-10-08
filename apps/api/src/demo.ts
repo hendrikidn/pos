@@ -7,6 +7,7 @@ import { ConfigService } from './config.service';
 import { BillingService } from './billing.service';
 import { ChannelService } from './channel.service';
 import { PurchaseService } from './purchase.service';
+import { TransferService } from './transfer.service';
 import { MemberService } from './member.service';
 import { StockService } from './stock.service';
 import { createApp } from './bootstrap';
@@ -337,6 +338,9 @@ async function main() {
   await buy.orderPo(seeder, po1.id);
   await buy.receive(seeder, po1.id, { invoiceRef: 'KN-2210', lines: [{ lineNo: 1, qty: 6_000, unitCost: 0.14 }] });
   await buy.createPo(seeder, { outletId: 'senopati', supplierId: 'susu-segar', lines: [{ ingredientId: 'susu', qty: 30_000, unitCost: 0.0175 }, { ingredientId: 'oat', qty: 10_000, unitCost: 0.04 }] });
+
+  // Transfer stok: satu kiriman Senopati → Kemang yang masih di perjalanan (bisa diterima dari dashboard sebagai pengguna lain).
+  await app.get(TransferService).send(seeder, { fromOutletId: 'senopati', toOutletId: 'kemang', note: 'Susu untuk akhir pekan', lines: [{ ingredientId: 'susu', qty: 2_000 }, { ingredientId: 'biji', qty: 500 }] });
 
   const open = await call('/v1/outlets/senopati/incidents', owner);
   const old = open.find((i: { order_ids: string[] }) => i.order_ids.includes('A-007'));

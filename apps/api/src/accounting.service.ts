@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { ApiAuth } from './auth';
 import {
-  buildChannelJournal, buildPurchaseJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
+  buildChannelJournal, buildCogsJournal, buildPurchaseJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
   type Account, type AccountType, type JournalEntry,
 } from './accounting';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
@@ -10,7 +10,8 @@ import type { Queryable } from './db/driver';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { resolveRange } from './report-range';
 import { toCsv } from './sales-export';
-import { DAY_MS, localDate, startOfLocalDay } from './sales-report';
+import { addDays, DAY_MS, localDate, startOfLocalDay } from './sales-report';
+import { StockService } from './stock.service';
 
 const CODE_RE = /^[0-9]-[0-9]{4}$/;
 const TYPES: AccountType[] = ['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE'];
@@ -21,7 +22,10 @@ interface Range { from?: string; to?: string; range?: string }
 
 @Injectable()
 export class AccountingService {
-  constructor(@Inject(Database) private readonly db: Database) {}
+  constructor(
+    @Inject(Database) private readonly db: Database,
+    @Inject(StockService) private readonly stock: StockService,
+  ) {}
 
   /** Bagan akun tenant; diisi dari bawaan pada pemakaian pertama. */
   private async accounts(q: Queryable, tenantId: string): Promise<(Account & { active: boolean })[]> {
@@ -165,7 +169,11 @@ export class AccountingService {
          where p.outlet_id = $1 and p.paid_date >= $2 and p.paid_date <= $3`, [outletId, r.from, r.to],
       )
     ).rows.map((x) => ({ id: Number(x.id), date: x.paid_date, amount: Number(x.amount), method: x.method, supplier: x.supplier }));
-    return [...auto, ...buildChannelJournal(platform, outletId), ...buildPurchaseJournal(receipts, payments), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
+    // HPP: pemakaian bahan menurut resep (hanya outlet yang sudah punya hitung fisik awal, seperti modul stok).
+    const dayStarts: { date: string; fromMs: number; toMs: number }[] = [];
+    for (let d = r.from; d <= r.to; d = addDays(d, 1)) dayStarts.push({ date: d, fromMs: startOfLocalDay(d, r.off) - 1, toMs: startOfLocalDay(d, r.off) + DAY_MS - 1 });
+    const cogs = await this.stock.cogsByDay(q, outletId, dayStarts, now);
+    return [...auto, ...buildCogsJournal(cogs.days, outletId, cogs.missing), ...buildChannelJournal(platform, outletId), ...buildPurchaseJournal(receipts, payments), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
   }
 
   /** Jurnal outlet pada rentang, ditambah daftar jurnal manual (termasuk yang dibatalkan) untuk pengelolaan. */

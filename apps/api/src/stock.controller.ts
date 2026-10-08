@@ -23,6 +23,12 @@ export class StockController {
     return { ok: true };
   }
 
+  /** HPP dan margin per menu (resep dasar × harga pokok rata-rata bahan). */
+  @Get('menu-cost')
+  menuCost(@Req() req: AuthedRequest) {
+    return this.stock.menuCosts(requireApi(req, ['OWNER', 'OPS', 'MANAGER']));
+  }
+
   @Get('recipes')
   recipes(@Req() req: AuthedRequest) {
     return this.stock.recipes(requireApi(req, ['OWNER', 'OPS', 'MANAGER']));

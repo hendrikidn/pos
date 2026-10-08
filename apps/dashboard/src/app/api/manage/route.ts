@@ -10,6 +10,8 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['POST', 'PUT'], path: /^\/v1\/suppliers(\/[a-z0-9_-]+)?$/ },
   { methods: ['POST'], path: /^\/v1\/suppliers\/[a-z0-9_-]+\/payments$/ },
   { methods: ['POST'], path: /^\/v1\/purchase-orders$/ },
+  { methods: ['POST'], path: /^\/v1\/stock-transfers$/ },
+  { methods: ['POST'], path: /^\/v1\/stock-transfers\/[0-9]+\/(receive|cancel)$/ },
   { methods: ['PUT'], path: /^\/v1\/purchase-orders\/[0-9]+$/ },
   { methods: ['POST'], path: /^\/v1\/purchase-orders\/[0-9]+\/(order|cancel|receive)$/ },
   { methods: ['POST'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/online\/reports$/ },

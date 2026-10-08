@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { consumptionByOrder, type Recipes } from '@pos/order';
+import { consumptionByOrder, usageByIngredient, type Recipes } from '@pos/order';
 import type { ApiAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
@@ -107,6 +107,58 @@ export class StockService {
       }
       return out;
     });
+  }
+
+  /** Harga pokok rata-rata per bahan (rupiah per satuan terkecil). */
+  private async loadCosts(q: Queryable): Promise<Map<string, number>> {
+    return new Map((await q.query<{ id: string; avg_cost: string }>('select id, avg_cost from ingredient')).rows.map((r) => [r.id, Number(r.avg_cost)]));
+  }
+
+  /**
+   * HPP per menu dari resep dasar dan harga pokok rata-rata bahan, dengan margin terhadap harga jual. Tambahan opsi (topping, ukuran) tidak
+   * ikut. `missing` = bahan di resep yang belum punya harga pokok (HPP-nya jadi terlalu rendah); menu tanpa resep tidak punya HPP.
+   */
+  async menuCosts(auth: ApiAuth) {
+    return this.db.tenantTx(auth.tenantId, async (q) => {
+      const recipes = await this.loadRecipes(q);
+      const costs = await this.loadCosts(q);
+      const menu = (await q.query<{ id: string; name: string; price: number; category: string; active: boolean }>('select id, name, price, category, active from menu_item order by category, sort, name')).rows;
+      return menu.map((m) => {
+        const lines = recipes.base.get(m.id);
+        if (!lines || lines.size === 0) return { id: m.id, name: m.name, category: m.category, active: m.active, price: m.price, cost: null, margin: null, marginPct: null, missing: [] as string[] };
+        let cost = 0;
+        const missing: string[] = [];
+        for (const [ing, qty] of lines) {
+          const c = costs.get(ing) ?? 0;
+          if (c === 0) missing.push(ing);
+          cost += qty * c;
+        }
+        const rounded = Math.round(cost);
+        return { id: m.id, name: m.name, category: m.category, active: m.active, price: m.price, cost: rounded, margin: m.price - rounded, marginPct: m.price > 0 ? Math.round(((m.price - rounded) / m.price) * 1000) / 10 : null, missing };
+      });
+    });
+  }
+
+  /**
+   * Beban bahan baku (HPP) per hari lokal: pemakaian teoretis dari penjualan × harga pokok rata-rata SAAT INI (riwayat harga per hari tidak
+   * disimpan). Bahan tanpa harga pokok tidak dihitung dan dilaporkan di `missing`.
+   */
+  async cogsByDay(q: Queryable, outletId: string, dayStarts: { date: string; fromMs: number; toMs: number }[], now: number): Promise<{ days: { date: string; amount: number }[]; missing: string[] }> {
+    if (dayStarts.length === 0) return { days: [], missing: [] };
+    const recipes = await this.loadRecipes(q);
+    const costs = await this.loadCosts(q);
+    const consumption = await this.consumptionSince(q, outletId, dayStarts[0]!.fromMs, now);
+    const missing = new Set<string>();
+    const days = dayStarts.map((d) => {
+      let amount = 0;
+      for (const [ing, qty] of usageByIngredient(consumption, recipes, d.fromMs, d.toMs)) {
+        const c = costs.get(ing) ?? 0;
+        if (c === 0) missing.add(ing);
+        amount += qty * c;
+      }
+      return { date: d.date, amount: Math.round(amount) };
+    });
+    return { days, missing: [...missing].sort() };
   }
 
   /** Mengganti seluruh resep satu lingkup (resep dasar menu, atau tambahan satu opsi). Daftar kosong menghapusnya. */

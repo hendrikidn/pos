@@ -2,14 +2,15 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import type { MenuRow } from '@/lib/api';
+import type { MenuCostRow, MenuRow } from '@/lib/api';
 import { resizeToJpeg } from '@/lib/image';
 import { manage } from '@/lib/manage';
 import { ModifierEditor } from './ModifierEditor';
 
 const rp = (n: number) => `Rp ${n.toLocaleString('id-ID')}`;
 
-export function MenuManager({ items }: { items: MenuRow[] }) {
+export function MenuManager({ items, costs = [] }: { items: MenuRow[]; costs?: MenuCostRow[] }) {
+  const costOf = new Map(costs.map((c) => [c.id, c]));
   const router = useRouter();
   const [form, setForm] = useState({ id: '', name: '', price: '', category: '' });
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
       <section className="panel">
         <h2>Menu</h2>
         <table className="table">
-          <thead><tr><th>Foto</th><th>Menu</th><th>Kategori</th><th className="num">Harga</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Foto</th><th>Menu</th><th>Kategori</th><th className="num">Harga</th><th className="num">HPP / margin</th><th>Status</th><th /></tr></thead>
           <tbody>
             {items.flatMap((m) => [
               <tr key={m.id} className={m.active ? '' : 'off'}>
@@ -50,6 +51,24 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
                 </td>
                 <td data-label="Kategori">{m.category}</td>
                 <td data-label="Harga" className="num">{rp(m.price)}</td>
+                <td data-label="HPP / margin" className="num">
+                  {(() => {
+                    const c = costOf.get(m.id);
+                    if (!c || c.cost === null) return <span className="muted small">tanpa resep</span>;
+                    return (
+                      <>
+                        {c.missing.length > 0 ? (
+                          <div className="small delta neg" title={`Belum ada harga pokok: ${c.missing.join(', ')}`}>HPP belum lengkap<br />(harga bahan kurang)</div>
+                        ) : (
+                          <>
+                            {rp(c.cost)}
+                            <div className={`small ${c.marginPct !== null && c.marginPct < 30 ? 'delta neg' : 'muted'}`}>{c.marginPct}% margin</div>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+                </td>
                 <td data-label="Status">{m.active ? 'Aktif' : 'Nonaktif'}</td>
                 <td className="row-actions">
                   <label className={`secondary btn-like ${busy ? 'disabled' : ''}`}>
@@ -93,7 +112,7 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
               ...(editing === m.id
                 ? [
                     <tr key={`${m.id}-mod`} className="mod-row">
-                      <td colSpan={6}>
+                      <td colSpan={7}>
                         <ModifierEditor
                           menuName={m.name}
                           groups={m.modifierGroups}
@@ -109,7 +128,7 @@ export function MenuManager({ items }: { items: MenuRow[] }) {
                   ]
                 : []),
             ])}
-            {items.length === 0 && <tr><td colSpan={6} className="muted">Belum ada menu.</td></tr>}
+            {items.length === 0 && <tr><td colSpan={7} className="muted">Belum ada menu.</td></tr>}
           </tbody>
         </table>
         <p className="muted small">Setiap perubahan harga dicatat di log audit beserta harga lama dan barunya. Perubahan varian sampai ke terminal pada pembaruan konfigurasi berikutnya; order yang sedang berjalan tidak berubah.</p>

@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import type { IngredientCostRow, PayableRow, PoDetail, PoRow, PoStatus, SupplierRow } from '@/lib/api';
+import type { IngredientCostRow, PayableRow, PoDetail, PoRow, PoStatus, SupplierRow, TransferRow } from '@/lib/api';
 import { manage } from '@/lib/manage';
 import { rp, shortDate } from '@/lib/format';
 
@@ -10,7 +10,9 @@ const STATUS: Record<PoStatus, string> = { DRAFT: 'Draf', ORDERED: 'Dipesan', PA
 const cost = (n: number) => `Rp ${n.toLocaleString('id-ID', { maximumFractionDigits: 4 })}`;
 
 interface Props {
-  view: 'po' | 'suppliers' | 'payables';
+  view: 'po' | 'suppliers' | 'payables' | 'transfers';
+  outlets: { id: string; name: string }[];
+  transfers: TransferRow[];
   outletId: string;
   role: string;
   pos: PoRow[];
@@ -20,7 +22,7 @@ interface Props {
   details: PoDetail[];
 }
 
-export function ProcurementManager({ view, outletId, role, pos, suppliers, payables, ingredients, details }: Props) {
+export function ProcurementManager({ view, outletId, outlets, role, pos, suppliers, payables, ingredients, details, transfers }: Props) {
   const router = useRouter();
   const canWrite = role === 'OWNER' || role === 'OPS';
   const [busy, setBusy] = useState(false);
@@ -31,6 +33,9 @@ export function ProcurementManager({ view, outletId, role, pos, suppliers, payab
   const [lines, setLines] = useState([{ ingredientId: '', qty: '', price: '', per: '1' }]);
   const [recv, setRecv] = useState<Record<string, { qty: string; cost: string }>>({});
   const [invoice, setInvoice] = useState<Record<number, string>>({});
+  const [tr, setTr] = useState({ to: '', note: '' });
+  const [trLines, setTrLines] = useState([{ ingredientId: '', qty: '' }]);
+  const [got, setGot] = useState<Record<string, string>>({});
   const activeIng = ingredients.filter((i) => i.active);
   const activeSup = suppliers.filter((s) => s.active);
 
@@ -52,6 +57,93 @@ export function ProcurementManager({ view, outletId, role, pos, suppliers, payab
     const payload = lines.filter((l) => l.ingredientId).map((l) => ({ ingredientId: l.ingredientId, qty: Number(l.qty), unitCost: Math.round((Number(l.price) / Number(l.per || 1)) * 10_000) / 10_000 }));
     const r = await run(() => manage('POST', '/v1/purchase-orders', { outletId, supplierId: po.supplierId, ...(po.expectedDate ? { expectedDate: po.expectedDate } : {}), ...(po.note ? { note: po.note } : {}), lines: payload }), () => 'Pesanan draf dibuat.');
     if (r) { setLines([{ ingredientId: '', qty: '', price: '', per: '1' }]); setPo({ supplierId: '', expectedDate: '', note: '' }); }
+  }
+
+  if (view === 'transfers') {
+    const others = outlets.filter((o) => o.id !== outletId);
+    const name = (id: string) => outlets.find((o) => o.id === id)?.name ?? id;
+    return (
+      <>
+        <section className="panel">
+          <h2>Transfer stok</h2>
+          <p className="muted small" style={{ marginTop: 0 }}>Kirim bahan dari dapur pusat ke outlet. Stok outlet asal turun saat dikirim; stok outlet tujuan bertambah saat diterima sesuai jumlah yang benar-benar diterima. Penerima harus orang lain dari pengirim. Selisih jumlah dan kiriman yang menggantung lebih dari 24 jam menjadi temuan.</p>
+          {transfers.length === 0 && <p className="muted">Belum ada transfer untuk outlet ini.</p>}
+          {transfers.map((t) => {
+            const incoming = t.toOutlet === outletId;
+            return (
+              <div key={t.id} className="journal-entry">
+                <header>
+                  <b>#{t.id}</b> {name(t.fromOutlet)} → {name(t.toOutlet)} · {t.status === 'SENT' ? 'Dalam perjalanan' : t.status === 'RECEIVED' ? 'Diterima' : 'Dibatalkan'}
+                  {t.stale && <span className="delta neg"> · belum diterima lebih dari 24 jam</span>}
+                  {t.short && <span className="delta neg"> · diterima kurang dari yang dikirim</span>}
+                  <span className="muted"> · dikirim oleh {t.sentBy}{t.receivedBy ? `, diterima oleh ${t.receivedBy}` : ''}</span>
+                </header>
+                <table className="table">
+                  <thead><tr><th>Bahan</th><th className="num">Dikirim</th><th className="num">Diterima</th></tr></thead>
+                  <tbody>
+                    {t.lines.map((l) => (
+                      <tr key={l.ingredientId}>
+                        <td data-label="Bahan">{l.name}</td>
+                        <td data-label="Dikirim" className="num">{l.qtySent.toLocaleString('id-ID')} {l.unit}</td>
+                        <td data-label="Diterima" className="num">
+                          {t.status === 'SENT' && incoming
+                            ? <input aria-label={`Diterima ${l.name}`} inputMode="numeric" style={{ width: 100 }} value={got[`${t.id}:${l.ingredientId}`] ?? String(l.qtySent)} onChange={(e) => setGot({ ...got, [`${t.id}:${l.ingredientId}`]: e.target.value.replace(/\D/g, '') })} />
+                            : l.qtyReceived === null ? '–' : <span className={l.qtyReceived < l.qtySent ? 'delta neg' : ''}>{l.qtyReceived.toLocaleString('id-ID')}</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {t.status === 'SENT' && (
+                  <p className="actions">
+                    {incoming && <button disabled={busy} onClick={() => void run(() => manage('POST', `/v1/stock-transfers/${t.id}/receive`, { lines: t.lines.map((l) => ({ ingredientId: l.ingredientId, qty: Number(got[`${t.id}:${l.ingredientId}`] ?? l.qtySent) })) }), (d) => ((d as { short: boolean }).short ? 'Diterima dengan selisih; tercatat sebagai temuan.' : 'Transfer diterima.'))}>Terima</button>}
+                    {t.fromOutlet === outletId && <button className="secondary" disabled={busy} onClick={() => { const reason = window.prompt('Alasan membatalkan transfer:'); if (reason) void run(() => manage('POST', `/v1/stock-transfers/${t.id}/cancel`, { reason })); }}>Batalkan</button>}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          {error && <p className="error" role="alert">{error}</p>}
+          {notice && <p className="ok-note" role="status">{notice}</p>}
+        </section>
+        <section className="panel">
+          <h2>Kirim dari {name(outletId)}</h2>
+          {others.length === 0 ? <p className="muted">Hanya ada satu outlet.</p> : (
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const r = await run(() => manage('POST', '/v1/stock-transfers', { fromOutletId: outletId, toOutletId: tr.to, ...(tr.note ? { note: tr.note } : {}), lines: trLines.filter((l) => l.ingredientId).map((l) => ({ ingredientId: l.ingredientId, qty: Number(l.qty) })) }), () => 'Transfer dikirim.');
+              if (r) { setTrLines([{ ingredientId: '', qty: '' }]); setTr({ to: '', note: '' }); }
+            }}>
+              <div className="form-grid">
+                <label>Ke outlet
+                  <select value={tr.to} onChange={(e) => setTr({ ...tr, to: e.target.value })} required>
+                    <option value="">Pilih outlet…</option>
+                    {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                </label>
+                <label>Catatan<input value={tr.note} onChange={(e) => setTr({ ...tr, note: e.target.value })} maxLength={140} /></label>
+              </div>
+              <table className="table">
+                <thead><tr><th>Bahan</th><th className="num">Jumlah</th><th /></tr></thead>
+                <tbody>
+                  {trLines.map((l, i) => {
+                    const ing = activeIng.find((x) => x.id === l.ingredientId);
+                    return (
+                      <tr key={i}>
+                        <td data-label="Bahan"><select value={l.ingredientId} aria-label={`Bahan transfer ${i + 1}`} onChange={(e) => setTrLines(trLines.map((x, j) => (j === i ? { ...x, ingredientId: e.target.value } : x)))}><option value="">Pilih bahan…</option>{activeIng.map((x) => <option key={x.id} value={x.id}>{x.name} ({x.unit})</option>)}</select></td>
+                        <td data-label="Jumlah"><input inputMode="numeric" value={l.qty} placeholder={ing ? `dalam ${ing.unit}` : ''} aria-label={`Jumlah transfer ${i + 1}`} onChange={(e) => setTrLines(trLines.map((x, j) => (j === i ? { ...x, qty: e.target.value.replace(/\D/g, '') } : x)))} /></td>
+                        <td>{trLines.length > 1 && <button type="button" className="secondary" onClick={() => setTrLines(trLines.filter((_, j) => j !== i))}>Hapus</button>}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="actions"><button type="button" className="secondary" onClick={() => setTrLines([...trLines, { ingredientId: '', qty: '' }])}>+ Baris</button><button type="submit" disabled={busy || !tr.to}>Kirim</button></p>
+            </form>
+          )}
+        </section>
+      </>
+    );
   }
 
   if (view === 'suppliers') {

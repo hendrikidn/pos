@@ -19,6 +19,7 @@ export const SYSTEM = {
   bank: '1-1300',
   inventory: '1-1400',
   payable: '2-1100',
+  cogs: '5-1000',
   commission: '6-5100',
   sales: '4-1000',
   service: '4-1100',
@@ -236,6 +237,15 @@ export function buildPurchaseJournal(
       lines: [{ account: SYSTEM.payable, debit: p.amount, credit: 0 }, { account: p.method === 'TUNAI' ? SYSTEM.cash : SYSTEM.bank, debit: 0, credit: p.amount }],
     })),
   ];
+}
+
+/** Jurnal HPP harian: beban bahan baku bertambah dan persediaan berkurang sebesar pemakaian teoretis (lihat `StockService.cogsByDay`). */
+export function buildCogsJournal(days: { date: string; amount: number }[], outletId: string, missing: string[]): JournalEntry[] {
+  return days.filter((d) => d.amount > 0).map((d): JournalEntry => ({
+    ref: `JU-HPP-${outletId}-${d.date.replace(/-/g, '')}`, date: d.date, memo: `Beban bahan baku (HPP) ${d.date}`, source: 'POS',
+    lines: [{ account: SYSTEM.cogs, debit: d.amount, credit: 0 }, { account: SYSTEM.inventory, debit: 0, credit: d.amount }],
+    notes: [`dihitung dari pemakaian menurut resep × harga pokok rata-rata saat ini${missing.length > 0 ? `; bahan tanpa harga pokok tidak dihitung: ${missing.join(', ')}` : ''}`],
+  }));
 }
 
 export interface TrialRow {

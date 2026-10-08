@@ -405,3 +405,10 @@ export interface PoDetail {
   receipts: { id: number; receivedAt: number; receivedBy: string; invoiceRef: string | null; amount: number; priceFlag: boolean }[];
 }
 export interface IngredientCostRow { id: string; name: string; unit: 'g' | 'ml' | 'pcs'; active: boolean; avgCost?: number }
+
+export interface TransferRow {
+  id: number; fromOutlet: string; toOutlet: string; status: 'SENT' | 'RECEIVED' | 'CANCELED'; note: string | null; sentBy: string; sentAt: number; receivedBy: string | null;
+  receivedAt: number | null; cancelReason: string | null; short: boolean; stale: boolean;
+  lines: { ingredientId: string; name: string; unit: string; qtySent: number; qtyReceived: number | null; unitCost: number }[];
+}
+export interface MenuCostRow { id: string; name: string; category: string; active: boolean; price: number; cost: number | null; margin: number | null; marginPct: number | null; missing: string[] }

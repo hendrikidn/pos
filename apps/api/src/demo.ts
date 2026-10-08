@@ -9,6 +9,7 @@ import { ChannelService } from './channel.service';
 import { HrService } from './hr.service';
 import { PurchaseService } from './purchase.service';
 import { ReservationService } from './reservation.service';
+import { WebShopService } from './web-shop.service';
 import { TransferService } from './transfer.service';
 import { MemberService } from './member.service';
 import { StockService } from './stock.service';
@@ -362,6 +363,11 @@ async function main() {
   await resv.setDeposit(seeder, night.id, { amount: 150_000, method: 'TRANSFER' }, now);
   await resv.create(seeder, 'senopati', { guestName: 'Pak Hendra (rapat kantor)', partySize: 8, start: now + 26 * H, durationMin: 150, tableNo: 'T2' });
 
+  // Toko web: aktif di Senopati (http://localhost:3001/shop/kopi-senopati), dengan satu pesanan menunggu kasir.
+  const shop = app.get(WebShopService);
+  await shop.setSettings(seeder, 'senopati', { enabled: true, slug: 'kopi-senopati' });
+  await shop.publicOrder('kopi-senopati', { name: 'Maya', phone: '0812 9000 1234', type: 'TAKE_AWAY', items: [{ itemId: 'kopi-susu', qty: 2 }, { itemId: 'croissant', qty: 1 }], note: 'Diambil jam 8' }, 'demo-seed');
+
   const open = await call('/v1/outlets/senopati/incidents', owner);
   const old = open.find((i: { order_ids: string[] }) => i.order_ids.includes('A-007'));
   if (old) await call(`/v1/incidents/${encodeURIComponent(old.id)}/review`, owner, { label: 'FALSE_ALARM', note: 'Customer salah pesan, dibuktikan CCTV. Void sah.' });
@@ -394,6 +400,7 @@ Sensor ESP32 (isi di firmware/sensor-node/app/secrets.h):
   DEVICE_TOKEN ${liveSensorToken}
   OUTLET_ID    senopati
   TERMINAL_ID  pos-1
+Toko web pelanggan: http://localhost:3001/shop/kopi-senopati (pesanan masuk ke tombol "Pesanan web" di POS)
 Staf demo (PIN): ${Object.entries(demoPins).map(([k, v]) => `${k} ${v}`).join(' · ')}
 `);
 }

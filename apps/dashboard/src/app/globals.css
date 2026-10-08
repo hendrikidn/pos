@@ -508,3 +508,28 @@ a.btn-like { text-decoration: none; padding: 0 14px; min-height: 44px; border: 1
 .journal-entry { border-top: 1px solid var(--line); padding: 10px 0; }
 .journal-entry header { margin-bottom: 4px; }
 .journal-entry .table { margin: 0; }
+
+/* Toko web publik (pelanggan): halaman satu kolom yang ramah ponsel. */
+.shop { max-width: 640px; margin: 0 auto; padding: 16px 16px 140px; }
+.shop h1 { margin: 8px 0 4px; font-size: 24px; }
+.shop h2 { margin: 22px 0 8px; font-size: 16px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.shop-seg { display: flex; gap: 8px; margin: 12px 0; }
+.shop-seg button { flex: 1; }
+.shop-seg button[aria-pressed='false'] { background: var(--surface-2); color: var(--text); }
+.shop-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 8px; }
+.shop-item b { display: block; }
+.shop-item small { color: var(--muted); }
+.shop-opts { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px 14px; margin: -2px 0 10px; }
+.shop-opts fieldset { border: 0; padding: 0; margin: 0 0 10px; }
+.shop-opts legend { font-weight: 600; margin-bottom: 4px; }
+.shop-opts label { display: flex; gap: 8px; align-items: center; padding: 6px 0; }
+.shop-opts input[type='text'] { width: 100%; }
+.shop-lines { list-style: none; margin: 12px 0; padding: 0; }
+.shop-lines li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--line); }
+.shop-qty { display: inline-flex; gap: 6px; align-items: center; }
+.shop-qty button { min-width: 36px; padding: 4px 10px; }
+.shop-form { display: grid; gap: 10px; margin-top: 12px; }
+.shop-form label { display: grid; gap: 4px; font-weight: 600; }
+.shop-hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.shop-bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 12px 16px; display: flex; justify-content: center; }
+.shop-bar > div { width: min(640px, 100%); display: flex; align-items: center; justify-content: space-between; gap: 12px; }

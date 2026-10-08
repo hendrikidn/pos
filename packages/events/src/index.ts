@@ -79,6 +79,11 @@ export type EventBody =
       payload: { orderId: string; channel: OnlineChannel; ref: string };
     }
   | {
+      type: 'order.web_linked';
+      /** Order ini dibuat dari pesanan toko web (`webOrderId` = nomor pesanan di server). Server mencocokkan nilai dan nasib pesanannya (R45-R47). */
+      payload: { orderId: string; webOrderId: number };
+    }
+  | {
       type: 'order.member_linked';
       /** Order ini dikaitkan ke member (poin diperoleh dari pembayarannya; penukaran poin merujuk member yang sama). */
       payload: { orderId: string; memberId: string };
@@ -176,7 +181,7 @@ export type EventBody =
 export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
-  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'order.channel_linked', 'attendance.clocked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
+  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'order.channel_linked', 'order.web_linked', 'attendance.clocked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
   'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.digital', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',
@@ -357,6 +362,7 @@ export function orderIdOf(e: PosEvent): string | undefined {
     case 'order.handoff_reclaimed':
     case 'order.member_linked':
     case 'order.channel_linked':
+    case 'order.web_linked':
     case 'bill.hold_reason':
     case 'kitchen.status_changed':
     case 'bill.printed':

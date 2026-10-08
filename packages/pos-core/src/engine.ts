@@ -6,7 +6,7 @@ import type { Recorder } from './recorder';
 import type { KeyValueStore } from './store';
 import { computeTotals, lineLabel, pricingOf, paidTotal, renderBill, renderKitchenTicket, renderReceipt, type Totals } from './totals';
 import {
-  fail, lineKey, ok, type CartLine, type Handoff, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic,
+  fail, lineKey, ok, type CartLine, type Handoff, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic, type WebOrderInput, type WebOrderItem,
 } from './types';
 
 export interface EngineDeps {
@@ -396,6 +396,49 @@ export class PosEngine {
     o.channel = { channel, ref: clean };
     await this.save(o);
     return ok(o);
+  }
+
+  /**
+   * Memeriksa isi pesanan toko web terhadap menu terminal ini sebelum pesanan diterima: menu yang sudah tidak ada, opsi yang tidak
+   * cocok, atau jumlah yang tidak sah. Mengembalikan pesan untuk kasir, atau null bila semuanya bisa dibuat.
+   */
+  checkWebOrderItems(items: WebOrderItem[]): string | null {
+    for (const it of items) {
+      const m = this.cfg.menu.find((x) => x.id === it.itemId);
+      if (!m) return `Menu "${it.name}" tidak ada di terminal ini (mungkin sudah dihapus atau belum tersinkron).`;
+      if (!Number.isInteger(it.qty) || it.qty < 1 || it.qty > 99) return `Jumlah "${it.name}" tidak sah.`;
+      if (it.note && it.note.length > MAX_NOTE_LENGTH) return `Catatan "${it.name}" terlalu panjang.`;
+      const sel = resolveSelection(m.modifierGroups, it.options);
+      if (!sel.ok) return `Pilihan untuk "${it.name}" tidak cocok dengan menu terminal: ${sel.message}`;
+    }
+    return null;
+  }
+
+  /**
+   * Membuat order dari pesanan toko web yang sudah diklaim di server: take-away atau dine-in (meja dari pesanan), dikaitkan lewat event
+   * `order.web_linked`, lalu semua item ditambahkan. Pembayarannya di kasir seperti order biasa; server menilai kecocokan nilai dan nasibnya (R45-R47).
+   */
+  async createWebOrder(web: WebOrderInput): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    if (!this.shift) return fail('NO_SHIFT', 'Buka shift terlebih dahulu.');
+    if (web.type === 'DINE_IN' && !web.tableNo) return fail('TABLE_REQUIRED', 'Pesanan dine-in perlu nomor meja.');
+    const dup = this.listOrders().find((o) => o.webOrder?.id === web.id && o.state.status !== 'VOIDED');
+    if (dup) return fail('WEB_DUPLICATE', `Pesanan web ini sudah dibuat sebagai order #${dup.number}.`);
+    const bad = this.checkWebOrderItems(web.items);
+    if (bad) return fail('WEB_ITEM_UNAVAILABLE', bad);
+    const created = await this.createOrder(web.type, web.type === 'DINE_IN' ? { tableNo: web.tableNo } : {});
+    if (!created.ok) return created;
+    const o = created.value;
+    await this.emit({ type: 'order.web_linked', payload: { orderId: o.id, webOrderId: web.id } });
+    o.webOrder = { id: web.id, code: web.code, name: web.name };
+    await this.save(o);
+    for (const it of web.items) {
+      const r = await this.addItem(o.id, it.itemId, it.qty, { options: it.options, note: it.note });
+      if (!r.ok) return r;
+    }
+    const fresh = this.order(o.id);
+    return ok(fresh.ok ? fresh.value : o);
   }
 
   /**

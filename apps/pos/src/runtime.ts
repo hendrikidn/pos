@@ -76,6 +76,20 @@ export interface ConfigStatus {
   lastError: string | null;
 }
 
+/** Satu pesanan toko web yang menunggu kasir (dari server). `options` = id opsi; `optionNames` hanya untuk tampilan. */
+export interface WebPending {
+  id: number;
+  code: string;
+  name: string;
+  phone: string;
+  type: 'TAKE_AWAY' | 'DINE_IN';
+  tableNo: string | null;
+  note: string | null;
+  total: number;
+  createdAt: number;
+  items: { itemId: string; name: string; qty: number; unitPrice: number; options: string[]; optionNames: string[]; note: string | null }[];
+}
+
 /** Satu reservasi di papan kasir (tanpa nomor telepon). `depositRemaining` = uang muka yang masih bisa dipakai sebagai pembayaran. */
 export interface ReservationItem {
   id: number;
@@ -109,6 +123,11 @@ export interface Runtime {
   tableBoard(): { board: TableBoard; at: number } | null;
   /** Reservasi hari ini dan sebentar lagi dari server (tanpa nomor telepon); null bila belum pernah berhasil diunduh atau mode demo. */
   reservations(): { items: ReservationItem[]; at: number } | null;
+  /** Pesanan toko web yang menunggu kasir; null bila belum pernah berhasil diunduh atau mode demo. */
+  webOrders(): { orders: WebPending[]; at: number } | null;
+  /** Menerima pesanan web: periksa menu terminal, klaim di server (hanya satu terminal berhasil), lalu buat order kasir yang tertaut. */
+  acceptWebOrder(id: number): Promise<Result<OrderRecord>>;
+  rejectWebOrder(id: number, reason: string): Promise<Result<true>>;
   /** Mendudukkan tamu yang datang (butuh koneksi); mengembalikan meja yang dipesan bila ada. */
   seatReservation(id: number): Promise<Result<{ tableNo: string | null; guestName: string }>>;
   /** Foto menu sebagai data URL (sudah diunduh dan tersimpan di terminal); null bila menu tanpa foto atau belum terunduh. */
@@ -303,6 +322,62 @@ export async function createRuntime(): Promise<Boot> {
     }
   };
 
+  // Pesanan toko web: daftar yang menunggu, menerima (klaim lalu buat order), dan menolak.
+  let webBoard: { orders: WebPending[]; at: number } | null = null;
+  const pollWeb = async () => {
+    if (demo || !settings.token) return;
+    try {
+      const res = await fetch(`${baseUrl}/v1/web-orders/pending`, { headers: { authorization: `Bearer ${settings.token}` } });
+      if (!res.ok) return;
+      webBoard = { orders: ((await res.json()) as { orders: WebPending[] }).orders, at: Date.now() };
+      notify();
+    } catch {
+      /* offline: daftar terakhir tetap dipakai */
+    }
+  };
+  const webCall = async (path: string, body: unknown) => {
+    const res = await fetch(`${baseUrl}${path}`, { method: 'POST', headers: { authorization: `Bearer ${settings.token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const j = (await res.json().catch(() => ({}))) as Record<string, unknown> & { message?: string | string[] };
+    return { ok: res.ok, status: res.status, body: j, message: (Array.isArray(j.message) ? j.message.join('; ') : j.message) ?? `Server menjawab ${res.status}.` };
+  };
+  const acceptWebOrder = async (id: number): Promise<Result<OrderRecord>> => {
+    if (demo || !settings.token) return { ok: false, code: 'NO_SERVER', message: 'Pesanan web memerlukan koneksi ke server.' };
+    const pending = webBoard?.orders.find((o) => o.id === id);
+    if (!pending) return { ok: false, code: 'WEB_UNKNOWN', message: 'Pesanan tidak ada di daftar; muat ulang.' };
+    if (!engine.currentShift()) return { ok: false, code: 'NO_SHIFT', message: 'Buka shift terlebih dahulu.' };
+    // Periksa dulu terhadap menu terminal ini: klaim di server tidak bisa dibatalkan.
+    const bad = engine.checkWebOrderItems(pending.items.map((i) => ({ itemId: i.itemId, name: i.name, qty: i.qty, options: i.options, ...(i.note ? { note: i.note } : {}) })));
+    if (bad) return { ok: false, code: 'WEB_ITEM_UNAVAILABLE', message: bad };
+    try {
+      const c = await webCall(`/v1/web-orders/${id}/accept`, {});
+      if (!c.ok) {
+        void pollWeb();
+        return { ok: false, code: `WEB_${c.status}`, message: c.message };
+      }
+      const r = await engine.createWebOrder(c.body as unknown as Parameters<typeof engine.createWebOrder>[0]);
+      if (r.ok) {
+        webBoard = webBoard ? { ...webBoard, orders: webBoard.orders.filter((o) => o.id !== id) } : null;
+        void syncNow();
+      }
+      notify();
+      return r;
+    } catch {
+      return { ok: false, code: 'OFFLINE', message: 'Tidak terhubung ke server.' };
+    }
+  };
+  const rejectWebOrder = async (id: number, reason: string): Promise<Result<true>> => {
+    if (demo || !settings.token) return { ok: false, code: 'NO_SERVER', message: 'Pesanan web memerlukan koneksi ke server.' };
+    try {
+      const c = await webCall(`/v1/web-orders/${id}/reject`, { reason });
+      if (!c.ok) return { ok: false, code: `WEB_${c.status}`, message: c.message };
+      webBoard = webBoard ? { ...webBoard, orders: webBoard.orders.filter((o) => o.id !== id) } : null;
+      notify();
+      return { ok: true, value: true };
+    } catch {
+      return { ok: false, code: 'OFFLINE', message: 'Tidak terhubung ke server.' };
+    }
+  };
+
   // Foto menu: versi di konfigurasi menentukan perlu-tidaknya mengunduh; hasilnya disimpan agar tampil juga saat offline.
   const images = new Map<string, { v: string; url: string }>();
   for (const key of await store.keys('img:')) {
@@ -410,6 +485,8 @@ export async function createRuntime(): Promise<Boot> {
   void pollHandoffs();
   void syncImages();
   void pollTables();
+  setInterval(() => void pollWeb(), 10_000);
+  void pollWeb();
   setInterval(() => void pollReservations(), 30_000);
   void pollReservations();
   setInterval(() => void reportPosture(), 10 * 60_000);
@@ -426,6 +503,9 @@ export async function createRuntime(): Promise<Boot> {
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,
     tableBoard: () => tableBoard,
+    webOrders: () => webBoard,
+    acceptWebOrder,
+    rejectWebOrder,
     reservations: () => reservationBoard,
     seatReservation,
     memberLookup: (phone) => memberCall(`/v1/members/lookup?phone=${encodeURIComponent(phone)}`),

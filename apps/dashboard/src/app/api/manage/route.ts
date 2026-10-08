@@ -7,6 +7,8 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['POST', 'PUT'], path: /^\/v1\/menu(\/[a-z0-9_-]+)?$/ },
   { methods: ['PUT'], path: /^\/v1\/menu\/[a-z0-9_-]+\/recipe$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/promos(\/[a-z0-9_-]+)?$/ },
+  { methods: ['PUT'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/web-shop$/ },
+  { methods: ['POST'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/web-orders\/[0-9]+\/reject$/ },
   { methods: ['POST'], path: /^\/v1\/outlets\/[a-z0-9_-]+\/reservations$/ },
   { methods: ['PUT'], path: /^\/v1\/reservations\/[0-9]+$/ },
   { methods: ['POST'], path: /^\/v1\/reservations\/[0-9]+\/(deposit|seat|no-show|cancel|settle)$/ },

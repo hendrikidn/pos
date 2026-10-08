@@ -30,6 +30,7 @@ export function NavLinks({ role }: { role: string }) {
       show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
     },
     { href: '/reservations', label: 'Reservasi', icon: <IconBook />, on: path.startsWith('/reservations'), show: role === 'OWNER' || role === 'MANAGER' },
+    { href: '/web-orders', label: 'Toko Web', icon: <IconBox />, on: path.startsWith('/web-orders'), show: role === 'OWNER' || role === 'MANAGER' },
     { href: '/hr', label: 'SDM', icon: <IconSliders />, on: path.startsWith('/hr'), show: role === 'OWNER' || role === 'MANAGER' },
     { href: '/accounting', label: 'Akuntansi', icon: <IconBook />, on: path.startsWith('/accounting'), show: role === 'OWNER' || role === 'MANAGER' },
     { href: '/settings', label: 'Pengaturan', icon: <IconSliders />, on: path.startsWith('/settings'), show: role === 'OWNER' || role === 'OPS' },

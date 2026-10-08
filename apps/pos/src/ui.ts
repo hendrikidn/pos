@@ -54,6 +54,7 @@ export function approvalHint(code: string): string {
 export const CHANNEL_LABEL: Record<string, string> = { GOFOOD: 'GoFood', GRABFOOD: 'GrabFood', SHOPEEFOOD: 'ShopeeFood' };
 
 export function orderLabel(o: OrderRecord, staff: { id: string; name: string }[]): string {
+  if (o.webOrder) return `Web ${o.webOrder.code} · ${o.webOrder.name}${o.tableNo ? ` · Meja ${o.tableNo}` : ''}`;
   if (o.channel) return `${CHANNEL_LABEL[o.channel.channel] ?? o.channel.channel} · ${o.channel.ref}`;
   const who = o.employeeId ? ` · ${staff.find((s) => s.id === o.employeeId)?.name ?? o.employeeId}` : '';
   return `${TYPE_LABEL[o.type]}${who}${o.tableNo ? ` · Meja ${o.tableNo}` : ''}`;

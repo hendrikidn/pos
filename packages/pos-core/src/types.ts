@@ -31,6 +31,12 @@ export interface Edc {
   label: string;
 }
 
+/** Satu baris pesanan toko web (nama untuk pesan ke kasir; `options` = id opsi). */
+export interface WebOrderItem { itemId: string; name: string; qty: number; options: string[]; note?: string }
+
+/** Pesanan toko web yang sudah diklaim di server dan siap dibuat sebagai order kasir. */
+export interface WebOrderInput { id: number; code: string; name: string; type: 'TAKE_AWAY' | 'DINE_IN'; tableNo?: string; items: WebOrderItem[] }
+
 export interface PosConfig {
   outletId: string;
   deviceId: string;
@@ -120,6 +126,8 @@ export interface OrderRecord {
   handedOff?: boolean;
   /** Order dari platform pesan-antar: kanal dan nomor pesanan di platform. Dibayar platform; tanpa diskon. */
   channel?: { channel: OnlineChannel; ref: string };
+  /** Order dibuat dari pesanan toko web: nomor pesanan, kode pendek untuk pelanggan, dan nama pemesan. Dibayar di kasir seperti biasa. */
+  webOrder?: { id: number; code: string; name: string };
   /** Member yang dikaitkan ke order ini beserta saldo poin yang diketahui saat dicari (saldo resmi ada di server). */
   member?: { id: string; name: string; points: number };
   /** Poin yang ditukar pada order ini (satu kali per order; tidak digabung dengan diskon lain). */

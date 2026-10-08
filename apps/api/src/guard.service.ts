@@ -6,6 +6,8 @@ import {
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { channelHits } from './channel.service';
 import { reservationHits } from './reservation-hits';
+import { webOrderFacts } from './web-order-store';
+import { webOrderHits } from './web-order';
 import { transferHits } from './transfer-hits';
 import { Database } from './db/database';
 import { shadowState } from './shadow';
@@ -121,6 +123,13 @@ export class GuardService {
           at: t.at, windowStart: t.at, windowEnd: t.at, context: false, confidence: 'HIGH', note: t.note,
         })),
         ...(await reservationHits(q, outletId, events, now)).filter((h) => h.at >= from).map((h): RuleHit => ({
+          rule: h.rule, key: h.key, weight: DEFAULT_CONFIG.weights[h.rule] ?? 0, modalities: ['POS'], outletId, terminalId: h.terminalId, orderId: h.orderId, actorIds: h.actor ? [h.actor] : [],
+          at: h.at, windowStart: h.at, windowEnd: h.at, context: false, confidence: 'HIGH', note: h.note,
+        })),
+        ...webOrderHits(
+          await webOrderFacts(q, outletId, from, events.filter((e) => e.type === 'order.web_linked').map((e) => (e.payload as { webOrderId: number }).webOrderId)),
+          events, now, from,
+        ).map((h): RuleHit => ({
           rule: h.rule, key: h.key, weight: DEFAULT_CONFIG.weights[h.rule] ?? 0, modalities: ['POS'], outletId, terminalId: h.terminalId, orderId: h.orderId, actorIds: h.actor ? [h.actor] : [],
           at: h.at, windowStart: h.at, windowEnd: h.at, context: false, confidence: 'HIGH', note: h.note,
         })),

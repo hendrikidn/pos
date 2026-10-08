@@ -110,6 +110,9 @@ export class GuardService {
         context: false, confidence: 'HIGH' as const, note: a.detail,
       }));
 
+      // Owner dan manager tidak diwajibkan absen (R42).
+      const attendanceExempt = (await q.query<{ id: string }>("select id from staff where role in ('OWNER', 'MANAGER')")).rows.map((r) => r.id);
+
       const hits = [
         ...loyaltyHits,
         ...(await transferHits(q, outletId, now)).filter((t) => t.at >= from).map((t): RuleHit => ({
@@ -119,7 +122,7 @@ export class GuardService {
         // Temuan dari data di luar jendela event harus tetap berada di dalam jendela insiden (insiden lama di luar jendela tidak dibaca ulang saat disimpan).
         ...(await channelHits(q, outletId, events, outlet.utc_offset_minutes, from, now)).filter((h) => h.at >= from),
         ...evaluateRules({
-          events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity, promos,
+          events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity, promos, attendanceExempt,
           utcOffsetMinutes: outlet.utc_offset_minutes,
           // Kuota makan karyawan diatur owner per outlet, dan sama dengan yang dipakai terminal.
           config: { r6DailyQuota: outlet.policy?.employeeMealQuota ?? DEFAULT_CONFIG.r6DailyQuota },

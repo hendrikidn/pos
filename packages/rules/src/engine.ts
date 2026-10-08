@@ -531,6 +531,47 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
     }
   }
 
+  // ---- R42: transaksi oleh staf yang tidak sedang absen ----
+  // Hanya berlaku di outlet yang memakai absensi (ada event absen di jendela ini). Absen masuk yang belum ditutup dianggap masih bertugas;
+  // toleransi `r42GraceMs` sebelum masuk dan sesudah pulang. Owner dan manager (`attendanceExempt`) dikecualikan. Satu temuan per staf per hari.
+  {
+    const clock = events.filter((e): e is EventOf<'attendance.clocked'> => e.type === 'attendance.clocked' && !!e.actorId);
+    if (clock.length > 0) {
+      const exempt = new Set(input.attendanceExempt ?? []);
+      const spans = new Map<string, { start: number; end: number }[]>();
+      const open = new Map<string, number>();
+      for (const e of clock) {
+        const who = e.actorId!;
+        if (e.payload.kind === 'IN') {
+          if (!open.has(who)) open.set(who, t(e));
+        } else if (open.has(who)) {
+          (spans.get(who) ?? spans.set(who, []).get(who)!).push({ start: open.get(who)!, end: t(e) });
+          open.delete(who);
+        }
+      }
+      // Absen masuk yang masih terbuka dianggap bertugas, tetapi tidak lebih dari 16 jam (lupa absen pulang tidak boleh membebaskan pemeriksaan selamanya).
+      for (const [who, start] of open) (spans.get(who) ?? spans.set(who, []).get(who)!).push({ start, end: now - start > 16 * 3_600_000 ? start + 16 * 3_600_000 : Infinity });
+      const ACTIVITY = new Set(['order.created', 'payment.received', 'void.approved', 'discount.applied', 'refund.created', 'bill.printed', 'order.sent_to_kitchen']);
+      const found = new Map<string, { first: PosEvent; count: number }>();
+      for (const e of events) {
+        if (!e.actorId || exempt.has(e.actorId) || !ACTIVITY.has(e.type)) continue;
+        const at = t(e);
+        if ((spans.get(e.actorId) ?? []).some((sp) => at >= sp.start - cfg.r42GraceMs && at <= sp.end + cfg.r42GraceMs)) continue;
+        const key = `${e.actorId}:${localDate(at, input.utcOffsetMinutes ?? 420)}`;
+        const f = found.get(key);
+        if (f) f.count++;
+        else found.set(key, { first: e, count: 1 });
+      }
+      for (const [key, f] of found) {
+        hit({
+          rule: 'R42', key: `R42:${key}`, weight: w('R42'), modalities: POS_ONLY, terminalId: f.first.deviceId, orderId: null,
+          actorIds: [f.first.actorId!], at: t(f.first), windowStart: t(f.first), windowEnd: t(f.first),
+          note: `${f.first.actorId} mencatat ${f.count} aktivitas kasir saat tidak sedang absen (pertama: ${f.first.type})`,
+        });
+      }
+    }
+  }
+
   // ---- R24: integritas event ----
   for (const [deviceId, list] of byDevice) {
     for (const issue of verifyChain(list)) {

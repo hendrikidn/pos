@@ -22,6 +22,7 @@ export const RULE_LABELS: Record<string, string> = {
   R27: 'total settlement EDC berbeda dengan POS',
   R28: 'metode bayar di POS tidak sesuai settlement',
   R29: 'pengaturan keamanan perangkat kasir tidak aman',
+  R42: 'transaksi oleh staf yang tidak sedang absen',
   R40: 'transfer stok antar-outlet belum diterima lebih dari 24 jam',
   R41: 'transfer stok diterima kurang dari yang dikirim',
   R37: 'pesanan online di POS tidak ada di laporan platform',

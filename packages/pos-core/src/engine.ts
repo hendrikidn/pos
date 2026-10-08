@@ -107,6 +107,8 @@ export class PosEngine {
   private lastPrinter: PrinterState | undefined;
   private claim = false;
   private user: string | null = null;
+  /** Staf yang sedang absen masuk di terminal ini: id → waktu masuk. Dipulihkan dari penyimpanan saat dimulai ulang. */
+  private readonly clockedIn = new Map<string, number>();
 
   constructor(private readonly d: EngineDeps) {
     this.cfg = d.config;
@@ -134,10 +136,44 @@ export class PosEngine {
     this.shift = (await this.d.store.get<ShiftRecord>('shift')) ?? null;
     this.counter = (await this.d.store.get<number>('counter')) ?? 0;
     this.claim = (await this.d.store.get<boolean>('paperClaim')) ?? false;
+    for (const key of await this.d.store.keys('att:')) {
+      const v = await this.d.store.get<{ since: number }>(key);
+      if (v) this.clockedIn.set(key.slice(4), v.since);
+    }
     for (const key of await this.d.store.keys('order:')) {
       const o = await this.d.store.get<OrderRecord>(key);
       if (o) this.orders.set(o.id, o);
     }
+  }
+
+  // ---------- absensi ----------
+
+  /** Waktu absen masuk staf (default: yang sedang login) bila belum absen pulang di terminal ini; selain itu null. */
+  clockedInSince(userId = this.user): number | null {
+    return userId ? (this.clockedIn.get(userId) ?? null) : null;
+  }
+
+  /** Absen masuk untuk staf yang sedang login (PIN sudah diverifikasi saat login). Tercatat sebagai event dan dipakai penggajian dan pemeriksaan transaksi di luar jam kerja. */
+  async clockIn(): Promise<Result<number>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    if (this.clockedIn.has(w.value)) return fail('ALREADY_CLOCKED_IN', 'Anda sudah absen masuk. Absen pulang dulu sebelum masuk lagi.');
+    await this.emit({ type: 'attendance.clocked', payload: { kind: 'IN' } });
+    const at = this.d.now();
+    this.clockedIn.set(w.value, at);
+    await this.d.store.write({ [`att:${w.value}`]: { since: at } });
+    return ok(at);
+  }
+
+  async clockOut(): Promise<Result<{ since: number; minutes: number }>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    const since = this.clockedIn.get(w.value);
+    if (since === undefined) return fail('NOT_CLOCKED_IN', 'Anda belum absen masuk di terminal ini.');
+    await this.emit({ type: 'attendance.clocked', payload: { kind: 'OUT' } });
+    this.clockedIn.delete(w.value);
+    await this.d.store.write({}, [`att:${w.value}`]);
+    return ok({ since, minutes: Math.max(0, Math.round((this.d.now() - since) / 60_000)) });
   }
 
   // ---------- sesi ----------

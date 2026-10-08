@@ -66,6 +66,11 @@ export type EventBody =
       payload: { orderId: string; orderType: Exclude<OrderType, 'EMPLOYEE'>; tableNo?: string; items: LineItem[] };
     }
   | {
+      type: 'attendance.clocked';
+      /** Absen masuk/pulang staf yang sedang login di terminal (pelakunya = `actorId`, diverifikasi PIN). */
+      payload: { kind: 'IN' | 'OUT' };
+    }
+  | {
       type: 'order.channel_linked';
       /** Order ini berasal dari platform pesan-antar; `ref` = nomor pesanan di platform (dasar rekonsiliasi dengan laporan platform). */
       payload: { orderId: string; channel: OnlineChannel; ref: string };
@@ -168,7 +173,7 @@ export type EventBody =
 export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
-  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'order.channel_linked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
+  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'order.channel_linked', 'attendance.clocked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
   'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.digital', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',

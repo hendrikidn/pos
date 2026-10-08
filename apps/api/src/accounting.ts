@@ -20,6 +20,7 @@ export const SYSTEM = {
   inventory: '1-1400',
   payable: '2-1100',
   cogs: '5-1000',
+  payroll: '6-1000',
   commission: '6-5100',
   sales: '4-1000',
   service: '4-1100',
@@ -245,6 +246,14 @@ export function buildCogsJournal(days: { date: string; amount: number }[], outle
     ref: `JU-HPP-${outletId}-${d.date.replace(/-/g, '')}`, date: d.date, memo: `Beban bahan baku (HPP) ${d.date}`, source: 'POS',
     lines: [{ account: SYSTEM.cogs, debit: d.amount, credit: 0 }, { account: SYSTEM.inventory, debit: 0, credit: d.amount }],
     notes: [`dihitung dari pemakaian menurut resep × harga pokok rata-rata saat ini${missing.length > 0 ? `; bahan tanpa harga pokok tidak dihitung: ${missing.join(', ')}` : ''}`],
+  }));
+}
+
+/** Jurnal gaji: pembayaran penggajian = Dr Beban Gaji, Cr Kas (tunai) atau Bank (transfer), pada tanggal bayar. */
+export function buildPayrollJournal(runs: { id: number; paidDate: string; total: number; method: 'TUNAI' | 'TRANSFER'; from: string; to: string }[]): JournalEntry[] {
+  return runs.filter((r) => r.total > 0).map((r): JournalEntry => ({
+    ref: `JU-GAJI-${r.id}`, date: r.paidDate, memo: `Gaji periode ${r.from} s/d ${r.to}`, source: 'POS',
+    lines: [{ account: SYSTEM.payroll, debit: r.total, credit: 0 }, { account: r.method === 'TUNAI' ? SYSTEM.cash : SYSTEM.bank, debit: 0, credit: r.total }],
   }));
 }
 

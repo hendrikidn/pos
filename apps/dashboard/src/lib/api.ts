@@ -412,3 +412,19 @@ export interface TransferRow {
   lines: { ingredientId: string; name: string; unit: string; qtySent: number; qtyReceived: number | null; unitCost: number }[];
 }
 export interface MenuCostRow { id: string; name: string; category: string; active: boolean; price: number; cost: number | null; margin: number | null; marginPct: number | null; missing: string[] }
+
+export interface AttendanceView {
+  range: { from: string; to: string };
+  rows: { staffId: string; name: string; start: number; end: number; minutes: number; terminalId: string | null; manual: boolean }[];
+  open: { staffId: string; name: string; start: number; terminalId: string; stale: boolean }[];
+  manual: { id: number; staffId: string; start: number; end: number; reason: string; createdBy: string }[];
+  summary: { staffId: string; name: string; days: number; minutes: number }[];
+}
+export interface StaffPayRow { id: string; name: string; role: string; active: boolean; payType: 'HOURLY' | 'MONTHLY' | null; rate: number | null; overtimeMultiplier: number | null }
+export type RunStatus = 'DRAFT' | 'FINAL' | 'PAID' | 'CANCELED';
+export interface PayrollRunRow { id: number; outletId: string; from: string; to: string; status: RunStatus; paidDate: string | null; createdBy: string; total: number; staff: number }
+export interface PayrollDetail {
+  id: number; outletId: string; from: string; to: string; status: RunStatus; dailyRegularMinutes: number; createdBy: string; finalizedBy: string | null; paidDate: string | null; payMethod: string | null; cancelReason: string | null;
+  lines: { staffId: string; name: string; payType: string; rate: number; regularMinutes: number; overtimeMinutes: number; base: number; overtimePay: number; allowance: number; deduction: number; net: number; note: string | null }[];
+  total: number;
+}

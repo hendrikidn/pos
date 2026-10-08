@@ -55,6 +55,8 @@ export interface RuleConfig {
   r14WindowMs: number;
   /** R34: member yang dikaitkan ke lebih dari sekian order berbeda dalam satu hari lokal ditandai. */
   r34MaxOrdersPerDay: number;
+  /** R42: toleransi sebelum absen masuk dan sesudah absen pulang. */
+  r42GraceMs: number;
   weights: Record<string, number>;
 }
 
@@ -77,9 +79,10 @@ export const DEFAULT_CONFIG: RuleConfig = {
   r14WindowMs: 7 * 24 * 3_600_000,
   /** R34: member yang dikaitkan ke lebih dari sekian order berbeda dalam satu hari. */
   r34MaxOrdersPerDay: 5,
+  r42GraceMs: 15 * 60_000,
   weights: {
     R1: 15, R1_DRAWER: 30, R2: 30, R2_PROXY: 20, R3: 35, R4: 40, R5: 20, R5B: 25, R6: 25, R6_APPROVED: 10, R14: 20,
-    R18: 30, R18_APPROVED: 10, R21: 30, R22: 30, R23: 20, R24: 40, R25: 25, R30: 60, R30_UNTRACKED: 20, R31: 50, R32: 45, R33: 50, R34: 30, R35: 50, R36: 40, R40: 30, R41: 40, R29_TIME: 30, R29_DEBUG: 15, R29_ROOT: 40,
+    R18: 30, R18_APPROVED: 10, R21: 30, R22: 30, R23: 20, R24: 40, R25: 25, R30: 60, R30_UNTRACKED: 20, R31: 50, R32: 45, R33: 50, R34: 30, R35: 50, R36: 40, R40: 30, R41: 40, R42: 25, R29_TIME: 30, R29_DEBUG: 15, R29_ROOT: 40,
   },
 };
 
@@ -98,6 +101,8 @@ export interface RuleInput {
    * dengan id tak dikenal atau besar melebihi aturan promo menjadi temuan R32. Tidak diberikan = aturan R32 tidak dijalankan.
    */
   promos?: { id: string; kind: 'PERCENT' | 'AMOUNT'; value: number }[];
+  /** Staf yang tidak wajib absen (owner, manager): aktivitasnya tidak diperiksa R42. */
+  attendanceExempt?: string[];
   /** Masalah integritas yang hanya diketahui server (mis. tanda tangan perangkat tidak sah). */
   extraIntegrity?: { deviceId: string; seq: number; kind: string; at: number; actorId?: string | null }[];
 }

@@ -177,6 +177,21 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
         <button className={`secondary ${claim ? 'warn' : ''}`} onClick={() => void run(ctx, () => engine.setPaperClaim(!claim))}>
           {claim ? 'Kertas habis ✓' : 'Kertas habis'}
         </button>
+        <button
+          className={`secondary ${engine.clockedInSince() === null ? 'warn' : ''}`}
+          title={engine.clockedInSince() === null ? 'Catat jam masuk kerja Anda' : `Masuk sejak ${new Date(engine.clockedInSince()!).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}
+          onClick={async () => {
+            if (engine.clockedInSince() === null) {
+              const r = await run(ctx, () => engine.clockIn());
+              if (r.ok) ctx.toast(`Absen masuk ${new Date(r.value).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`, 'info');
+            } else {
+              const r = await run(ctx, () => engine.clockOut());
+              if (r.ok) ctx.toast(`Absen pulang. Lama kerja ${Math.floor(r.value.minutes / 60)} jam ${r.value.minutes % 60} menit`, 'info');
+            }
+          }}
+        >
+          {engine.clockedInSince() === null ? 'Absen masuk' : 'Absen pulang'}
+        </button>
         <span className="muted small">{shift ? 'Shift buka' : 'Shift tutup'} · {user.name}</span>
         <button className="ghost" onClick={() => { engine.logout(); ctx.selectOrder(null); ctx.bump(); }}>Keluar</button>
       </div>

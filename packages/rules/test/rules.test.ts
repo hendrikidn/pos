@@ -702,3 +702,66 @@ describe('R35 dan R36: pesanan online', () => {
     expect(h[0]!.note).toContain('sudah dipakai order a');
   });
 });
+
+describe('R42: transaksi oleh staf yang tidak sedang absen', () => {
+  const r42 = (s: Sim, exempt: string[] = []) => evaluateRules({ events: s.events, now: s.t('20:00:00'), terminals: [s.terminalId], capabilities: NO_SENSOR, attendanceExempt: exempt }).filter((h) => h.rule === 'R42');
+  const clock = (s: Sim, hms: string, kind: 'IN' | 'OUT', actor: string) => s.pos({ type: 'attendance.clocked', payload: { kind } }, hms, actor);
+
+  it('transaksi dalam jam absen (dengan toleransi 15 menit) tidak memicu apa pun', () => {
+    const s = new Sim();
+    clock(s, '09:00:00', 'IN', 'budi');
+    s.cashOrder('a', '10:00:00', '10:01:00', 30_000, 'budi');
+    clock(s, '17:00:00', 'OUT', 'budi');
+    s.cashOrder('b', '17:10:00', '17:11:00', 20_000, 'budi'); // 10 menit setelah pulang: dalam toleransi
+    expect(r42(s)).toEqual([]);
+  });
+
+  it('transaksi sebelum masuk atau sesudah pulang melewati toleransi memicu R42, satu temuan per staf per hari dengan jumlah aktivitas', () => {
+    const s = new Sim();
+    s.cashOrder('x', '08:00:00', '08:01:00', 10_000, 'sari'); // sari belum absen sama sekali; tetapi budi absen sehingga outlet memakai absensi
+    clock(s, '09:00:00', 'IN', 'budi');
+    clock(s, '17:00:00', 'OUT', 'budi');
+    s.cashOrder('y', '18:00:00', '18:01:00', 10_000, 'budi');
+    const h = r42(s);
+    expect(h.map((x) => x.actorIds[0]).sort()).toEqual(['budi', 'sari']);
+    expect(h.find((x) => x.actorIds[0] === 'sari')!.note).toContain('4 aktivitas');
+    expect(h.find((x) => x.actorIds[0] === 'budi')!.weight).toBe(25);
+  });
+
+  it('absen masuk yang belum ditutup dianggap masih bertugas; outlet tanpa absensi dan staf yang dikecualikan tidak diperiksa', () => {
+    const s = new Sim();
+    clock(s, '09:00:00', 'IN', 'budi');
+    s.cashOrder('a', '19:00:00', '19:01:00', 10_000, 'budi');
+    expect(r42(s)).toEqual([]);
+    const noAtt = new Sim();
+    noAtt.cashOrder('a', '10:00:00', '10:01:00', 10_000, 'sari');
+    expect(r42(noAtt)).toEqual([]);
+    const own = new Sim();
+    clock(own, '09:00:00', 'IN', 'budi');
+    own.cashOrder('a', '10:00:00', '10:01:00', 10_000, 'rina'); // manager
+    expect(r42(own, ['rina'])).toEqual([]);
+    expect(r42(own, [])).toHaveLength(1);
+  });
+
+  it('absen masuk yang terbuka lebih dari 16 jam tidak lagi membebaskan staf: aktivitas setelah 16 jam ditandai', () => {
+    const s = new Sim();
+    clock(s, '01:00:00', 'IN', 'budi');
+    s.cashOrder('a', '10:00:00', '10:01:00', 10_000, 'budi'); // 9 jam sejak masuk
+    s.cashOrder('b', '19:00:00', '19:01:00', 10_000, 'budi'); // 18 jam sejak masuk
+    const h = evaluateRules({ events: s.events, now: s.t('20:00:00'), terminals: [s.terminalId], capabilities: NO_SENSOR }).filter((x) => x.rule === 'R42');
+    expect(h).toHaveLength(1);
+    expect(h[0]!.note).toContain('4 aktivitas');
+  });
+
+  it('absen pulang lalu masuk lagi membentuk dua rentang; di antaranya tidak tercakup', () => {
+    const s = new Sim();
+    clock(s, '09:00:00', 'IN', 'budi'); clock(s, '12:00:00', 'OUT', 'budi');
+    clock(s, '15:00:00', 'IN', 'budi'); clock(s, '18:00:00', 'OUT', 'budi');
+    s.cashOrder('a', '10:00:00', '10:01:00', 10_000, 'budi');
+    s.cashOrder('b', '13:30:00', '13:31:00', 10_000, 'budi'); // jam istirahat
+    s.cashOrder('c', '16:00:00', '16:01:00', 10_000, 'budi');
+    const h = r42(s);
+    expect(h).toHaveLength(1);
+    expect(h[0]!.note).toContain('4 aktivitas'); // order.created, bill.printed, sent_to_kitchen, payment untuk order b
+  });
+});

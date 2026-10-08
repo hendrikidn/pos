@@ -6,6 +6,7 @@ import type { ApiAuth } from './auth';
 import { ConfigService } from './config.service';
 import { BillingService } from './billing.service';
 import { ChannelService } from './channel.service';
+import { HrService } from './hr.service';
 import { PurchaseService } from './purchase.service';
 import { TransferService } from './transfer.service';
 import { MemberService } from './member.service';
@@ -341,6 +342,17 @@ async function main() {
 
   // Transfer stok: satu kiriman Senopati → Kemang yang masih di perjalanan (bisa diterima dari dashboard sebagai pengguna lain).
   await app.get(TransferService).send(seeder, { fromOutletId: 'senopati', toOutletId: 'kemang', note: 'Susu untuk akhir pekan', lines: [{ ingredientId: 'susu', qty: 2_000 }, { ingredientId: 'biji', qty: 500 }] });
+
+  // SDM: tarif gaji dan absensi lima hari terakhir (koreksi manual), satu hari lembur. Gaji bisa dihitung dari dashboard.
+  const hr = app.get(HrService);
+  await hr.setPay(seeder, 'budi', { payType: 'HOURLY', rate: 25_000, overtimeMultiplier: 1.5 });
+  await hr.setPay(seeder, 'sari', { payType: 'MONTHLY', rate: 4_500_000, overtimeMultiplier: 1.5 });
+  const todayStart = Math.floor((now + 7 * H) / (24 * H)) * 24 * H - 7 * H; // 00:00 WIB hari ini
+  for (let d = 1; d <= 5; d++) {
+    const day = todayStart - d * 24 * H;
+    await hr.addManual(seeder, 'senopati', { staffId: 'budi', start: day + 9 * H, end: day + (d === 2 ? 19 : 17) * H, reason: 'Absensi demo' }, now);
+    await hr.addManual(seeder, 'senopati', { staffId: 'sari', start: day + 13 * H, end: day + 21 * H, reason: 'Absensi demo' }, now);
+  }
 
   const open = await call('/v1/outlets/senopati/incidents', owner);
   const old = open.find((i: { order_ids: string[] }) => i.order_ids.includes('A-007'));

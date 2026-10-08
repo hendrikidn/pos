@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { ApiAuth } from './auth';
 import {
-  buildChannelJournal, buildCogsJournal, buildPurchaseJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
+  buildChannelJournal, buildCogsJournal, buildPayrollJournal, buildPurchaseJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
   type Account, type AccountType, type JournalEntry,
 } from './accounting';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
@@ -173,7 +173,13 @@ export class AccountingService {
     const dayStarts: { date: string; fromMs: number; toMs: number }[] = [];
     for (let d = r.from; d <= r.to; d = addDays(d, 1)) dayStarts.push({ date: d, fromMs: startOfLocalDay(d, r.off) - 1, toMs: startOfLocalDay(d, r.off) + DAY_MS - 1 });
     const cogs = await this.stock.cogsByDay(q, outletId, dayStarts, now);
-    return [...auto, ...buildCogsJournal(cogs.days, outletId, cogs.missing), ...buildChannelJournal(platform, outletId), ...buildPurchaseJournal(receipts, payments), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
+    const payroll = (
+      await q.query<{ id: string; paid_date: string; pay_method: 'TUNAI' | 'TRANSFER'; period_start: string; period_end: string; total: string }>(
+        `select r.id, r.paid_date, r.pay_method, r.period_start, r.period_end, coalesce((select sum(net) from payroll_line l where l.run_id = r.id), 0) as total
+         from payroll_run r where r.outlet_id = $1 and r.status = 'PAID' and r.paid_date >= $2 and r.paid_date <= $3`, [outletId, r.from, r.to],
+      )
+    ).rows.map((x) => ({ id: Number(x.id), paidDate: x.paid_date, total: Number(x.total), method: x.pay_method, from: x.period_start, to: x.period_end }));
+    return [...auto, ...buildPayrollJournal(payroll), ...buildCogsJournal(cogs.days, outletId, cogs.missing), ...buildChannelJournal(platform, outletId), ...buildPurchaseJournal(receipts, payments), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
   }
 
   /** Jurnal outlet pada rentang, ditambah daftar jurnal manual (termasuk yang dibatalkan) untuk pengelolaan. */

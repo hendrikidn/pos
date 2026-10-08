@@ -18,9 +18,12 @@ describe('KPI tenant di konsol admin', () => {
        values ($1, $2, $3, $4, $5, $6, $7, repeat('0', 64), repeat('1', 64), $8::jsonb)`,
       [`e${++seq}`, tenant, outlet, device, seq, type, at, JSON.stringify(payload)],
     );
-  const order = (at: number, orderType = 'DINE_IN') => ev('kopi', 'kopi-pusat', 'pos-1', 'order.created', at, { orderId: `o${seq}`, orderType });
-  const pay = (at: number, amount: number) => ev('kopi', 'kopi-pusat', 'pos-1', 'payment.received', at, { orderId: 'x', method: 'CASH', amount });
-  const refund = (at: number, amount: number) => ev('kopi', 'kopi-pusat', 'pos-1', 'refund.created', at, { refundId: 'r', originalOrderId: 'x', amount, method: 'CASH', approverId: 'a' });
+  const order = (id: string, at: number, orderType = 'DINE_IN') => ev('kopi', 'kopi-pusat', 'pos-1', 'order.created', at, { orderId: id, orderType });
+  const pay = (id: string, at: number, amount: number) => ev('kopi', 'kopi-pusat', 'pos-1', 'payment.received', at, { orderId: id, method: 'CASH', amount });
+  const refund = (id: string, at: number, amount: number) => ev('kopi', 'kopi-pusat', 'pos-1', 'refund.created', at, { refundId: `r-${id}`, originalOrderId: id, amount, method: 'CASH', approverId: 'a' });
+  const voidIt = (id: string, at: number, amount: number) => ev('kopi', 'kopi-pusat', 'pos-1', 'void.approved', at, { orderId: id, reasonCode: 'CUSTOMER_CANCEL', approverIds: ['hendra'], amount });
+  /** Order lengkap: dibuat lalu dibayar satu detik kemudian. */
+  const sale = async (id: string, at: number, amount: number, orderType = 'DINE_IN') => { await order(id, at, orderType); await pay(id, at + 1000, amount); };
 
   beforeAll(async () => {
     h = await createHarness(NOW);
@@ -39,14 +42,16 @@ describe('KPI tenant di konsol admin', () => {
     await h.db.admin.query("update device set last_seen_ms = $1 where id = 'pos-1'", [NOW - 10 * 60_000]);
     await h.db.admin.query("update device set revoked_at = now(), last_seen_ms = $1 where id = 'sensor-lama'", [NOW - 1000]);
 
-    // Hari ini (WIB): 2 pesanan biasa + 1 pesanan karyawan (tidak dihitung); bayar 50.000 + 30.000; refund 10.000 -> 70.000.
-    await order(NOW - 2 * HOUR); await order(NOW - HOUR); await order(NOW - HOUR, 'EMPLOYEE');
-    await pay(NOW - 2 * HOUR, 50_000); await pay(NOW - HOUR, 30_000); await refund(NOW - 30 * 60_000, 10_000);
+    // Hari ini (WIB): A 50.000 dan B 30.000, refund A 10.000 -> 70.000, 2 pesanan.
+    // Tidak dihitung: E (makan karyawan) dan V (dibayar 40.000 lalu di-void, beserta refund 5.000 atas V).
+    await sale('A', NOW - 2 * HOUR, 50_000); await sale('B', NOW - HOUR, 30_000); await refund('A', NOW - 30 * 60_000, 10_000);
+    await sale('E', NOW - HOUR, 15_000, 'EMPLOYEE');
+    await sale('V', NOW - 90 * 60_000, 40_000); await voidIt('V', NOW - 80 * 60_000, 40_000); await refund('V', NOW - 70 * 60_000, 5_000);
     // 3 hari lalu: masuk 7 hari. 20 hari lalu: hanya 30 hari. 40 hari lalu dan 3 hari ke depan: diabaikan.
-    await order(NOW - 3 * DAY); await pay(NOW - 3 * DAY, 20_000);
-    await order(NOW - 20 * DAY); await pay(NOW - 20 * DAY, 100_000);
-    await order(NOW - 40 * DAY); await pay(NOW - 40 * DAY, 999_000);
-    await order(NOW + 3 * DAY); await pay(NOW + 3 * DAY, 888_000);
+    await sale('C', NOW - 3 * DAY, 20_000);
+    await sale('D', NOW - 20 * DAY, 100_000);
+    await sale('F', NOW - 40 * DAY, 999_000);
+    await sale('G', NOW + 3 * DAY, 888_000);
 
     // Insiden: satu kritis terbuka, satu rendah terbuka, satu fraud terkonfirmasi (30 hari), satu sah.
     const inc = (id: string, level: string, status: string, start: number) =>
@@ -72,8 +77,8 @@ describe('KPI tenant di konsol admin', () => {
     expect(d.kpi).toMatchObject({
       outlets: 2,
       staffActive: 1,
-      ordersToday: 2, orders7d: 3, orders30d: 4, // pesanan karyawan, 40 hari lalu, dan masa depan tidak dihitung
-      revenueToday: 70_000, revenue7d: 90_000, revenue30d: 190_000, // bayar dikurangi refund
+      ordersToday: 2, orders7d: 3, orders30d: 4, // karyawan, order di-void, 40 hari lalu, dan masa depan tidak dihitung
+      revenueToday: 70_000, revenue7d: 90_000, revenue30d: 190_000, // bayar dikurangi refund; void dan karyawan tidak masuk
       devicesTotal: 2, devicesOnline: 1, sensorsTotal: 1, sensorsOnline: 1, // perangkat dicabut tidak dihitung
       incidentsOpen: 2, incidentsCritical: 1, confirmedFraud30d: 1,
       lastActivityMs: NOW - 60_000,
@@ -101,16 +106,44 @@ describe('KPI tenant di konsol admin', () => {
   it('batas hari mengikuti zona waktu outlet: 00:30 WIB masuk hari ini, 23:30 WIB sebelumnya masuk kemarin', async () => {
     h.setNow(Date.parse('2026-10-07T00:45:00+07:00'));
     try {
-      await ev('kopi', 'kopi-pusat', 'pos-1', 'order.created', Date.parse('2026-10-07T00:30:00+07:00'), { orderId: 'b1', orderType: 'DINE_IN' });
-      await ev('kopi', 'kopi-pusat', 'pos-1', 'order.created', Date.parse('2026-10-06T23:30:00+07:00'), { orderId: 'b2', orderType: 'DINE_IN' });
+      await sale('b1', Date.parse('2026-10-07T00:30:00+07:00'), 1_000);
+      await sale('b2', Date.parse('2026-10-06T23:30:00+07:00'), 1_000);
       const d = (await h.http('GET', '/v1/admin/tenants/kopi', admin)).body;
-      // Hari ini (7 Okt WIB) = 2 pesanan seeded pukul 08:00 dan 09:00 (hari kalender yang sama) + b1. b2 jatuh pada 6 Okt.
+      // Hari ini (7 Okt WIB) = A dan B (pukul 08:00 dan 09:00, hari kalender yang sama) + b1. b2 jatuh pada 6 Okt.
       expect(d.kpi.ordersToday).toBe(3);
       expect(d.daily.at(-1)).toMatchObject({ date: '2026-10-07', orders: 3 });
       expect(d.daily.at(-2)).toMatchObject({ date: '2026-10-06', orders: 1 });
     } finally {
       h.setNow(NOW);
     }
+  });
+
+  it('KONSISTENSI: angka KPI konsol admin sama persis dengan laporan penjualan owner untuk rentang yang sama', async () => {
+    const owner = await h.admin.createApiToken('kopi', 'owner-konsistensi', 'OWNER');
+    const kpi = (await h.http('GET', '/v1/admin/tenants/kopi', admin)).body.outletKpis.find((x: { outletId: string }) => x.outletId === 'kopi-pusat');
+    for (const [range, orders, revenue] of [['today', 'ordersToday', 'revenueToday'], ['7d', 'orders7d', 'revenue7d'], ['30d', 'orders30d', 'revenue30d']] as const) {
+      const r = await h.http('GET', `/v1/outlets/kopi-pusat/reports/sales?range=${range}`, owner);
+      expect(r.status, range).toBe(200);
+      expect(r.body.totals.orders, `pesanan ${range}`).toBe(kpi[orders]);
+      expect(r.body.totals.net, `penerimaan ${range}`).toBe(kpi[revenue]);
+    }
+  });
+
+  it('pembayaran sebagian dan terpisah: satu order dihitung sekali (+1), penerimaan menjumlahkan semua pembayarannya (+25.000), sama dengan laporan owner', async () => {
+    const owner = await h.admin.createApiToken('kopi', 'owner-konsistensi-2', 'OWNER');
+    const read = async () => ({
+      kpi: (await h.http('GET', '/v1/admin/tenants/kopi', admin)).body.kpi,
+      report: (await h.http('GET', '/v1/outlets/kopi-pusat/reports/sales?range=today', owner)).body.totals,
+    });
+    const before = await read();
+    await order('S', NOW - 30 * 60_000);
+    await pay('S', NOW - 29 * 60_000, 10_000);
+    await pay('S', NOW - 28 * 60_000, 15_000);
+    const after = await read();
+    expect(after.kpi.ordersToday - before.kpi.ordersToday).toBe(1);
+    expect(after.kpi.revenueToday - before.kpi.revenueToday).toBe(25_000);
+    expect(after.report.orders).toBe(after.kpi.ordersToday);
+    expect(after.report.net).toBe(after.kpi.revenueToday);
   });
 
   it('daftar tenant dan ringkasan platform menjumlahkan KPI semua tenant', async () => {

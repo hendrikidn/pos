@@ -30,7 +30,7 @@ export interface TenantKpi {
   ordersToday: number;
   orders7d: number;
   orders30d: number;
-  /** Penerimaan bersih: pembayaran diterima dikurangi refund. */
+  /** Penerimaan bersih: pembayaran diterima dikurangi refund, tanpa order karyawan dan order yang di-void (sama dengan laporan owner). */
   revenueToday: number;
   revenue7d: number;
   revenue30d: number;
@@ -54,30 +54,49 @@ export interface DailyPoint {
 
 const num = (v: unknown) => Number(v ?? 0);
 
-/** Penjualan per outlet. Pesanan karyawan (EMPLOYEE) tidak dihitung, dan event berstempel lebih dari sehari di masa depan diabaikan. */
+/**
+ * Pembayaran dan refund yang dihitung sebagai penjualan, dengan aturan yang SAMA dengan laporan penjualan owner
+ * (`buildSalesReport`, apps/api/src/sales-report.ts), supaya angka di konsol admin dan di dashboard owner tidak berbeda:
+ *  - waktu = waktu terkoreksi (waktu perangkat − selisih jam), hari mengikuti zona waktu outlet, event > 1 hari di masa depan diabaikan;
+ *  - order karyawan dan order yang kemudian di-void (kapan pun) TIDAK dihitung, begitu pula refund atas order itu;
+ *  - satu order dihitung sekali sebagai pesanan, pada pembayaran pertamanya (`first`);
+ *  - penerimaan = pembayaran − refund.
+ * Parameter: $1 sekarang, $2 batas awal waktu terkoreksi, $3 tenant (atau null untuk semua).
+ */
+const SALES_CTE = `
+  pay as (
+    select e.tenant_id, e.outlet_id, e.type, e.device_id, e.seq, o.utc_offset_minutes as off,
+           case e.type when 'payment.received' then e.payload->>'orderId' else e.payload->>'originalOrderId' end as oid,
+           case e.type when 'payment.received' then (e.payload->>'amount')::float8 else -(e.payload->>'amount')::float8 end as money,
+           (e.device_time_ms - e.clock_offset_ms) as t
+    from event e join outlet o on o.id = e.outlet_id
+    where e.type in ('payment.received', 'refund.created')
+      and (e.device_time_ms - e.clock_offset_ms) >= $2::float8 and (e.device_time_ms - e.clock_offset_ms) <= $1::float8 + 86400000
+      and ($3::text is null or e.tenant_id = $3)
+  ),
+  sales as (
+    select p.tenant_id, p.outlet_id, p.type, p.money, p.t,
+           floor((p.t + p.off * 60000.0) / 86400000.0) as day,
+           floor(($1::float8 + p.off * 60000.0) / 86400000.0) as today,
+           (p.type = 'payment.received' and row_number() over (partition by p.outlet_id, p.oid, p.type order by p.t, p.device_id, p.seq) = 1) as first
+    from pay p
+    where not exists (select 1 from event x where x.outlet_id = p.outlet_id and x.type = 'void.approved' and x.payload->>'orderId' = p.oid)
+      and not exists (select 1 from event x where x.outlet_id = p.outlet_id and x.type = 'order.created' and x.payload->>'orderId' = p.oid and x.payload->>'orderType' = 'EMPLOYEE')
+  )`;
+
+/** Penjualan per outlet: hari ini, 7 hari kalender lokal terakhir, dan 30 hari kalender lokal terakhir (termasuk hari ini). */
 async function salesByOutlet(db: Database, now: number, tenantId?: string) {
   const r = await db.admin.query<Record<string, unknown>>(
-    `with ev as (
-       select e.tenant_id, e.outlet_id, e.type, e.device_time_ms,
-              floor((e.device_time_ms + o.utc_offset_minutes * 60000.0) / 86400000.0) as day,
-              floor(($1::float8 + o.utc_offset_minutes * 60000.0) / 86400000.0) as today,
-              case e.type when 'payment.received' then (e.payload->>'amount')::float8
-                          when 'refund.created' then -(e.payload->>'amount')::float8 else 0 end as money
-       from event e join outlet o on o.id = e.outlet_id
-       where e.type in ('order.created', 'payment.received', 'refund.created')
-         and e.device_time_ms >= $2::float8 and e.device_time_ms <= $1::float8 + 86400000
-         and ($3::text is null or e.tenant_id = $3)
-         and not (e.type = 'order.created' and coalesce(e.payload->>'orderType', '') = 'EMPLOYEE')
-     )
+    `with ${SALES_CTE}
      select tenant_id, outlet_id,
-            count(*) filter (where type = 'order.created' and day = today)::int as orders_today,
-            count(*) filter (where type = 'order.created' and device_time_ms >= $4::float8)::int as orders_7d,
-            count(*) filter (where type = 'order.created')::int as orders_30d,
+            count(*) filter (where first and day = today)::int as orders_today,
+            count(*) filter (where first and day >= today - 6)::int as orders_7d,
+            count(*) filter (where first and day >= today - 29)::int as orders_30d,
             coalesce(sum(money) filter (where day = today), 0)::float8 as revenue_today,
-            coalesce(sum(money) filter (where device_time_ms >= $4::float8), 0)::float8 as revenue_7d,
-            coalesce(sum(money), 0)::float8 as revenue_30d
-     from ev group by tenant_id, outlet_id`,
-    [now, now - 30 * DAY_MS, tenantId ?? null, now - 7 * DAY_MS],
+            coalesce(sum(money) filter (where day >= today - 6), 0)::float8 as revenue_7d,
+            coalesce(sum(money) filter (where day >= today - 29), 0)::float8 as revenue_30d
+     from sales group by tenant_id, outlet_id`,
+    [now, now - 32 * DAY_MS, tenantId ?? null],
   );
   return r.rows;
 }
@@ -160,16 +179,10 @@ export async function dailySeries(db: Database, now: number, tenantId: string): 
   const todayIdx = Math.floor((now + off * 60_000) / DAY_MS);
   const rows = (
     await db.admin.query<{ day: string; orders: number; revenue: number }>(
-      `select floor((e.device_time_ms + o.utc_offset_minutes * 60000.0) / 86400000.0)::bigint as day,
-              count(*) filter (where e.type = 'order.created')::int as orders,
-              coalesce(sum(case e.type when 'payment.received' then (e.payload->>'amount')::float8
-                                       when 'refund.created' then -(e.payload->>'amount')::float8 else 0 end), 0)::float8 as revenue
-       from event e join outlet o on o.id = e.outlet_id
-       where e.tenant_id = $1 and e.type in ('order.created', 'payment.received', 'refund.created')
-         and e.device_time_ms >= $2::float8 and e.device_time_ms <= $3::float8
-         and not (e.type = 'order.created' and coalesce(e.payload->>'orderType', '') = 'EMPLOYEE')
-       group by 1`,
-      [tenantId, now - (DAILY_DAYS + 2) * DAY_MS, now + DAY_MS],
+      `with ${SALES_CTE}
+       select day::bigint as day, count(*) filter (where first)::int as orders, coalesce(sum(money), 0)::float8 as revenue
+       from sales group by day`,
+      [now, now - (DAILY_DAYS + 2) * DAY_MS, tenantId],
     )
   ).rows;
   const m = new Map(rows.map((r) => [Number(r.day), r]));

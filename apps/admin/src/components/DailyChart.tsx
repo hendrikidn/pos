@@ -43,7 +43,7 @@ export function DailyChart({ daily }: { daily: DailyPoint[] }) {
         </div>
       </div>
       <p className="muted small" style={{ margin: '0 0 6px' }}>
-        {metric === 'revenue' ? 'Pembayaran diterima dikurangi refund.' : 'Pesanan pelanggan; pesanan karyawan tidak dihitung.'} Total {fmt(total)}. Batang terakhir adalah hari ini dan belum lengkap.
+        {metric === 'revenue' ? 'Pembayaran diterima dikurangi refund; order yang di-void dan makan karyawan tidak dihitung.' : 'Order yang dibayar (sekali per order); order yang di-void dan makan karyawan tidak dihitung.'} Total {fmt(total)}. Batang terakhir adalah hari ini dan belum lengkap.
       </p>
       <div className="chart-scroll">
       <div className="chart-wrap" onMouseLeave={() => setHover(null)}>

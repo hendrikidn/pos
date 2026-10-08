@@ -14,7 +14,7 @@ export default async function TenantsPage() {
   return (
     <Shell me={me}>
       <h1>Platform</h1>
-      <p className="sub">Ringkasan seluruh tenant. Pesanan dan penerimaan dihitung 7 hari terakhir.</p>
+      <p className="sub">Ringkasan seluruh tenant. Pesanan dan penerimaan dihitung 7 hari kalender terakhir (zona waktu outlet) dengan aturan yang sama seperti laporan penjualan owner.</p>
 
       <div className="tiles">
         <StatTile label="Tenant aktif" value={num(o.tenants.active)} sub={o.tenants.suspended ? `${o.tenants.suspended} ditangguhkan` : 'tidak ada yang ditangguhkan'} />
@@ -26,7 +26,7 @@ export default async function TenantsPage() {
           tone={o.devices.total > 0 && o.devices.online < o.devices.total ? 'warn' : undefined}
         />
         <StatTile label="Pesanan, 7 hari" value={num(o.orders7d)} />
-        <StatTile label="Penerimaan, 7 hari" value={rupiahShort(o.revenue7d)} sub="bayar dikurangi refund" title={rupiah(o.revenue7d)} />
+        <StatTile label="Penerimaan, 7 hari" value={rupiahShort(o.revenue7d)} sub="bayar dikurangi refund; tanpa void dan karyawan" title={rupiah(o.revenue7d)} />
         <StatTile
           label="Insiden terbuka"
           value={num(o.incidents.open)}

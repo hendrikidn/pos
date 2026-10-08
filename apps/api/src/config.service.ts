@@ -69,6 +69,11 @@ export interface SettingsInput {
   taxOnService?: boolean;
   roundingUnit?: number;
   edcs?: { tid: string; bank: string; label: string }[];
+  /**
+   * Loyalty: `rupiahPerPoint` belanja Rp sekian = 1 poin (0 = loyalty mati), `pointValue` nilai Rp per poin saat ditukar (0 = tidak bisa ditukar),
+   * `maxRedeemPercent` batas potongan dari subtotal (1–100).
+   */
+  loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
   /** Denah meja; `[]` menghapusnya (kasir kembali mengetik nomor meja bebas). */
   tables?: { no: string; area: string; seats: number }[];
   policy?: {
@@ -153,6 +158,8 @@ export interface DeviceConfig {
     taxOnService?: boolean;
     roundingUnit?: number;
     edcs: { tid: string; bank: string; label: string }[];
+    /** Hanya bila loyalty aktif di outlet ini. */
+    loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
     /** Zona waktu outlet (menit dari UTC); hanya dikirim bersama promo karena jadwal promo memakainya. */
     utcOffsetMinutes?: number;
     /** Hanya bila outlet punya denah meja. */
@@ -395,7 +402,7 @@ export class ConfigService {
 
   async getSettings(auth: ApiAuth, outletId: string, now = Date.now()) {
     const row = await this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, tables, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
+      (await q.query<{ shadow_days: number; shadow_started_ms: number | null }>('select id, name, terminals, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, loyalty_rupiah_per_point, loyalty_point_value, loyalty_max_redeem_percent, edcs, tables, policy, cctv_retention_days, cctv_clock_offset_sec, shadow_days, shadow_started_ms from outlet where id = $1', [outletId])).rows[0],
     );
     if (!row) throw new NotFoundException('outlet tidak ditemukan');
     const { shadow_started_ms, ...rest } = row;
@@ -412,6 +419,15 @@ export class ConfigService {
       need(Array.isArray(s.edcs) && s.edcs.length <= 10, 'edcs maksimal 10');
       for (const e of s.edcs) need(/^[0-9]{6,12}$/.test(e.tid) && !!e.bank?.trim() && !!e.label?.trim(), 'setiap EDC perlu tid (6–12 digit), bank, dan label');
       need(new Set(s.edcs.map((e) => e.tid)).size === s.edcs.length, 'TID EDC tidak boleh ganda');
+    }
+    if (s.loyalty !== undefined) {
+      const l = s.loyalty;
+      need(typeof l === 'object' && l !== null, 'loyalty harus berupa objek');
+      need(Number.isInteger(l.rupiahPerPoint) && l.rupiahPerPoint >= 0 && l.rupiahPerPoint <= 1_000_000, 'rupiahPerPoint 0–1.000.000 (0 = loyalty mati)');
+      need(Number.isInteger(l.pointValue) && l.pointValue >= 0 && l.pointValue <= 1_000_000, 'pointValue 0–1.000.000 (0 = poin tidak bisa ditukar)');
+      need(Number.isInteger(l.maxRedeemPercent) && l.maxRedeemPercent >= 1 && l.maxRedeemPercent <= 100, 'maxRedeemPercent 1–100');
+      // Menukar poin lebih bernilai daripada memperolehnya = poin bisa dicetak jadi uang. Dicegah di sini, bukan hanya diingatkan.
+      need(l.rupiahPerPoint === 0 || l.pointValue <= l.rupiahPerPoint, 'nilai tukar per poin tidak boleh melebihi belanja per poin (rugi pada setiap putaran)');
     }
     if (s.tables !== undefined) {
       need(Array.isArray(s.tables) && s.tables.length <= 200, 'tables maksimal 200');
@@ -442,7 +458,9 @@ export class ConfigService {
                 shadow_days = coalesce($9, shadow_days),
                 shadow_started_ms = case when $10::boolean then $11::float8 else shadow_started_ms end,
                 service_charge_percent = coalesce($12, service_charge_percent), tax_on_service = coalesce($13, tax_on_service),
-                rounding_unit = coalesce($14, rounding_unit), tables = coalesce($15::jsonb, tables)
+                rounding_unit = coalesce($14, rounding_unit), tables = coalesce($15::jsonb, tables),
+                loyalty_rupiah_per_point = coalesce($16, loyalty_rupiah_per_point), loyalty_point_value = coalesce($17, loyalty_point_value),
+                loyalty_max_redeem_percent = coalesce($18, loyalty_max_redeem_percent)
          where id = $1`,
         [
           outletId, s.merchantName?.trim() ?? null, s.taxPercent ?? null, s.edcs ? JSON.stringify(s.edcs) : null,
@@ -450,6 +468,7 @@ export class ConfigService {
           s.shadowDays ?? null, s.shadowRestart === true, now,
           s.serviceChargePercent ?? null, s.taxOnService ?? null, s.roundingUnit ?? null,
           s.tables ? JSON.stringify(s.tables.map((t) => ({ no: t.no, area: t.area.trim(), seats: t.seats }))) : null,
+          s.loyalty?.rupiahPerPoint ?? null, s.loyalty?.pointValue ?? null, s.loyalty?.maxRedeemPercent ?? null,
         ],
       );
       if (r.rowCount === 0) throw new NotFoundException('outlet tidak ditemukan');
@@ -519,8 +538,8 @@ export class ConfigService {
   async deviceConfig(device: DeviceAuth): Promise<DeviceConfig> {
     return this.db.tenantTx(device.tenantId, async (q) => {
       const o = (
-        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; tables: NonNullable<DeviceConfig['outlet']['tables']>; utc_offset_minutes: number; policy: Record<string, number> | null }>(
-          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, edcs, tables, policy, utc_offset_minutes from outlet where id = $1',
+        await q.query<{ id: string; name: string; merchant_name: string | null; tax_percent: number; service_charge_percent: number; tax_on_service: boolean; rounding_unit: number; edcs: DeviceConfig['outlet']['edcs']; tables: NonNullable<DeviceConfig['outlet']['tables']>; utc_offset_minutes: number; loyalty_rupiah_per_point: number; loyalty_point_value: number; loyalty_max_redeem_percent: number; policy: Record<string, number> | null }>(
+          'select id, name, merchant_name, tax_percent, service_charge_percent, tax_on_service, rounding_unit, loyalty_rupiah_per_point, loyalty_point_value, loyalty_max_redeem_percent, edcs, tables, policy, utc_offset_minutes from outlet where id = $1',
           [device.outletId],
         )
       ).rows[0];
@@ -558,6 +577,7 @@ export class ConfigService {
           ...(o.tax_on_service === false ? { taxOnService: false } : {}),
           ...(o.rounding_unit > 0 ? { roundingUnit: o.rounding_unit } : {}),
           ...(promos.length > 0 ? { utcOffsetMinutes: o.utc_offset_minutes } : {}),
+          ...(o.loyalty_rupiah_per_point > 0 && !isKds ? { loyalty: { rupiahPerPoint: o.loyalty_rupiah_per_point, pointValue: o.loyalty_point_value, maxRedeemPercent: o.loyalty_max_redeem_percent } } : {}),
           edcs: o.edcs, ...(o.tables.length > 0 ? { tables: o.tables } : {}), policy: o.policy,
         },
         staff: staff.map((s) => ({ id: s.id, name: s.name, role: s.role, salt: s.pin_salt, hash: s.pin_hash, iterations: s.pin_iterations })),

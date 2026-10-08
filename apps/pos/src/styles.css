@@ -341,3 +341,5 @@ main { flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch
 .promo-card { width: 100%; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; min-height: 64px; padding: 10px 14px; }
 .promo-card small { font-weight: 500; color: var(--muted); }
 .promo-card small.need { color: var(--warn); font-weight: 600; }
+
+.pill.s-MEMBER { background: var(--info-soft); color: var(--info); }

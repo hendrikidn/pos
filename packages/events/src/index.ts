@@ -63,6 +63,11 @@ export type EventBody =
       payload: { orderId: string; orderType: Exclude<OrderType, 'EMPLOYEE'>; tableNo?: string; items: LineItem[] };
     }
   | {
+      type: 'order.member_linked';
+      /** Order ini dikaitkan ke member (poin diperoleh dari pembayarannya; penukaran poin merujuk member yang sama). */
+      payload: { orderId: string; memberId: string };
+    }
+  | {
       type: 'order.handoff_reclaimed';
       /** Terminal asal menarik kembali order yang belum diambil terminal lain (setelah klaim ke server berhasil). */
       payload: { orderId: string };
@@ -91,7 +96,7 @@ export type EventBody =
       type: 'discount.applied';
       payload: {
         orderId: string;
-        kind: 'MANUAL' | 'MEMBER' | 'COUPON' | 'PROMO';
+        kind: 'MANUAL' | 'MEMBER' | 'COUPON' | 'PROMO' | 'POINTS';
         amount: number;
         percent: number;
         /** true jika member/kupon diverifikasi (scan barcode atau OTP); promo selalu true karena besarnya ditetapkan aturan di server */
@@ -99,6 +104,9 @@ export type EventBody =
         approverId?: string;
         /** Hanya untuk kind PROMO: id promo yang dipilih kasir dari daftar di server. */
         promoId?: string;
+        /** Hanya untuk kind POINTS: member yang menukar poin dan jumlah poinnya (saldo dijaga server, bukan terminal). */
+        memberId?: string;
+        points?: number;
       };
     }
   | {
@@ -152,7 +160,7 @@ export type EventBody =
 export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
-  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
+  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.handed_off', 'order.handoff_reclaimed', 'order.member_linked', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
   'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.digital', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',
@@ -331,6 +339,7 @@ export function orderIdOf(e: PosEvent): string | undefined {
     case 'order.table_changed':
     case 'order.handed_off':
     case 'order.handoff_reclaimed':
+    case 'order.member_linked':
     case 'bill.hold_reason':
     case 'kitchen.status_changed':
     case 'bill.printed':

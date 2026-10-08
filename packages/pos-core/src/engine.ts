@@ -555,6 +555,7 @@ export class PosEngine {
     if (o.handedOff) return fail('HANDOFF_ALREADY', 'Order ini sudah diserahkan.');
     if (o.state.status !== 'DRAFT' && o.state.status !== 'SENT') return fail('HANDOFF_LOCKED', 'Order sudah ditagih atau selesai; hanya order yang belum ditagih bisa diserahkan.');
     if (o.items.length === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
+    if (o.member) return fail('HANDOFF_MEMBER', 'Order ini sudah dikaitkan ke member; member tidak ikut berpindah. Serahkan sebelum memasukkan member.');
     if (o.discount > 0) return fail('HANDOFF_DISCOUNT', 'Order ini sudah diberi diskon. Diskon tidak ikut berpindah; serahkan sebelum diberi diskon.');
     await this.emit({
       type: 'order.handed_off',
@@ -634,6 +635,66 @@ export class PosEngine {
     return ok(o);
   }
 
+  // ---------- member dan poin ----------
+
+  /**
+   * Mengaitkan order ke member (hasil pencarian di server). Poin diperoleh dari pembayaran order ini; saldo resmi dijaga server, jadi `points`
+   * di sini hanya batas atas yang diketahui terminal saat penukaran. Satu member per order; tidak untuk makan karyawan.
+   */
+  async linkMember(orderId: string, m: { id: string; name: string; points: number }): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    if (!this.cfg.loyalty) return fail('LOYALTY_OFF', 'Loyalty belum diaktifkan untuk outlet ini.');
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    if (o.type === 'EMPLOYEE') return fail('MEMBER_EMPLOYEE', 'Order makan karyawan tidak bisa dikaitkan ke member.');
+    if (o.state.status === 'PAID' || o.state.status === 'VOIDED' || o.state.status === 'MERGED') return fail('ORDER_LOCKED', 'Order sudah selesai atau terkunci.');
+    if (o.member) return fail('MEMBER_ALREADY', 'Order ini sudah dikaitkan ke member.');
+    if (!m.id || m.id.length > 40) return fail('MEMBER_INVALID', 'Member tidak valid.');
+    await this.emit({ type: 'order.member_linked', payload: { orderId, memberId: m.id } });
+    o.member = { id: m.id, name: m.name, points: Math.max(0, Math.trunc(m.points)) };
+    await this.save(o);
+    return ok(o);
+  }
+
+  /** Poin paling banyak yang bisa ditukar pada order ini: saldo yang diketahui dan batas persen dari subtotal. 0 bila belum bisa. */
+  maxRedeemablePoints(o: OrderRecord): number {
+    const l = this.cfg.loyalty;
+    if (!l || l.pointValue <= 0 || !o.member || o.pointsRedeemed || o.discount > 0) return 0;
+    const subtotal = this.totals(o).subtotal;
+    const byCap = Math.floor((subtotal * l.maxRedeemPercent) / 100 / l.pointValue);
+    return Math.max(0, Math.min(o.member.points, byCap, Math.floor(subtotal / l.pointValue)));
+  }
+
+  /**
+   * Menukar poin member menjadi potongan (nilai per poin dan batas persen dari server). Sekali per order, tidak digabung dengan promo atau
+   * diskon lain. Setelah tagihan dicetak perlu persetujuan supervisor seperti diskon lain.
+   */
+  async redeemPoints(orderId: string, points: number, opts: { approver?: ApproverInput } = {}): Promise<Result<OrderRecord>> {
+    const w = this.who();
+    if (!w.ok) return w;
+    const l = this.cfg.loyalty;
+    if (!l || l.pointValue <= 0) return fail('LOYALTY_OFF', 'Penukaran poin belum diaktifkan untuk outlet ini.');
+    const r = this.order(orderId);
+    if (!r.ok) return r;
+    const o = r.value;
+    if (!o.member) return fail('MEMBER_REQUIRED', 'Kaitkan order ke member dulu.');
+    if (o.pointsRedeemed) return fail('POINTS_ALREADY', 'Order ini sudah menukar poin.');
+    if (o.discount > 0 || o.promoId) return fail('DISCOUNT_STACK', 'Order ini sudah diberi diskon atau promo; tukar poin tidak digabung.');
+    if (!Number.isInteger(points) || points < 1) return fail('POINTS_INVALID', 'Jumlah poin tidak valid.');
+    if (points > o.member.points) return fail('POINTS_INSUFFICIENT', `Saldo poin ${o.member.name} hanya ${o.member.points}.`);
+    const max = this.maxRedeemablePoints(o);
+    if (points > max) return fail('POINTS_OVER_LIMIT', `Poin yang bisa ditukar pada order ini maksimal ${max} (batas ${l.maxRedeemPercent}% dari subtotal).`);
+    const res = await this.discountCore(orderId, { kind: 'POINTS', amount: points * l.pointValue, verified: true, approver: opts.approver, memberId: o.member.id, points });
+    if (res.ok) {
+      res.value.pointsRedeemed = points;
+      res.value.member = { ...o.member, points: o.member.points - points };
+      await this.save(res.value);
+    }
+    return res;
+  }
+
   async sendToKitchen(orderId: string): Promise<Result<OrderRecord>> {
     const r = this.order(orderId);
     if (!r.ok) return r;
@@ -697,6 +758,7 @@ export class PosEngine {
   ): Promise<Result<OrderRecord>> {
     const r = this.order(orderId);
     if (r.ok && r.value.promoId) return fail('PROMO_STACK', 'Order ini sudah memakai promo; promo tidak digabung dengan diskon lain.');
+    if (r.ok && r.value.pointsRedeemed) return fail('DISCOUNT_STACK', 'Order ini sudah memakai tukar poin; diskon lain tidak digabung.');
     return this.discountCore(orderId, cmd);
   }
 
@@ -714,7 +776,7 @@ export class PosEngine {
     const promo = (this.cfg.promos ?? []).find((p) => p.id === promoId);
     if (!promo) return fail('PROMO_UNKNOWN', 'Promo tidak dikenal atau sudah tidak aktif.');
     if (o.promoId) return fail('PROMO_STACK', 'Order ini sudah memakai promo.');
-    if (o.discount > 0) return fail('PROMO_STACK', 'Order ini sudah diberi diskon; promo tidak digabung dengan diskon lain.');
+    if (o.discount > 0 || o.pointsRedeemed) return fail('PROMO_STACK', 'Order ini sudah diberi diskon; promo tidak digabung dengan diskon lain.');
     if (o.type === 'EMPLOYEE') return fail('PROMO_EMPLOYEE', 'Order makan karyawan tidak bisa memakai promo.');
     const subtotal = this.totals(o).subtotal;
     if (subtotal === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
@@ -732,7 +794,7 @@ export class PosEngine {
 
   private async discountCore(
     orderId: string,
-    cmd: { kind: 'MANUAL' | 'MEMBER' | 'COUPON' | 'PROMO'; percent?: number; amount?: number; verified: boolean; approver?: ApproverInput; promoId?: string },
+    cmd: { kind: 'MANUAL' | 'MEMBER' | 'COUPON' | 'PROMO' | 'POINTS'; percent?: number; amount?: number; verified: boolean; approver?: ApproverInput; promoId?: string; memberId?: string; points?: number },
   ): Promise<Result<OrderRecord>> {
     const w = this.who();
     if (!w.ok) return w;
@@ -753,7 +815,7 @@ export class PosEngine {
       if (!a.ok) return a;
       approverId = a.value[0];
     }
-    const decision = decideDiscount(o.state, { actorId: w.value, kind: cmd.kind, amount, percent, verified: cmd.verified, approverId, ...(cmd.promoId ? { promoId: cmd.promoId } : {}) }, this.ctx());
+    const decision = decideDiscount(o.state, { actorId: w.value, kind: cmd.kind, amount, percent, verified: cmd.verified, approverId, ...(cmd.promoId ? { promoId: cmd.promoId } : {}), ...(cmd.memberId ? { memberId: cmd.memberId, points: cmd.points } : {}) }, this.ctx());
     if (!decision.ok) return fail(decision.code, decision.message);
 
     const e = await this.emit(decision.body);

@@ -174,12 +174,14 @@ export function decideVoid(order: OrderState, cmd: VoidCommand, ctx: Ctx): Decis
 
 export interface DiscountCommand {
   actorId: string;
-  kind: 'MANUAL' | 'MEMBER' | 'COUPON' | 'PROMO';
+  kind: 'MANUAL' | 'MEMBER' | 'COUPON' | 'PROMO' | 'POINTS';
   amount: number;
   percent: number;
   verified: boolean;
   approverId?: string;
   promoId?: string;
+  memberId?: string;
+  points?: number;
 }
 
 /** Diskon setelah bill dicetak, atau diskon manual besar tanpa verifikasi, memerlukan supervisor. */
@@ -209,6 +211,7 @@ export function decideDiscount(order: OrderState, cmd: DiscountCommand, ctx: Ctx
         verified: cmd.verified,
         approverId: cmd.approverId,
         ...(cmd.promoId ? { promoId: cmd.promoId } : {}),
+        ...(cmd.memberId ? { memberId: cmd.memberId, points: cmd.points } : {}),
       },
     },
   };

@@ -7,7 +7,7 @@ import { MergeDialog, Modal, ModifierDialog, MoveTableDialog, NoteDialog, PinPad
 import { PayDialog } from './PayDialog';
 import { approvalHint, isPaid, METHOD_LABEL, NEEDS_APPROVAL, orderLabel, rp, run, STATUS_LABEL, type Ctx } from './ui';
 
-type Dialog = 'qr' | 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null | 'handoff';
+type Dialog = 'qr' | 'pay' | 'discount' | 'void' | 'decline' | 'refund' | 'table' | 'split' | 'merge' | null | 'handoff' | 'member';
 
 /** Warna latar lembut yang tetap untuk satu nama menu (inisial pada kartu tanpa foto). */
 const tint = (name: string): string => {
@@ -106,6 +106,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
             <h2>#{order.number} · {orderLabel(order, engine.staff())}</h2>
             <span className={`pill s-${order.state.status}`}>{order.handedOff ? 'Diserahkan' : STATUS_LABEL[order.state.status]}</span>
             {engine.holdRequiredMinutes(order) !== null && !final && <span className="pill s-HOLD" title="Pembayaran tunai memerlukan alasan">Ditahan {engine.holdRequiredMinutes(order)} mnt</span>}
+            {order.member && <span className="pill s-MEMBER" title="Poin diperoleh dari pembayaran order ini">Member: {order.member.name} · {order.member.points} poin</span>}
             {order.kitchen && <span className="pill">Dapur: {order.kitchen === 'COOKING' ? 'dimasak' : order.kitchen === 'READY' ? 'siap' : 'disajikan'}</span>}
           </div>
           <button className="ghost" onClick={() => ctx.selectOrder(null)}>Tutup</button>
@@ -176,6 +177,11 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
                 {order.type === 'DINE_IN' && <button className="secondary" onClick={() => setDlg('table')}>Pindah meja</button>}
                 {splittable && <button className="secondary" disabled={itemCount < 2} onClick={() => setDlg('split')}>Pisah bill</button>}
                 {splittable && <button className="secondary" disabled={mergeable.length === 0} onClick={() => setDlg('merge')}>Gabung</button>}
+              </div>
+            )}
+            {config.loyalty && ctx.rt.handoffs().available && order.type !== 'EMPLOYEE' && !order.member && (
+              <div className="sub">
+                <button className="secondary" onClick={() => setDlg('member')}>Member</button>
               </div>
             )}
             {splittable && ctx.rt.handoffs().available && (
@@ -321,6 +327,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
           </div>
         </Modal>
       )}
+      {dlg === 'member' && <MemberDialog ctx={ctx} order={order} onClose={() => setDlg(null)} />}
       {dlg === 'handoff' && (
         <Modal title="Serahkan ke terminal lain" onClose={() => setDlg(null)}>
           <p className="muted">Order dikunci di terminal ini dan muncul di terminal lain di outlet ini (mis. kasir) untuk diambil dan ditagih. Selama belum diambil, Anda bisa menariknya kembali. Item yang sudah dikirim ke dapur tidak dikirim ulang.</p>
@@ -366,20 +373,78 @@ const promoText = (p: Promo): string => {
   return [base, ...rules].join(' · ');
 };
 
+/** Mencari member lewat nomor HP (atau mendaftarkan yang baru) lalu mengaitkannya ke order. Saldo dan nama datang dari server. */
+function MemberDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecord; onClose: () => void }) {
+  const { rt } = ctx;
+  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [found, setFound] = useState<{ id: string; name: string; points: number } | null>(null);
+  const [notFound, setNotFound] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function search() {
+    setBusy(true);
+    setFound(null);
+    setNotFound(false);
+    const r = await rt.memberLookup(phone);
+    setBusy(false);
+    if (r.ok) return setFound(r.value);
+    if (r.code === 'MEMBER_404') return setNotFound(true);
+    ctx.toast(r.message, 'error');
+  }
+  async function link(m: { id: string; name: string; points: number }) {
+    const r = await rt.engine.linkMember(order.id, m);
+    ctx.bump();
+    if (!r.ok) return ctx.toast(r.message, 'error');
+    onClose();
+  }
+  async function register() {
+    setBusy(true);
+    const r = await rt.memberRegister(phone, name);
+    setBusy(false);
+    if (!r.ok) return ctx.toast(r.message, 'error');
+    await link(r.value);
+  }
+
+  return (
+    <Modal title="Member" onClose={onClose}>
+      <label className="field">Nomor HP member
+        <input inputMode="tel" value={phone} onChange={(e) => { setPhone(e.target.value.replace(/[^\d+\s-]/g, '')); setFound(null); setNotFound(false); }} placeholder="0812 3456 7890" autoFocus />
+      </label>
+      {!found && !notFound && <div className="actions"><button className="secondary" onClick={onClose}>Batal</button><button disabled={busy || phone.replace(/\D/g, '').length < 9} onClick={() => void search()}>Cari</button></div>}
+      {found && (
+        <>
+          <p><b>{found.name}</b> · {found.points} poin</p>
+          <div className="actions"><button className="secondary" onClick={onClose}>Batal</button><button onClick={() => void link(found)}>Pakai untuk order ini</button></div>
+        </>
+      )}
+      {notFound && (
+        <>
+          <p className="notice">Nomor ini belum terdaftar. Daftarkan sebagai member baru?</p>
+          <label className="field">Nama member<input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} /></label>
+          <div className="actions"><button className="secondary" onClick={onClose}>Batal</button><button disabled={busy || name.trim().length < 1} onClick={() => void register()}>Daftarkan dan pakai</button></div>
+        </>
+      )}
+      <p className="muted">Poin diperoleh dari pembayaran order ini. Nomor HP tidak ditampilkan lagi setelah dicari.</p>
+    </Modal>
+  );
+}
+
 function DiscountDialog({ ctx, order, onClose, withApproval }: { ctx: Ctx; order: OrderRecord; onClose: () => void; withApproval: WithApproval }) {
   const { engine } = ctx.rt;
   const promos = engine.config.promos ?? [];
-  const [tab, setTab] = useState<'PROMO' | 'MANUAL' | 'MEMBER' | 'COUPON'>(promos.length > 0 && !order.promoId ? 'PROMO' : 'MANUAL');
+  const loyalty = engine.config.loyalty;
+  const [tab, setTab] = useState<'PROMO' | 'MANUAL' | 'POINTS'>(promos.length > 0 && !order.promoId ? 'PROMO' : 'MANUAL');
+  const [pts, setPts] = useState('');
   const [percent, setPercent] = useState('10');
-  const [verified, setVerified] = useState(false);
   const subtotal = engine.totals(order).subtotal;
-  const kind = tab === 'PROMO' ? 'MANUAL' : tab;
-  const tabs: ['PROMO' | 'MANUAL' | 'MEMBER' | 'COUPON', string][] = [...(promos.length > 0 ? [['PROMO', 'Promo'] as ['PROMO', string]] : []), ['MANUAL', 'Manual'], ['MEMBER', 'Member'], ['COUPON', 'Kupon']];
+  const maxPts = engine.maxRedeemablePoints(order);
+  const tabs: ['PROMO' | 'MANUAL' | 'POINTS', string][] = [...(promos.length > 0 ? [['PROMO', 'Promo'] as ['PROMO', string]] : []), ['MANUAL', 'Manual'], ...(loyalty && loyalty.pointValue > 0 ? [['POINTS', 'Tukar poin'] as ['POINTS', string]] : [])];
   return (
     <Modal title="Diskon" onClose={onClose}>
       <div className="seg">
         {tabs.map(([k, l]) => (
-          <button key={k} className={tab === k ? 'on' : ''} onClick={() => { setTab(k); setVerified(k !== 'MANUAL' && k !== 'PROMO'); }}>{l}</button>
+          <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
       {tab === 'PROMO' ? (
@@ -410,22 +475,52 @@ function DiscountDialog({ ctx, order, onClose, withApproval }: { ctx: Ctx; order
           </ul>
           <p className="muted">Besar potongan ditentukan promo, bukan kasir. Setelah tagihan dicetak, promo memerlukan persetujuan supervisor.</p>
         </>
+      ) : tab === 'POINTS' && loyalty ? (
+        <>
+          {!order.member ? (
+            <p className="notice">Kaitkan order ke member dulu (tombol Member di keranjang), lalu poinnya bisa ditukar di sini.</p>
+          ) : order.pointsRedeemed ? (
+            <p className="notice">Order ini sudah menukar {order.pointsRedeemed} poin.</p>
+          ) : (
+            <>
+              <p><b>{order.member.name}</b> · saldo {order.member.points} poin (1 poin = {rp(loyalty.pointValue)})</p>
+              {order.discount > 0 && <p className="notice">Order ini sudah diberi diskon atau promo; tukar poin tidak digabung.</p>}
+              <label className="field">Poin yang ditukar (maks. {maxPts})
+                <input inputMode="numeric" value={pts} onChange={(e) => setPts(e.target.value.replace(/\D/g, ''))} placeholder={String(maxPts)} />
+              </label>
+              <div className="quick">
+                <button type="button" className="secondary" disabled={maxPts === 0} onClick={() => setPts(String(maxPts))}>Semua yang bisa ({maxPts})</button>
+              </div>
+              {Number(pts) > 0 && <p className="change">Potongan {rp(Number(pts) * loyalty.pointValue)}</p>}
+              <p className="muted">Paling banyak {loyalty.maxRedeemPercent}% dari subtotal. Saldo resmi dijaga server; penukaran melebihi saldo ditandai sebagai temuan.</p>
+              <div className="actions">
+                <button className="secondary" onClick={onClose}>Batal</button>
+                <button
+                  disabled={!(Number(pts) >= 1) || Number(pts) > maxPts}
+                  onClick={async () => {
+                    const r = await withApproval((a) => engine.redeemPoints(order.id, Number(pts), { approver: a[0] }), 1);
+                    if (r?.ok) onClose();
+                  }}
+                >
+                  Tukar {Number(pts) > 0 ? `${pts} poin` : 'poin'}
+                </button>
+              </div>
+            </>
+          )}
+        </>
       ) : (
         <>
           <label className="field">Persen diskon
             <input inputMode="numeric" value={percent} onChange={(e) => setPercent(e.target.value.replace(/\D/g, ''))} />
           </label>
-          {tab !== 'MANUAL' && (
-            <label className="check"><input type="checkbox" checked={verified} onChange={(e) => setVerified(e.target.checked)} /> Member/kupon sudah diverifikasi (scan atau OTP)</label>
-          )}
           {order.promoId && <p className="notice">Order ini sudah memakai promo; diskon lain tidak bisa ditambahkan.</p>}
-          <p className="muted">Diskon manual di atas 15% tanpa verifikasi, atau diskon setelah tagihan dicetak, memerlukan persetujuan supervisor.</p>
+          <p className="muted">Diskon manual di atas 15%, atau diskon setelah tagihan dicetak, memerlukan persetujuan supervisor.</p>
           <div className="actions">
             <button className="secondary" onClick={onClose}>Batal</button>
             <button
               disabled={!percent || Number(percent) < 1 || Number(percent) > 100}
               onClick={async () => {
-                const r = await withApproval((a) => engine.applyDiscount(order.id, { kind, percent: Number(percent), verified, approver: a[0] }), 1);
+                const r = await withApproval((a) => engine.applyDiscount(order.id, { kind: 'MANUAL', percent: Number(percent), verified: false, approver: a[0] }), 1);
                 if (r?.ok) onClose();
               }}
             >

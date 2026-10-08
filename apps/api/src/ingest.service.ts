@@ -3,6 +3,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { GENESIS_HASH, hashEvent, isEventType, MAX_EVENT_LINES, MAX_LINE_QTY, RECEIPT_TOKEN, type EventType, type PosEvent } from '@pos/events';
 import type { DeviceAuth } from './auth';
 import { Database } from './db/database';
+import { applyLoyalty } from './loyalty';
 import { clampShadowStart, GO_LIVE_TYPES } from './shadow';
 
 export const MAX_BATCH = 500;
@@ -95,6 +96,7 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     if (p['items'] === undefined) return 'items wajib';
     return badItems(p);
   },
+  'order.member_linked': (p) => (str(p, 'orderId') && str(p, 'memberId') && (p['memberId'] as string).length <= 40 ? null : 'orderId/memberId tidak valid'),
   'order.handoff_reclaimed': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
   'bill.hold_reason': (p) =>
     str(p, 'orderId') && str(p, 'reason') && (p['reason'] as string).length <= 40 && Number.isInteger(p['heldMinutes']) && (p['heldMinutes'] as number) >= 0
@@ -106,8 +108,11 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
   'kitchen.status_changed': (p) => (str(p, 'orderId') && oneOf(p, 'status', ['COOKING', 'READY', 'SERVED']) ? null : 'orderId/status tidak valid'),
   'bill.printed': (p) => (str(p, 'orderId') && num(p, 'total') ? badItems(p) ?? badBreakdown(p) : 'orderId/total tidak valid'),
   'discount.applied': (p) => {
-    if (!(str(p, 'orderId') && oneOf(p, 'kind', ['MANUAL', 'MEMBER', 'COUPON', 'PROMO']) && num(p, 'amount') && num(p, 'percent') && bool(p, 'verified'))) return 'field diskon tidak valid';
+    if (!(str(p, 'orderId') && oneOf(p, 'kind', ['MANUAL', 'MEMBER', 'COUPON', 'PROMO', 'POINTS']) && num(p, 'amount') && num(p, 'percent') && bool(p, 'verified'))) return 'field diskon tidak valid';
     if (p['kind'] === 'PROMO' ? !str(p, 'promoId') || (p['promoId'] as string).length > 32 : p['promoId'] !== undefined) return 'promoId wajib untuk diskon PROMO dan hanya untuk itu';
+    if (p['kind'] === 'POINTS') {
+      if (!str(p, 'memberId') || (p['memberId'] as string).length > 40 || !Number.isInteger(p['points']) || (p['points'] as number) < 1 || (p['points'] as number) > 1_000_000) return 'memberId dan points (bilangan bulat ≥ 1) wajib untuk penukaran poin';
+    } else if (p['memberId'] !== undefined || p['points'] !== undefined) return 'memberId/points hanya untuk penukaran poin';
     return null;
   },
   'payment.received': (p) => (str(p, 'orderId') && oneOf(p, 'method', METHODS) && num(p, 'amount') ? null : 'orderId/method/amount tidak valid'),
@@ -232,8 +237,11 @@ export class IngestService {
       let accepted = 0;
       /** Waktu terkoreksi event bermakna yang diterima, untuk menandai awal mode shadow. */
       const goLive: number[] = [];
+      /** Event baru yang diterima pada panggilan ini (bukan duplikat), untuk pembukuan poin. */
+      const fresh: PosEvent[] = [];
       const accept = (e: PosEvent) => {
         accepted++;
+        fresh.push(e);
         if ((GO_LIVE_TYPES as readonly string[]).includes(e.type)) goLive.push(e.deviceTime - e.clockOffsetMs);
       };
       let duplicates = 0;
@@ -302,6 +310,8 @@ export class IngestService {
         lastHash = e.hash;
         accept(e);
       }
+
+      await applyLoyalty(q, auth, fresh);
 
       // Mode shadow mulai berhitung dari aktivitas pertama yang bermakna, bukan dari saat outlet dibuat atau alat dinyalakan.
       if (goLive.length > 0) {

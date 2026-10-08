@@ -164,6 +164,16 @@ export interface MenuRow {
   image: string | null;
 }
 
+export interface MemberRow {
+  id: string;
+  name: string;
+  phoneMasked: string;
+  active: boolean;
+  points: number;
+  lastActivityMs: number | null;
+  createdAt: string;
+}
+
 export interface PromoRow {
   id: string;
   name: string;
@@ -189,6 +199,9 @@ export interface OutletSettings {
   service_charge_percent: number;
   tax_on_service: boolean;
   rounding_unit: number;
+  loyalty_rupiah_per_point: number;
+  loyalty_point_value: number;
+  loyalty_max_redeem_percent: number;
   edcs: { tid: string; bank: string; label: string }[];
   tables: { no: string; area: string; seats: number }[];
   policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number; holdBillMinutes?: number } | null;

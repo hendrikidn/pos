@@ -97,7 +97,19 @@ export class GuardService {
       // Promo yang berlaku di outlet ini (termasuk yang sudah dinonaktifkan, karena diskon lama merujuknya).
       const promos = (await q.query<{ id: string; kind: 'PERCENT' | 'AMOUNT'; value: number }>('select id, kind, value from promo where outlet_id is null or outlet_id = $1', [outletId])).rows;
 
+      // Peringatan buku besar poin (saldo kurang, member tidak dikenal/berbeda) menjadi temuan R33.
+      const loyaltyHits: RuleHit[] = (
+        await q.query<{ device_id: string; seq: number; kind: string; order_id: string; actor_id: string | null; detail: string; at_ms: number }>(
+          'select device_id, seq, kind, order_id, actor_id, detail, at_ms from loyalty_alert where outlet_id = $1 and at_ms >= $2', [outletId, from],
+        )
+      ).rows.map((a) => ({
+        rule: 'R33', key: `R33:${a.device_id}:${a.seq}:${a.kind}`, weight: DEFAULT_CONFIG.weights['R33'] ?? 0, modalities: ['POS'], outletId,
+        terminalId: a.device_id, orderId: a.order_id, actorIds: a.actor_id ? [a.actor_id] : [], at: Number(a.at_ms), windowStart: Number(a.at_ms), windowEnd: Number(a.at_ms),
+        context: false, confidence: 'HIGH' as const, note: a.detail,
+      }));
+
       const hits = [
+        ...loyaltyHits,
         ...evaluateRules({
           events, now, terminals: outlet.terminals, capabilities: outlet.capabilities, extraIntegrity, promos,
           utcOffsetMinutes: outlet.utc_offset_minutes,

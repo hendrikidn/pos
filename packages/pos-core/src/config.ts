@@ -21,6 +21,7 @@ export interface DeviceConfig {
     roundingUnit?: number;
     tables?: { no: string; area: string; seats: number }[];
     utcOffsetMinutes?: number;
+    loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
     edcs: { tid: string; bank: string; label: string }[];
     policy: Partial<Policy> | null;
   };
@@ -41,6 +42,7 @@ export function toPosConfig(c: DeviceConfig): PosConfig {
     ...(c.outlet.roundingUnit ? { roundingUnit: c.outlet.roundingUnit } : {}),
     edcs: c.outlet.edcs,
     ...(c.outlet.tables?.length ? { tables: c.outlet.tables } : {}),
+    ...(c.outlet.loyalty ? { loyalty: c.outlet.loyalty } : {}),
     ...(c.promos?.length ? { promos: c.promos, ...(c.outlet.utcOffsetMinutes !== undefined ? { utcOffsetMinutes: c.outlet.utcOffsetMinutes } : {}) } : {}),
     staff: c.staff,
     menu: c.menu,

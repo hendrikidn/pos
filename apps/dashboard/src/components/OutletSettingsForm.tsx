@@ -28,6 +28,9 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
   const [taxOnService, setTaxOnService] = useState(s.tax_on_service ?? true);
   const [rounding, setRounding] = useState(String(s.rounding_unit ?? 0));
   const [edcs, setEdcs] = useState(s.edcs);
+  const [perPoint, setPerPoint] = useState(String(s.loyalty_rupiah_per_point ?? 0));
+  const [pointValue, setPointValue] = useState(String(s.loyalty_point_value ?? 0));
+  const [maxRedeem, setMaxRedeem] = useState(String(s.loyalty_max_redeem_percent ?? 50));
   const [groups, setGroups] = useState<TableGroup[]>(() => groupTables(s.tables));
   const [threshold, setThreshold] = useState(String(s.policy?.secondApprovalAbove ?? 50_000));
   const [discount, setDiscount] = useState(String(s.policy?.manualDiscountMaxPercent ?? 15));
@@ -55,6 +58,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
     }
     const r = await manage('PUT', `/v1/outlets/${s.id}/settings`, {
       merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs, tables,
+      loyalty: { rupiahPerPoint: Number(perPoint || 0), pointValue: Number(pointValue || 0), maxRedeemPercent: Number(maxRedeem || 50) },
       policy: { secondApprovalAbove: Number(threshold), manualDiscountMaxPercent: Number(discount), employeeMealQuota: Number(mealQuota), holdBillMinutes: Number(hold) },
       cctvRetentionDays: Number(retention), cctvClockOffsetSec: Number(offset),
     });
@@ -102,6 +106,14 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
         </div>
       ))}
       <p><button type="button" className="secondary" onClick={() => setEdcs([...edcs, { tid: '', bank: '', label: '' }])}>+ Tambah EDC</button></p>
+
+      <h3>Loyalty</h3>
+      <p className="muted small">Member mendapat poin dari pembayaran. Isi 0 pada belanja per poin untuk mematikan loyalty. Nilai tukar per poin tidak boleh melebihi belanja per poin, agar poin tidak bisa dicetak jadi uang.</p>
+      <div className="form-grid">
+        <label>Belanja Rp per 1 poin (0 = loyalty mati)<input inputMode="numeric" value={perPoint} onChange={(e) => setPerPoint(e.target.value.replace(/\D/g, ''))} /></label>
+        <label>Nilai tukar 1 poin (Rp; 0 = poin tidak bisa ditukar)<input inputMode="numeric" value={pointValue} onChange={(e) => setPointValue(e.target.value.replace(/\D/g, ''))} /></label>
+        <label>Batas potongan dari subtotal (%)<input inputMode="numeric" value={maxRedeem} onChange={(e) => setMaxRedeem(e.target.value.replace(/\D/g, ''))} /></label>
+      </div>
 
       <h3>Denah meja</h3>
       <p className="muted small">Kosongkan bila kasir cukup mengetik nomor meja. Bila diisi, kasir memilih meja dari denah berwarna (kosong, terisi, di dapur, menunggu bayar) di semua terminal. Tulis nomor dipisah koma; rentang dengan tanda hubung (1-8).</p>

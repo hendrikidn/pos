@@ -97,6 +97,10 @@ export interface Runtime {
   tableBoard(): { board: TableBoard; at: number } | null;
   /** Foto menu sebagai data URL (sudah diunduh dan tersimpan di terminal); null bila menu tanpa foto atau belum terunduh. */
   menuImage(id: string): string | null;
+  /** Cari member lewat nomor HP di server (butuh koneksi). Tidak tersedia di mode demo. */
+  memberLookup(phone: string): Promise<Result<{ id: string; name: string; points: number }>>;
+  /** Mendaftarkan member baru dari kasir (dibatasi server per jam). */
+  memberRegister(phone: string, name: string): Promise<Result<{ id: string; name: string; points: number }>>;
   /** Serah-terima order antar-terminal. Tidak tersedia di mode demo (perlu server). */
   handoffs(): { available: boolean; incoming: Handoff[] };
   /** Menyerahkan order ke terminal lain; event disinkronkan segera supaya terminal lain bisa melihatnya. */
@@ -292,6 +296,18 @@ export async function createRuntime(): Promise<Boot> {
     }
   };
 
+  const memberCall = async (path: string, init?: RequestInit): Promise<Result<{ id: string; name: string; points: number }>> => {
+    if (demo || !settings.token) return { ok: false, code: 'NO_SERVER', message: 'Member memerlukan koneksi ke server.' };
+    try {
+      const res = await fetch(`${baseUrl}${path}`, { ...init, headers: { authorization: `Bearer ${settings.token}`, 'content-type': 'application/json' } });
+      const body = (await res.json().catch(() => ({}))) as { id?: string; name?: string; points?: number; message?: string | string[] };
+      if (!res.ok) return { ok: false, code: `MEMBER_${res.status}`, message: (Array.isArray(body.message) ? body.message.join('; ') : body.message) ?? `Server menjawab ${res.status}.` };
+      return { ok: true, value: { id: body.id!, name: body.name!, points: body.points ?? 0 } };
+    } catch {
+      return { ok: false, code: 'OFFLINE', message: 'Tidak terhubung ke server. Member perlu koneksi.' };
+    }
+  };
+
   // Serah-terima order: daftar order terminal lain yang bisa diambil, dan hasil order yang diserahkan terminal ini.
   let incoming: Handoff[] = [];
   const pollHandoffs = async () => {
@@ -366,6 +382,8 @@ export async function createRuntime(): Promise<Boot> {
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,
     tableBoard: () => tableBoard,
+    memberLookup: (phone) => memberCall(`/v1/members/lookup?phone=${encodeURIComponent(phone)}`),
+    memberRegister: (phone, name) => memberCall('/v1/members', { method: 'POST', body: JSON.stringify({ phone, name }) }),
     menuImage: (id) => images.get(id)?.url ?? null,
     handoffs: () => ({ available: !demo && !!settings.token, incoming }),
     handOff: async (orderId) => {

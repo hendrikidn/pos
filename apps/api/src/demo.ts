@@ -4,6 +4,7 @@ import { Sim } from '@pos/sim';
 import { AdminService } from './admin.service';
 import type { ApiAuth } from './auth';
 import { ConfigService } from './config.service';
+import { MemberService } from './member.service';
 import { StockService } from './stock.service';
 import { createApp } from './bootstrap';
 import { ConsoleMailer } from './mailer';
@@ -104,6 +105,7 @@ async function main() {
   const config = app.get(ConfigService);
   const seeder: ApiAuth = { kind: 'api', tenantId: 'demo', userId: 'demo-seed', role: 'OWNER' };
   await config.updateSettings(seeder, 'senopati', {
+    loyalty: { rupiahPerPoint: 10_000, pointValue: 100, maxRedeemPercent: 50 },
     merchantName: 'Kopi Senopati', taxPercent: 10, edcs: [{ tid: '12345678', bank: 'Mandiri', label: 'EDC Mandiri' }],
     // Denah meja: meja 4 dan 9 dipakai terminal term-sen (order hidup di bawah), jadi terminal pos-1 melihatnya terisi.
     tables: [
@@ -117,6 +119,17 @@ async function main() {
     ['rina', 'Rina (Manager)', 'MANAGER'], ['owner', 'Owner', 'OWNER'],
   ] as const;
   for (const [id, name, role] of people) await config.createStaff(seeder, { id, name, role, pin: demoPins[id] });
+  // Member contoh dengan saldo poin (diisi langsung di buku besar agar bisa dicoba menukar poin).
+  const members = app.get(MemberService);
+  for (const [i, [phone, name, pts]] of ([['0812 3456 7890', 'Dewi Lestari', 120], ['0856 1111 2222', 'Eko Prasetyo', 35], ['0877 9999 0000', 'Sinta Dewi', 0]] as const).entries()) {
+    const m = await members.register(seeder, { phone, name });
+    if (pts > 0) {
+      await db.admin.query(
+        "insert into member_ledger (tenant_id, outlet_id, member_id, device_id, seq, kind, order_id, points, at_ms) values ('demo', 'senopati', $1, 'seed', $4, 'EARN', 'seed', $2, $3)",
+        [m.id, pts, Date.now() - 5 * 86_400_000, i + 1],
+      );
+    }
+  }
   await config.createPromo(seeder, { id: 'hemat10', name: 'Hemat 10%', kind: 'PERCENT', value: 10, maxDiscount: 10_000 });
   await config.createPromo(seeder, { id: 'happy-hour', name: 'Happy hour', kind: 'PERCENT', value: 20, days: [1, 2, 3, 4, 5], startHour: 14, endHour: 17 });
   await config.createPromo(seeder, { id: 'belanja-60', name: 'Potong 15rb', kind: 'AMOUNT', value: 15_000, minSubtotal: 60_000 });

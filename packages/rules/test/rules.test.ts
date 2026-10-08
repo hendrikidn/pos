@@ -624,3 +624,35 @@ describe('R32: diskon promo tidak sesuai aturan promo', () => {
     expect(r32(run32(s)).map((h) => h.orderId)).toEqual(['a']); // hanya yang PROMO
   });
 });
+
+describe('R34: satu member dikaitkan ke terlalu banyak order dalam sehari', () => {
+  const r34 = (hits: RuleHit[]) => hits.filter((h) => h.rule === 'R34');
+  const link = (s: Sim, i: number, member: string, hms: string, actor = 'budi') => {
+    s.pos({ type: 'order.created', payload: { orderId: `o${member}-${i}`, orderType: 'TAKE_AWAY' } }, hms, actor);
+    s.pos({ type: 'order.member_linked', payload: { orderId: `o${member}-${i}`, memberId: member } }, hms, actor);
+  };
+
+  it('sampai lima order sehari wajar; lebih dari itu memicu R34 sekali per member per hari', () => {
+    const s = new Sim();
+    for (let i = 0; i < 5; i++) link(s, i, 'm1', `1${i}:00:00`);
+    expect(r34(run(s, '20:00:00', NO_SENSOR))).toEqual([]);
+    link(s, 5, 'm1', '16:00:00');
+    link(s, 6, 'm1', '17:00:00');
+    const hits = r34(run(s, '20:00:00', NO_SENSOR));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ actorIds: ['budi'], weight: 30, orderId: null });
+    expect(hits[0]!.note).toContain('7 order berbeda');
+  });
+
+  it('order yang sama dikaitkan berulang dihitung satu; member berbeda dihitung sendiri-sendiri; kasir yang terlibat dicatat', () => {
+    const s = new Sim();
+    for (let i = 0; i < 4; i++) link(s, i, 'm1', `1${i}:00:00`, i % 2 ? 'sari' : 'budi');
+    for (let i = 0; i < 4; i++) s.pos({ type: 'order.member_linked', payload: { orderId: 'om1-0', memberId: 'm1' } }, `15:0${i}:00`, 'budi');
+    for (let i = 0; i < 4; i++) link(s, i, 'm2', `1${i}:30:00`);
+    expect(r34(run(s, '20:00:00', NO_SENSOR))).toEqual([]);
+    link(s, 4, 'm1', '16:00:00', 'sari'); link(s, 5, 'm1', '17:00:00', 'budi');
+    const hits = r34(run(s, '20:00:00', NO_SENSOR));
+    expect(hits).toHaveLength(1);
+    expect(hits[0]!.actorIds).toEqual(['budi', 'sari']);
+  });
+});

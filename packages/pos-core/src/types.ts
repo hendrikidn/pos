@@ -44,6 +44,8 @@ export interface PosConfig {
   taxOnService?: boolean;
   roundingUnit?: number;
   edcs: Edc[];
+  /** Loyalty outlet (dari server); tidak ada = loyalty mati. */
+  loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
   /** Promo aktif outlet (dari server). Kasir hanya memilih dari sini; kosong = tidak ada promo. */
   promos?: Promo[];
   /** Zona waktu outlet (menit dari UTC), dipakai jadwal promo; bawaan WIB. */
@@ -114,6 +116,10 @@ export interface OrderRecord {
   mergedInto?: string;
   /** Order ini diserahkan ke terminal lain dan belum selesai diurus: terkunci (status MERGED) sampai diambil atau ditarik kembali. */
   handedOff?: boolean;
+  /** Member yang dikaitkan ke order ini beserta saldo poin yang diketahui saat dicari (saldo resmi ada di server). */
+  member?: { id: string; name: string; points: number };
+  /** Poin yang ditukar pada order ini (satu kali per order; tidak digabung dengan diskon lain). */
+  pointsRedeemed?: number;
   /** Promo yang dipakai order ini (satu order, satu promo; tidak digabung dengan diskon lain). */
   promoId?: string;
   /** Order ini dibuat dari order terminal lain yang diserahkan kepadanya. */

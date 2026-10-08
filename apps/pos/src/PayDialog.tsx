@@ -83,6 +83,9 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
           ) : (
             <p className="muted">Lunas, tidak ada kembalian.</p>
           )}
+          {order.member && config.loyalty && (
+            <p className="muted">Member {order.member.name}: +{Math.floor(order.payments.reduce((s, p) => s + p.amount, 0) / config.loyalty.rupiahPerPoint)} poin dari order ini</p>
+          )}
           <ul className="pay-list" aria-label="Pembayaran">
             {order.payments.map((p, i) => (
               <li key={i}><MethodIcon method={p.method} /><span>{METHOD_LABEL[p.method]}</span><b>{rp(p.amount)}</b></li>

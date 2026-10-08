@@ -466,6 +466,30 @@ export function evaluateRules(input: RuleInput): RuleHit[] {
     }
   }
 
+  // ---- R34: member yang dikaitkan ke terlalu banyak order dalam sehari ----
+  // Pola penimbunan poin: karyawan memasukkan nomor HP sendiri (atau nomor kenalan) pada order pelanggan lain.
+  {
+    const perDay = new Map<string, { member: string; date: string; orders: Set<string>; actors: Set<string>; last: number; terminal: string }>();
+    for (const e of events) {
+      if (e.type !== 'order.member_linked') continue;
+      const date = localDate(t(e), input.utcOffsetMinutes ?? 420);
+      const key = `${e.payload.memberId}:${date}`;
+      const g = perDay.get(key) ?? { member: e.payload.memberId, date, orders: new Set(), actors: new Set(), last: 0, terminal: e.deviceId };
+      g.orders.add(e.payload.orderId);
+      if (e.actorId) g.actors.add(e.actorId);
+      g.last = Math.max(g.last, t(e));
+      perDay.set(key, g);
+    }
+    for (const [key, g] of perDay) {
+      if (g.orders.size <= cfg.r34MaxOrdersPerDay) continue;
+      hit({
+        rule: 'R34', key: `R34:${key}`, weight: w('R34'), modalities: POS_ONLY, terminalId: g.terminal, orderId: null,
+        actorIds: [...g.actors].sort(), at: g.last, windowStart: g.last, windowEnd: g.last,
+        note: `member ${g.member} dikaitkan ke ${g.orders.size} order berbeda pada ${g.date} (batas wajar ${cfg.r34MaxOrdersPerDay})`,
+      });
+    }
+  }
+
   // ---- R24: integritas event ----
   for (const [deviceId, list] of byDevice) {
     for (const issue of verifyChain(list)) {

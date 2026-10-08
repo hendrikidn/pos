@@ -14,6 +14,7 @@ describe('terminal POS → API ← layar dapur', () => {
   let engine: PosEngine;
   let owner: string;
   let kdsToken: string;
+  let termToken: string;
   let kdsRec: Recorder;
   let kdsSync: SyncClient;
   let termSync: SyncClient;
@@ -39,7 +40,7 @@ describe('terminal POS → API ← layar dapur', () => {
     await h.admin.createTenant('t1', 'Tenant 1');
     // Outlet dengan layar dapur: R2 memakai versi KDS (status dapur), bukan proksi waktu.
     await h.admin.createOutlet('t1', 'o1', 'Kopi Senopati', { terminals: ['term-1'], capabilities: { sensor: false, kds: true, printerReportsStatus: false } });
-    const termToken = await h.admin.createDevice('t1', 'o1', 'term-1', 'terminal');
+    termToken = await h.admin.createDevice('t1', 'o1', 'term-1', 'terminal');
     kdsToken = await h.admin.createDevice('t1', 'o1', 'kds-1', 'kds');
     owner = await h.admin.createApiToken('t1', 'owner-1', 'OWNER');
 
@@ -134,12 +135,34 @@ describe('terminal POS → API ← layar dapur', () => {
     expect(r2.note).toMatch(/dimasak|siap|disajikan/);
   });
 
+  it('terminal membaca papan dan menerapkan SERVED dari layar dapur: void order yang sudah disajikan wajib owner', async () => {
+    at('12:20:00');
+    const c = must<{ id: string }>(await engine.createOrder('TAKE_AWAY')).id;
+    must(await engine.addItem(c, 'kopi-susu', 1)); // 24.200: tanpa aturan nominal besar, hanya status dapur yang menentukan
+    must(await engine.sendToKitchen(c));
+    await termSync.flush();
+    at('12:22:00');
+    await kdsStatus(c, 'SERVED');
+
+    // Persis yang dilakukan runtime POS: baca papan dengan token terminal, lalu terapkan statusnya.
+    const res = await h.http('GET', '/v1/kds/board', termToken);
+    expect(res.status).toBe(200);
+    expect(res.body.served).toContain(c);
+    const statuses: Record<string, 'COOKING' | 'READY' | 'SERVED'> = {};
+    for (const t of res.body.tickets) if (t.status !== 'NEW') statuses[t.orderId] = t.status;
+    for (const id of res.body.served) statuses[id] = 'SERVED';
+    expect(await engine.applyKitchenStatuses(statuses)).toBeGreaterThan(0);
+
+    expect(await engine.voidOrder(c, 'WRONG_ORDER', [{ userId: 'hendra', pin: pins.hendra }])).toMatchObject({ ok: false, code: 'OWNER_REQUIRED' });
+    must(await engine.voidOrder(c, 'WRONG_ORDER', [{ userId: 'owner', pin: pins.owner }]));
+  });
+
   it('rantai perangkat layar dapur utuh, tanpa masalah integritas, dan hanya berisi status dan heartbeat', async () => {
     const rows = (await h.db.tenantTx('t1', async (q) =>
       (await q.query<{ seq: number; type: string; integrity: string | null }>("select seq, type, integrity from event where device_id = 'kds-1' order by seq")).rows,
     ));
-    expect(rows.length).toBe(3); // COOKING (asal), READY dan SERVED (tiket hasil pisah)
-    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3]);
+    expect(rows.length).toBe(4); // COOKING (asal), READY dan SERVED (tiket hasil pisah), SERVED (order c)
+    expect(rows.map((r) => r.seq)).toEqual([1, 2, 3, 4]);
     expect(rows.every((r) => r.type === 'kitchen.status_changed' && r.integrity === null)).toBe(true);
   });
 });

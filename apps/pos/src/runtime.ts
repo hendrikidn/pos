@@ -2,7 +2,8 @@ import {
   ConfigClient, demoConfig, EscPosPrinter, PosEngine, Recorder, STALE_AFTER_MS, SyncClient, toPosConfig, WebCryptoSigner,
   type KeyPairHolder, type Printer, type PosConfig, type Signer, type SyncResult,
 } from '@pos/pos-core';
-import type { PrinterState } from '@pos/events';
+import type { KitchenStatus, PrinterState } from '@pos/events';
+import type { KdsBoard } from '@pos/order';
 import { IdbStore } from './idb-store';
 import { createKdsRuntime, type KdsRuntime } from './kds-runtime';
 import {
@@ -201,6 +202,22 @@ export async function createRuntime(): Promise<Boot> {
     notify();
   };
 
+  // Status dapur dari layar dapur (KDS): hanya dibaca bila ada order yang sudah dikirim ke dapur dan belum selesai.
+  const pollKitchen = async () => {
+    if (demo || !settings.token || !engine.listOrders().some((o) => ['SENT', 'BILLED'].includes(o.state.status) && o.items.some((l) => l.sentQty > 0))) return;
+    try {
+      const res = await fetch(`${baseUrl}/v1/kds/board`, { headers: { authorization: `Bearer ${settings.token}` } });
+      if (!res.ok) return;
+      const board = (await res.json()) as KdsBoard;
+      const statuses: Record<string, KitchenStatus> = {};
+      for (const t of board.tickets) if (t.status !== 'NEW') statuses[t.orderId] = t.status;
+      for (const id of board.served) statuses[id] = 'SERVED';
+      if ((await engine.applyKitchenStatuses(statuses)) > 0) notify();
+    } catch {
+      /* offline: status dapur yang diketahui terminal tetap yang terakhir */
+    }
+  };
+
   let printerState: PrinterState | null = null;
   const poll = async () => {
     printerState = await engine.pollPrinter();
@@ -228,6 +245,7 @@ export async function createRuntime(): Promise<Boot> {
   void engine.heartbeat().then(() => reportPosture()).then(syncNow);
   setInterval(() => void engine.heartbeat(), 60_000);
   setInterval(() => void poll(), 10_000);
+  setInterval(() => void pollKitchen(), 10_000);
   setInterval(() => void reportPosture(), 10 * 60_000);
   void poll();
   setInterval(() => void syncNow(), 5_000);

@@ -209,3 +209,26 @@ describe('papan dapur: pisah bill dan gabung', () => {
     expect(b.tickets[0]).toMatchObject({ firstSentAt: T0 + MIN, statusAt: T0 + 3 * MIN });
   });
 });
+
+describe('papan dapur: daftar order yang sudah disajikan', () => {
+  it('SERVED masuk daftar (agar terminal tahu); kiriman berikutnya membuka kembali tiket dan mengeluarkannya dari daftar', () => {
+    const r = new Rec();
+    r.created(0, 'term-1-1'); r.sent(1, 'term-1-1', [item('k', 'Kopi', 1)]);
+    expect(board(r, 2).served).toEqual([]);
+    r.status(3, 'term-1-1', 'SERVED');
+    expect(board(r, 4).served).toEqual(['term-1-1']);
+    expect(board(r, 4).tickets).toEqual([]);
+    r.sent(10, 'term-1-1', [item('l', 'Latte', 1)]);
+    expect(board(r, 11).served).toEqual([]);
+  });
+
+  it('order yang di-void atau sudah lewat 12 jam tidak ada di daftar', () => {
+    const r = new Rec();
+    r.created(0, 'term-1-1'); r.sent(1, 'term-1-1', [item('k', 'Kopi', 1)]); r.status(2, 'term-1-1', 'SERVED');
+    r.created(0, 'term-1-2'); r.sent(1, 'term-1-2', [item('k', 'Kopi', 1)]); r.status(2, 'term-1-2', 'SERVED');
+    r.at(3, { type: 'void.approved', payload: { orderId: 'term-1-2', reasonCode: 'WRONG_ORDER', approverIds: ['hendra'], amount: 1 } });
+    expect(board(r, 5).served).toEqual(['term-1-1']);
+    expect(board(r, 2 + KDS_HISTORY_MS / MIN + 1).served).toEqual([]);
+  });
+});
+

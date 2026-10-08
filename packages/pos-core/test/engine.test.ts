@@ -800,3 +800,39 @@ describe('pindah meja, pisah bill, gabung order, bayar sebagian', () => {
   });
 });
 
+describe('status dapur dari layar dapur', () => {
+  let c: Ctx;
+  beforeEach(async () => {
+    c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+  });
+  const sentOrder = async () => {
+    const id = must(await c.engine.createOrder('TAKE_AWAY')).id;
+    must(await c.engine.addItem(id, 'kopi-susu', 1)); // 24.200: di bawah ambang dua persetujuan
+    must(await c.engine.sendToKitchen(id));
+    return id;
+  };
+
+  it('tanpa informasi dapur, void order terkirim cukup dengan supervisor; setelah server melapor SERVED, wajib owner', async () => {
+    const a = await sentOrder();
+    const b = await sentOrder();
+    // order b: terminal belum tahu apa pun
+    expect(await c.engine.applyKitchenStatuses({ [a]: 'SERVED' })).toBe(1);
+    expect(await c.engine.voidOrder(a, 'WRONG_ORDER', [{ userId: 'hendra', pin: c.pins.hendra }])).toMatchObject({ ok: false, code: 'OWNER_REQUIRED' });
+    expect((await c.engine.voidOrder(b, 'WRONG_ORDER', [{ userId: 'hendra', pin: c.pins.hendra }])).ok).toBe(true);
+    expect((await c.engine.voidOrder(a, 'WRONG_ORDER', [{ userId: 'owner', pin: c.pins.owner }])).ok).toBe(true);
+  });
+
+  it('idempoten, mengabaikan order yang tidak dikenal atau sudah di-void, dan status server menimpa status lokal', async () => {
+    const a = await sentOrder();
+    must(await c.engine.setKitchenStatus(a, 'READY'));
+    expect(await c.engine.applyKitchenStatuses({ [a]: 'READY', tidak_ada: 'SERVED' })).toBe(0);
+    expect(await c.engine.applyKitchenStatuses({ [a]: 'COOKING' })).toBe(1); // item susulan membuat dapur memasak lagi
+    expect(c.engine.getOrder(a)!).toMatchObject({ kitchen: 'COOKING', state: { kitchen: 'COOKING' } });
+    expect(await c.engine.applyKitchenStatuses({ [a]: 'COOKING' })).toBe(0);
+    must(await c.engine.voidOrder(a, 'WRONG_ORDER', [{ userId: 'hendra', pin: c.pins.hendra }]));
+    expect(await c.engine.applyKitchenStatuses({ [a]: 'SERVED' })).toBe(0);
+  });
+});
+

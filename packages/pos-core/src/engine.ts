@@ -674,6 +674,23 @@ export class PosEngine {
     return ok(o);
   }
 
+  /**
+   * Menerapkan status dapur yang diketahui server (dari layar dapur). Terminal hanya tahu status yang ia ubah sendiri; tanpa ini,
+   * kunci void ("sudah disajikan → owner") tidak berlaku bila status SERVED dicatat dari layar dapur. Server dianggap benar.
+   */
+  async applyKitchenStatuses(statuses: Record<string, KitchenStatus>): Promise<number> {
+    let changed = 0;
+    for (const [id, st] of Object.entries(statuses)) {
+      const o = this.orders.get(id);
+      if (!o || o.state.status === 'VOIDED' || o.state.status === 'MERGED' || o.kitchen === st) continue;
+      o.kitchen = st;
+      o.state = { ...o.state, kitchen: st };
+      await this.save(o);
+      changed++;
+    }
+    return changed;
+  }
+
   // ---------- printer dan perangkat ----------
 
   paperClaimActive(): boolean {

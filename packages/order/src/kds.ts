@@ -44,6 +44,11 @@ export interface KdsBoard {
   generatedAt: number;
   tickets: KdsTicket[];
   voided: KdsVoided[];
+  /**
+   * Order yang sudah disajikan (dalam 12 jam terakhir). Tiket SERVED hilang dari `tickets`, jadi terminal memerlukan daftar ini
+   * untuk tahu bahwa makanan sudah disajikan (kunci void: setelah disajikan butuh owner).
+   */
+  served: string[];
 }
 
 interface Line {
@@ -205,7 +210,9 @@ export function buildKitchenBoard(input: { events: PosEvent[]; now: number }): K
 
   const tickets: KdsTicket[] = [];
   const voided: KdsVoided[] = [];
+  const served: string[] = [];
   for (const s of states.values()) {
+    if (s.status === 'SERVED' && s.voidedAt === null && !s.merged && s.statusAt !== null && now - s.statusAt <= KDS_HISTORY_MS) served.push(s.orderId);
     const ref = s.orderId.split('-').pop() ?? s.orderId;
     if (s.voidedAt !== null) {
       if (s.voidedLines.length > 0 && now - s.voidedAt <= KDS_VOID_VISIBLE_MS) {
@@ -224,5 +231,6 @@ export function buildKitchenBoard(input: { events: PosEvent[]; now: number }): K
   }
   tickets.sort((a, b) => a.firstSentAt - b.firstSentAt || a.orderId.localeCompare(b.orderId));
   voided.sort((a, b) => b.at - a.at);
-  return { generatedAt: now, tickets, voided };
+  served.sort();
+  return { generatedAt: now, tickets, voided, served };
 }

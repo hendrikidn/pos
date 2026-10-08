@@ -44,12 +44,12 @@ describe('akuntansi', () => {
   it('bagan akun bawaan terisi saat pertama dibuka; OWNER dan MANAGER boleh membaca, OPS dan terminal tidak', async () => {
     const r = await h.http('GET', '/v1/accounting/accounts', manager);
     expect(r.status).toBe(200);
-    expect(r.body).toHaveLength(21);
+    expect(r.body).toHaveLength(23);
     expect(r.body.find((a: { code: string }) => a.code === '4-2000')).toMatchObject({ name: 'Diskon Penjualan', type: 'REVENUE', normal: 'DEBIT', active: true });
     expect((await h.http('GET', '/v1/accounting/accounts', ops)).status).toBe(403);
     expect((await h.http('GET', '/v1/accounting/accounts', term)).status).toBe(403);
     expect((await h.http('GET', '/v1/accounting/accounts')).status).toBe(401);
-    expect((await h.http('GET', '/v1/accounting/accounts', owner)).body).toHaveLength(21); // tidak terisi dua kali
+    expect((await h.http('GET', '/v1/accounting/accounts', owner)).body).toHaveLength(23); // tidak terisi dua kali
   });
 
   it('jurnal penjualan POS dihitung dari event dan seimbang; order void tidak dibukukan', async () => {
@@ -125,7 +125,7 @@ describe('akuntansi', () => {
     expect((await h.http('POST', '/v1/outlets/o1/accounting/journal/2/void', owner, { reason: 'bukan outlet ini' })).status).toBe(404);
     expect((await j('', ownerB, 'o1')).status).toBe(404);
     expect((await entry({ date: DAY, memo: 'Peretasan', lines: lines(1) }, ownerB, 'o1')).status).toBe(404);
-    expect((await h.http('GET', '/v1/accounting/accounts', ownerB)).body).toHaveLength(21); // bagan akun terpisah per tenant
+    expect((await h.http('GET', '/v1/accounting/accounts', ownerB)).body).toHaveLength(23); // bagan akun terpisah per tenant
   });
 
   it('bagan akun: tambah akun, nama dan nonaktif; akun sistem tidak boleh dinonaktifkan; akun nonaktif tidak bisa dijurnal', async () => {

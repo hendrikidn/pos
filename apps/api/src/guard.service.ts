@@ -5,6 +5,7 @@ import {
 } from '@pos/rules';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { channelHits } from './channel.service';
+import { reservationHits } from './reservation-hits';
 import { transferHits } from './transfer-hits';
 import { Database } from './db/database';
 import { shadowState } from './shadow';
@@ -118,6 +119,10 @@ export class GuardService {
         ...(await transferHits(q, outletId, now)).filter((t) => t.at >= from).map((t): RuleHit => ({
           rule: t.rule, key: t.key, weight: DEFAULT_CONFIG.weights[t.rule] ?? 0, modalities: ['POS'], outletId, terminalId: null, orderId: null, actorIds: [t.actor],
           at: t.at, windowStart: t.at, windowEnd: t.at, context: false, confidence: 'HIGH', note: t.note,
+        })),
+        ...(await reservationHits(q, outletId, events, now)).filter((h) => h.at >= from).map((h): RuleHit => ({
+          rule: h.rule, key: h.key, weight: DEFAULT_CONFIG.weights[h.rule] ?? 0, modalities: ['POS'], outletId, terminalId: h.terminalId, orderId: h.orderId, actorIds: h.actor ? [h.actor] : [],
+          at: h.at, windowStart: h.at, windowEnd: h.at, context: false, confidence: 'HIGH', note: h.note,
         })),
         // Temuan dari data di luar jendela event harus tetap berada di dalam jendela insiden (insiden lama di luar jendela tidak dibaca ulang saat disimpan).
         ...(await channelHits(q, outletId, events, outlet.utc_offset_minutes, from, now)).filter((h) => h.at >= from),

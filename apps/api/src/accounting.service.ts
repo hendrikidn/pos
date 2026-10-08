@@ -1,11 +1,12 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { ApiAuth } from './auth';
 import {
-  buildChannelJournal, buildCogsJournal, buildPayrollJournal, buildPurchaseJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
+  buildChannelJournal, buildCogsJournal, buildDepositJournal, buildPayrollJournal, buildPurchaseJournal, buildSalesJournal, checkJournalLines, DEFAULT_ACCOUNTS, incomeStatement, JOURNAL_EVENT_TYPES, journalCsvRows, ledger, SYSTEM, trialBalance,
   type Account, type AccountType, type JournalEntry,
 } from './accounting';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { Database } from './db/database';
+import { ReservationService } from './reservation.service';
 import type { Queryable } from './db/driver';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { resolveRange } from './report-range';
@@ -25,6 +26,7 @@ export class AccountingService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(StockService) private readonly stock: StockService,
+    @Inject(ReservationService) private readonly reservations: ReservationService,
   ) {}
 
   /** Bagan akun tenant; diisi dari bawaan pada pemakaian pertama. */
@@ -179,7 +181,13 @@ export class AccountingService {
          from payroll_run r where r.outlet_id = $1 and r.status = 'PAID' and r.paid_date >= $2 and r.paid_date <= $3`, [outletId, r.from, r.to],
       )
     ).rows.map((x) => ({ id: Number(x.id), paidDate: x.paid_date, total: Number(x.total), method: x.pay_method, from: x.period_start, to: x.period_end }));
-    return [...auto, ...buildPayrollJournal(payroll), ...buildCogsJournal(cogs.days, outletId, cogs.missing), ...buildChannelJournal(platform, outletId), ...buildPurchaseJournal(receipts, payments), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
+    const deposits = buildDepositJournal(
+      (await this.reservations.journalRows(q, outletId, fromMs, toMs)).map((d) => ({
+        id: d.id, guest: d.guest, deposit: d.deposit, method: d.method,
+        depositAt: localDate(d.depositAt, r.off), settle: d.settle ? { kind: d.settle.kind, amount: d.settle.amount, at: localDate(d.settle.at, r.off) } : null,
+      })),
+    ).filter((e) => e.date >= r.from && e.date <= r.to);
+    return [...auto, ...deposits, ...buildPayrollJournal(payroll), ...buildCogsJournal(cogs.days, outletId, cogs.missing), ...buildChannelJournal(platform, outletId), ...buildPurchaseJournal(receipts, payments), ...byId.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ref.localeCompare(b.ref));
   }
 
   /** Jurnal outlet pada rentang, ditambah daftar jurnal manual (termasuk yang dibatalkan) untuk pengelolaan. */

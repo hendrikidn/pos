@@ -290,7 +290,7 @@ export interface SalesReport {
   };
   byDay: { date: string; orders: number; net: number }[];
   byHour: { hour: number; orders: number; net: number }[];
-  byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM'; payments: number; amount: number }[];
+  byMethod: { method: 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT'; payments: number; amount: number }[];
   byCashier: CashierRow[];
   byProduct: { itemId: string; name: string; qty: number; amount: number }[];
   byOption: { group: string; name: string; qty: number; amount: number }[];
@@ -428,3 +428,12 @@ export interface PayrollDetail {
   lines: { staffId: string; name: string; payType: string; rate: number; regularMinutes: number; overtimeMinutes: number; base: number; overtimePay: number; allowance: number; deduction: number; net: number; note: string | null }[];
   total: number;
 }
+
+export type ReservationStatus = 'BOOKED' | 'SEATED' | 'NO_SHOW' | 'CANCELED';
+export interface ReservationRow {
+  id: number; guestName: string; phone: string | null; partySize: number; start: number; durationMin: number; tableNo: string | null; status: ReservationStatus; note: string | null;
+  createdBy: string; statusBy: string | null; statusAt: number | null; statusReason: string | null;
+  deposit: number; depositMethod: 'CASH' | 'TRANSFER' | null; depositBy: string | null; depositAt: number | null; applied: number; remaining: number;
+  settle: { kind: 'REFUND' | 'FORFEIT'; amount: number; by: string; at: number; reason: string } | null;
+}
+export interface ReservationList { range: { from: string; to: string }; reservations: ReservationRow[]; tables: string[] }

@@ -1,8 +1,11 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
-/** PLATFORM: dibayar oleh platform pesan-antar (GoFood dan sejenisnya) dan diselesaikan ke outlet kemudian; hanya untuk order yang dikaitkan ke kanal online. */
-export type PaymentMethod = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM';
+/**
+ * PLATFORM: dibayar oleh platform pesan-antar (GoFood dan sejenisnya) dan diselesaikan ke outlet kemudian; hanya untuk order yang dikaitkan ke kanal online.
+ * DEPOSIT: memakai uang muka reservasi (`reservationId` wajib); sahnya diperiksa server (aturan R43).
+ */
+export type PaymentMethod = 'CASH' | 'QRIS' | 'EDC_DEBIT' | 'EDC_CREDIT' | 'PLATFORM' | 'DEPOSIT';
 export const ONLINE_CHANNELS = ['GOFOOD', 'GRABFOOD', 'SHOPEEFOOD'] as const;
 export type OnlineChannel = (typeof ONLINE_CHANNELS)[number];
 export type OrderType = 'DINE_IN' | 'TAKE_AWAY' | 'EMPLOYEE';
@@ -124,7 +127,7 @@ export type EventBody =
     }
   | {
       type: 'payment.received';
-      payload: { orderId: string; method: PaymentMethod; amount: number; tid?: string; approvalCode?: string };
+      payload: { orderId: string; method: PaymentMethod; amount: number; tid?: string; approvalCode?: string; reservationId?: number };
     }
   | { type: 'payment.method_changed'; payload: { orderId: string; from: PaymentMethod; to: PaymentMethod } }
   | { type: 'receipt.printed'; payload: { orderId: string } }

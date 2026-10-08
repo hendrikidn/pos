@@ -36,6 +36,7 @@ export function TableMap({ ctx, onPick, onClose }: { ctx: Ctx; onPick: (tableNo:
   const [now, setNow] = useState(Date.now());
   const [conflict, setConflict] = useState<{ no: string; others: TableOrderView[] } | null>(null);
   const [typing, setTyping] = useState<string | null>(null);
+  const [held, setHeld] = useState<{ no: string; name: string; at: number } | null>(null);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 15_000);
     return () => clearInterval(id);
@@ -54,9 +55,15 @@ export function TableMap({ ctx, onPick, onClose }: { ctx: Ctx; onPick: (tableNo:
   const areas = [...new Set(defs.map((d) => d.area))];
   const counts = (['FREE', 'OCCUPIED', 'SENT', 'BILLED'] as const).map((s) => [s, [...defs.map((d) => d.no), ...extra].filter((no) => summarizeTable(no, all).state === s).length] as const);
 
+  /** Reservasi yang menahan meja ini sekarang: mulai dalam 60 menit ke depan, atau sedang berlangsung dan tamunya belum duduk. */
+  const holdOf = (no: string) => (ctx.rt.reservations()?.items ?? []).find((r) => r.status === 'BOOKED' && r.tableNo === no && now >= r.start - 60 * 60_000 && now <= r.start + r.durationMin * 60_000);
+
   function tap(no: string) {
     const s = summarizeTable(no, all);
-    if (s.state === 'FREE') return onPick(no);
+    if (s.state === 'FREE') {
+      const h = holdOf(no);
+      return h ? setHeld({ no, name: h.guestName, at: h.start }) : onPick(no);
+    }
     const own = s.orders.filter((o) => mineIds.has(o.orderId));
     if (own.length > 0) {
       ctx.selectOrder(own[own.length - 1]!.orderId);
@@ -75,6 +82,7 @@ export function TableMap({ ctx, onPick, onClose }: { ctx: Ctx; onPick: (tableNo:
         {s.since !== null && <small>{duration(minutes(s.since, now))}</small>}
         {s.due > 0 && <small>{rp(s.due)}</small>}
         {theirs.length > 0 && <small className="tbl-dev">{[...new Set(theirs.map((o) => o.deviceId))].join(', ')}</small>}
+        {s.state === 'FREE' && holdOf(no) && <small className="tbl-dev">Dipesan {new Date(holdOf(no)!.start).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} · {holdOf(no)!.guestName}</small>}
         {seats !== undefined && s.state === 'FREE' && <small>{seats} kursi</small>}
       </button>
     );
@@ -112,6 +120,15 @@ export function TableMap({ ctx, onPick, onClose }: { ctx: Ctx; onPick: (tableNo:
       )}
       <div className="actions"><button className="secondary" onClick={() => setTyping('')}>Nomor lain…</button></div>
 
+      {held && (
+        <Modal title={`Meja ${held.no} dipesan`} onClose={() => setHeld(null)}>
+          <p>Meja ini dipesan <b>{held.name}</b> pukul {new Date(held.at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}. Buka order di sini hanya bila tamu itu sudah datang (gunakan tombol Reservasi) atau meja pasti bebas sebelum jamnya.</p>
+          <div className="actions">
+            <button className="secondary" onClick={() => setHeld(null)}>Batal</button>
+            <button onClick={() => { const no = held.no; setHeld(null); onPick(no); }}>Tetap buka order baru</button>
+          </div>
+        </Modal>
+      )}
       {conflict && (
         <Modal title={`Meja ${conflict.no} sedang dipakai`} onClose={() => setConflict(null)}>
           <ul className="pay-list">

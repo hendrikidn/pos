@@ -28,6 +28,8 @@ export const SYSTEM = {
   returns: '4-3000',
   rounding: '4-9000',
   taxPayable: '2-1200',
+  deposit: '2-1300',
+  depositIncome: '4-9100',
   cashShortage: '6-9000',
 } as const;
 
@@ -39,6 +41,7 @@ export const DEFAULT_ACCOUNTS: Account[] = [
   { code: '1-1400', name: 'Persediaan Bahan Baku', type: 'ASSET', normal: 'DEBIT' },
   { code: '2-1100', name: 'Utang Usaha', type: 'LIABILITY', normal: 'CREDIT' },
   { code: '2-1200', name: 'Utang Pajak Restoran (PBJT)', type: 'LIABILITY', normal: 'CREDIT' },
+  { code: '2-1300', name: 'Uang Muka Reservasi', type: 'LIABILITY', normal: 'CREDIT' },
   { code: '3-1000', name: 'Modal Pemilik', type: 'EQUITY', normal: 'CREDIT' },
   { code: '3-2000', name: 'Laba Ditahan', type: 'EQUITY', normal: 'CREDIT' },
   { code: '4-1000', name: 'Penjualan', type: 'REVENUE', normal: 'CREDIT' },
@@ -46,6 +49,7 @@ export const DEFAULT_ACCOUNTS: Account[] = [
   { code: '4-2000', name: 'Diskon Penjualan', type: 'REVENUE', normal: 'DEBIT' },
   { code: '4-3000', name: 'Retur Penjualan', type: 'REVENUE', normal: 'DEBIT' },
   { code: '4-9000', name: 'Selisih Pembulatan', type: 'REVENUE', normal: 'CREDIT' },
+  { code: '4-9100', name: 'Pendapatan Uang Muka Hangus', type: 'REVENUE', normal: 'CREDIT' },
   { code: '5-1000', name: 'Beban Bahan Baku (HPP)', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-1000', name: 'Beban Gaji dan Upah', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-2000', name: 'Beban Sewa', type: 'EXPENSE', normal: 'DEBIT' },
@@ -98,7 +102,7 @@ export function checkJournalLines(lines: unknown, accounts: Map<string, { active
   return null;
 }
 
-const METHOD_ACCOUNT = { CASH: SYSTEM.cash, QRIS: SYSTEM.digital, EDC_DEBIT: SYSTEM.digital, EDC_CREDIT: SYSTEM.digital, PLATFORM: SYSTEM.platform } as const;
+const METHOD_ACCOUNT = { CASH: SYSTEM.cash, QRIS: SYSTEM.digital, EDC_DEBIT: SYSTEM.digital, EDC_CREDIT: SYSTEM.digital, PLATFORM: SYSTEM.platform, DEPOSIT: SYSTEM.deposit } as const;
 
 /** Jenis event yang dibutuhkan jurnal penjualan. */
 export const JOURNAL_EVENT_TYPES = ['payment.received', 'refund.created', 'order.created', 'bill.printed', 'cash.counted'];
@@ -255,6 +259,26 @@ export function buildPayrollJournal(runs: { id: number; paidDate: string; total:
     ref: `JU-GAJI-${r.id}`, date: r.paidDate, memo: `Gaji periode ${r.from} s/d ${r.to}`, source: 'POS',
     lines: [{ account: SYSTEM.payroll, debit: r.total, credit: 0 }, { account: r.method === 'TUNAI' ? SYSTEM.cash : SYSTEM.bank, debit: 0, credit: r.total }],
   }));
+}
+
+/**
+ * Jurnal uang muka reservasi: diterima = Dr Kas (tunai) atau Bank (transfer), Cr Uang Muka; dikembalikan = kebalikannya;
+ * dihanguskan = Dr Uang Muka, Cr Pendapatan Uang Muka Hangus. Pemakaian sebagai pembayaran masuk jurnal penjualan (Dr Uang Muka).
+ */
+export function buildDepositJournal(rows: { id: number; guest: string; deposit: number; method: 'CASH' | 'TRANSFER'; depositAt: string; settle: { kind: 'REFUND' | 'FORFEIT'; amount: number; at: string } | null }[]): JournalEntry[] {
+  const out: JournalEntry[] = [];
+  for (const r of rows) {
+    const money = r.method === 'CASH' ? SYSTEM.cash : SYSTEM.bank;
+    if (r.depositAt) out.push({ ref: `JU-UM-${r.id}`, date: r.depositAt, memo: `Uang muka reservasi #${r.id} (${r.guest})`, source: 'POS', lines: [{ account: money, debit: r.deposit, credit: 0 }, { account: SYSTEM.deposit, debit: 0, credit: r.deposit }] });
+    if (r.settle) {
+      out.push({
+        ref: `JU-UMX-${r.id}`, date: r.settle.at, source: 'POS',
+        memo: `${r.settle.kind === 'REFUND' ? 'Pengembalian' : 'Uang muka hangus'} reservasi #${r.id} (${r.guest})`,
+        lines: [{ account: SYSTEM.deposit, debit: r.settle.amount, credit: 0 }, { account: r.settle.kind === 'REFUND' ? money : SYSTEM.depositIncome, debit: 0, credit: r.settle.amount }],
+      });
+    }
+  }
+  return out;
 }
 
 export interface TrialRow {

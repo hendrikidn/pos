@@ -903,7 +903,7 @@ export class PosEngine {
    */
   async pay(
     orderId: string,
-    p: { method: PaymentMethod; amount?: number; tendered?: number; tid?: string; approvalCode?: string; holdReason?: string },
+    p: { method: PaymentMethod; amount?: number; tendered?: number; tid?: string; approvalCode?: string; holdReason?: string; reservationId?: number },
   ): Promise<Result<{ order: OrderRecord; change: number }>> {
     const w = this.who();
     if (!w.ok) return w;
@@ -915,6 +915,8 @@ export class PosEngine {
     if (!o.state.billPrinted) return fail('BILL_REQUIRED', 'Tagihan harus dicetak atau ditampilkan sebelum pembayaran.');
     if (o.channel && p.method !== 'PLATFORM') return fail('CHANNEL_PLATFORM_ONLY', 'Order online dibayar platform: pakai metode Platform.');
     if (!o.channel && p.method === 'PLATFORM') return fail('PLATFORM_NOT_ONLINE', 'Metode Platform hanya untuk order yang dibuat dari pesanan online.');
+    // Uang muka reservasi: nominal dan sahnya diperiksa server (R43); terminal hanya memastikan reservasinya disebut.
+    if (p.method === 'DEPOSIT' && !(Number.isInteger(p.reservationId) && (p.reservationId as number) > 0)) return fail('RESERVATION_REQUIRED', 'Pilih reservasi yang uang mukanya dipakai.');
 
     const due = this.outstanding(o);
     let amount = p.amount ?? due;
@@ -932,7 +934,7 @@ export class PosEngine {
     if (!Number.isInteger(amount) || amount <= 0) return fail('AMOUNT_INVALID', 'Nominal tidak valid.');
 
     let tid = p.tid;
-    if (p.method !== 'CASH' && p.method !== 'PLATFORM') {
+    if (p.method !== 'CASH' && p.method !== 'PLATFORM' && p.method !== 'DEPOSIT') {
       tid ??= this.cfg.edcs.length === 1 ? this.cfg.edcs[0]!.tid : undefined;
       if (!tid) return fail('EDC_REQUIRED', 'Pilih mesin EDC yang dipakai.');
       if (!this.cfg.edcs.some((x) => x.tid === tid)) return fail('EDC_UNKNOWN', 'Mesin EDC tidak terdaftar di outlet ini.');
@@ -951,6 +953,7 @@ export class PosEngine {
       payload: {
         orderId, method: p.method, amount,
         ...(tid ? { tid } : {}), ...(p.approvalCode ? { approvalCode: p.approvalCode } : {}),
+        ...(p.method === 'DEPOSIT' ? { reservationId: p.reservationId } : {}),
       },
     });
     o.payments.push({ method: p.method, amount, tid, approvalCode: p.approvalCode, at: this.d.now() });
@@ -1041,6 +1044,7 @@ export class PosEngine {
     const r = this.order(orderId);
     if (!r.ok) return r;
     const o = r.value;
+    if (method === 'DEPOSIT') return fail('REFUND_METHOD', 'Pengembalian tidak bisa lewat uang muka: pilih tunai atau metode asal lainnya.');
     const a = await this.checkApprovers([approver]);
     if (!a.ok) return a;
     const refundId = `${o.id}-R${o.refunds.length + 1}`;

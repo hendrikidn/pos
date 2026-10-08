@@ -29,7 +29,7 @@ const str = (p: Payload, k: string) => typeof p[k] === 'string' && p[k] !== '';
 const num = (p: Payload, k: string) => typeof p[k] === 'number' && Number.isFinite(p[k]);
 const bool = (p: Payload, k: string) => typeof p[k] === 'boolean';
 const oneOf = (p: Payload, k: string, values: readonly string[]) => typeof p[k] === 'string' && values.includes(p[k] as string);
-const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT', 'PLATFORM'] as const;
+const METHODS = ['CASH', 'QRIS', 'EDC_DEBIT', 'EDC_CREDIT', 'PLATFORM', 'DEPOSIT'] as const;
 
 /** Layar dapur hanya mengubah status tiket (dan heartbeat); token yang bocor tidak boleh bisa memalsukan pembayaran. */
 const KDS_EVENT_TYPES: readonly EventType[] = ['kitchen.status_changed', 'device.heartbeat'];
@@ -117,8 +117,16 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     } else if (p['memberId'] !== undefined || p['points'] !== undefined) return 'memberId/points hanya untuk penukaran poin';
     return null;
   },
-  'payment.received': (p) => (str(p, 'orderId') && oneOf(p, 'method', METHODS) && num(p, 'amount') ? null : 'orderId/method/amount tidak valid'),
-  'payment.method_changed': (p) => (str(p, 'orderId') && oneOf(p, 'from', METHODS) && oneOf(p, 'to', METHODS) ? null : 'field tidak valid'),
+  'payment.received': (p) => {
+    if (!(str(p, 'orderId') && oneOf(p, 'method', METHODS) && num(p, 'amount'))) return 'orderId/method/amount tidak valid';
+    // Uang muka selalu menyebut reservasinya; metode lain tidak boleh membawa reservationId.
+    if (p['method'] === 'DEPOSIT') return Number.isInteger(p['reservationId']) && (p['reservationId'] as number) > 0 ? null : 'pembayaran uang muka wajib menyebut reservationId';
+    return p['reservationId'] === undefined ? null : 'reservationId hanya untuk pembayaran uang muka';
+  },
+  'payment.method_changed': (p) => {
+    if (!(str(p, 'orderId') && oneOf(p, 'from', METHODS) && oneOf(p, 'to', METHODS))) return 'field tidak valid';
+    return p['from'] === 'DEPOSIT' || p['to'] === 'DEPOSIT' ? 'pembayaran uang muka tidak bisa diganti metodenya' : null;
+  },
   'receipt.printed': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
   'receipt.digital': (p) => (str(p, 'orderId') && typeof p['token'] === 'string' && RECEIPT_TOKEN.test(p['token']) ? null : 'orderId/token tidak valid'),
   'receipt.declined': (p) => (str(p, 'orderId') ? null : 'orderId wajib'),
@@ -126,7 +134,7 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     str(p, 'orderId') && str(p, 'reasonCode') && num(p, 'amount') && Array.isArray(p['approverIds']) && (p['approverIds'] as unknown[]).every((a) => typeof a === 'string')
       ? null : 'field void tidak valid',
   'refund.created': (p) =>
-    str(p, 'refundId') && str(p, 'originalOrderId') && num(p, 'amount') && oneOf(p, 'method', METHODS) && str(p, 'approverId')
+    str(p, 'refundId') && str(p, 'originalOrderId') && num(p, 'amount') && oneOf(p, 'method', METHODS) && p['method'] !== 'DEPOSIT' && str(p, 'approverId')
       ? null : 'field refund tidak valid',
   'drawer.opened': () => null,
   'printer.status': (p) =>

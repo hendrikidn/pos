@@ -549,7 +549,7 @@ function RefundDialog({ ctx, order, onClose, withApproval }: { ctx: Ctx; order: 
           onClick={async () => {
             const approvers = await ctx.approve(1, 'Refund memerlukan persetujuan.');
             if (!approvers) return;
-            const r = await run(ctx, () => ctx.rt.engine.refund(order.id, Number(amount), order.payments[0]?.method ?? 'CASH', approvers[0]!));
+            const r = await run(ctx, () => ctx.rt.engine.refund(order.id, Number(amount), (order.payments[0]?.method === 'DEPOSIT' ? 'CASH' : order.payments[0]?.method) ?? 'CASH', approvers[0]!));
             if (r.ok) onClose();
           }}
         >

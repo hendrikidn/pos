@@ -5,6 +5,7 @@ import { CustomerDisplay, DISPLAY_CHANNEL, type DisplayView } from './CustomerDi
 import { Kds } from './Kds';
 import { Logo } from './Logo';
 import { OrderPanel } from './OrderPanel';
+import { ReservationDialog } from './Reservations';
 import { TableMap } from './TableMap';
 import { hardware, isNative, kioskWanted, loadPrinterSetting, savePrinterSetting, setKioskWanted, type PrinterKind } from './native';
 import { createRuntime, saveSettings, setDemo, type Boot, type Runtime } from './runtime';
@@ -201,7 +202,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
 
 function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   const { engine } = ctx.rt;
-  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | 'online' | null>(null);
+  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | 'online' | 'reservations' | null>(null);
   const [table, setTable] = useState('');
   const incoming = ctx.rt.handoffs().incoming;
   const shift = engine.currentShift();
@@ -225,6 +226,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   };
 
   if (!shift) return <OpenShift ctx={ctx} />;
+  const reservationsToday = ctx.rt.reservations()?.items.filter((r) => r.status === 'BOOKED').length ?? 0;
   return (
     <div className="pos-orders">
       <div className="order-strip">
@@ -233,6 +235,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           <button className="secondary" onClick={() => setAsking(engine.config.tables?.length ? 'tables' : 'table')}>+ Dine-in</button>
           <button className="secondary" onClick={() => setAsking('employee')}>+ Karyawan</button>
           {(engine.config.channels?.length ?? 0) > 0 && <button className="secondary" onClick={() => setAsking('online')}>+ Online</button>}
+          {reservationsToday > 0 && <button className="secondary" onClick={() => setAsking('reservations')}>Reservasi · {reservationsToday}</button>}
           {incoming.length > 0 && <button className="incoming" onClick={() => setAsking('incoming')}>Order masuk · {incoming.length}</button>}
         </div>
         <ul className="strip-list" aria-label="Order di shift ini">
@@ -276,6 +279,9 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
             setAsking(null);
           }}
         />
+      )}
+      {asking === 'reservations' && (
+        <ReservationDialog ctx={ctx} onClose={() => setAsking(null)} onSeated={(no) => (no ? void create('DINE_IN', { tableNo: no }) : setAsking('tables'))} />
       )}
       {asking === 'incoming' && <IncomingDialog ctx={ctx} onClose={() => setAsking(null)} />}
       {asking === 'employee' && (

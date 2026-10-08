@@ -76,6 +76,18 @@ export interface ConfigStatus {
   lastError: string | null;
 }
 
+/** Satu reservasi di papan kasir (tanpa nomor telepon). `depositRemaining` = uang muka yang masih bisa dipakai sebagai pembayaran. */
+export interface ReservationItem {
+  id: number;
+  guestName: string;
+  partySize: number;
+  start: number;
+  durationMin: number;
+  tableNo: string | null;
+  status: 'BOOKED' | 'SEATED';
+  depositRemaining: number;
+}
+
 export interface Runtime {
   engine: PosEngine;
   /** Printer yang dipakai engine (simulasi, atau ESC/POS lewat jaringan/USB). */
@@ -95,6 +107,10 @@ export interface Runtime {
    * `at` = kapan terakhir berhasil, agar UI bisa menandai data usang.
    */
   tableBoard(): { board: TableBoard; at: number } | null;
+  /** Reservasi hari ini dan sebentar lagi dari server (tanpa nomor telepon); null bila belum pernah berhasil diunduh atau mode demo. */
+  reservations(): { items: ReservationItem[]; at: number } | null;
+  /** Mendudukkan tamu yang datang (butuh koneksi); mengembalikan meja yang dipesan bila ada. */
+  seatReservation(id: number): Promise<Result<{ tableNo: string | null; guestName: string }>>;
   /** Foto menu sebagai data URL (sudah diunduh dan tersimpan di terminal); null bila menu tanpa foto atau belum terunduh. */
   menuImage(id: string): string | null;
   /** Cari member lewat nomor HP di server (butuh koneksi). Tidak tersedia di mode demo. */
@@ -261,6 +277,32 @@ export async function createRuntime(): Promise<Boot> {
     }
   };
 
+  // Reservasi: papan dari server untuk kasir, dan mendudukkan tamu.
+  let reservationBoard: { items: ReservationItem[]; at: number } | null = null;
+  const pollReservations = async () => {
+    if (demo || !settings.token) return;
+    try {
+      const res = await fetch(`${baseUrl}/v1/reservations/board`, { headers: { authorization: `Bearer ${settings.token}` } });
+      if (!res.ok) return;
+      reservationBoard = { items: ((await res.json()) as { reservations: ReservationItem[] }).reservations, at: Date.now() };
+      notify();
+    } catch {
+      /* offline: papan terakhir tetap dipakai */
+    }
+  };
+  const seatReservation = async (id: number): Promise<Result<{ tableNo: string | null; guestName: string }>> => {
+    if (demo || !settings.token) return { ok: false, code: 'NO_SERVER', message: 'Mendudukkan tamu memerlukan koneksi ke server.' };
+    try {
+      const res = await fetch(`${baseUrl}/v1/reservations/${id}/seat-device`, { method: 'POST', headers: { authorization: `Bearer ${settings.token}`, 'content-type': 'application/json' }, body: '{}' });
+      const body = (await res.json().catch(() => ({}))) as { tableNo?: string | null; guestName?: string; message?: string | string[] };
+      if (!res.ok) return { ok: false, code: `RESERVATION_${res.status}`, message: (Array.isArray(body.message) ? body.message.join('; ') : body.message) ?? `Server menjawab ${res.status}.` };
+      void pollReservations();
+      return { ok: true, value: { tableNo: body.tableNo ?? null, guestName: body.guestName ?? '' } };
+    } catch {
+      return { ok: false, code: 'OFFLINE', message: 'Tidak terhubung ke server.' };
+    }
+  };
+
   // Foto menu: versi di konfigurasi menentukan perlu-tidaknya mengunduh; hasilnya disimpan agar tampil juga saat offline.
   const images = new Map<string, { v: string; url: string }>();
   for (const key of await store.keys('img:')) {
@@ -368,6 +410,8 @@ export async function createRuntime(): Promise<Boot> {
   void pollHandoffs();
   void syncImages();
   void pollTables();
+  setInterval(() => void pollReservations(), 30_000);
+  void pollReservations();
   setInterval(() => void reportPosture(), 10 * 60_000);
   void poll();
   setInterval(() => void syncNow(), 5_000);
@@ -382,6 +426,8 @@ export async function createRuntime(): Promise<Boot> {
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,
     tableBoard: () => tableBoard,
+    reservations: () => reservationBoard,
+    seatReservation,
     memberLookup: (phone) => memberCall(`/v1/members/lookup?phone=${encodeURIComponent(phone)}`),
     memberRegister: (phone, name) => memberCall('/v1/members', { method: 'POST', body: JSON.stringify({ phone, name }) }),
     menuImage: (id) => images.get(id)?.url ?? null,

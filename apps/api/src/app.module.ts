@@ -32,6 +32,8 @@ import { PurchaseService } from './purchase.service';
 import { PurchaseController } from './purchase.controller';
 import { TransferService } from './transfer.service';
 import { HrService } from './hr.service';
+import { ReservationService } from './reservation.service';
+import { ReservationController } from './reservation.controller';
 import { HrController } from './hr.controller';
 import { TransferController } from './transfer.controller';
 import { ChannelController } from './channel.controller';
@@ -67,7 +69,7 @@ export class AppModule {
   static forRoot(db: Database, opts: AppOptions = {}): DynamicModule {
     return {
       module: AppModule,
-      controllers: [ApiController, ConfigController, DeviceController, StockController, MemberController, BillingController, AccountingController, ChannelController, PurchaseController, TransferController, HrController, PlatformController, LoginController, TenantUsersController],
+      controllers: [ApiController, ConfigController, DeviceController, StockController, MemberController, BillingController, AccountingController, ChannelController, PurchaseController, TransferController, HrController, ReservationController, PlatformController, LoginController, TenantUsersController],
       providers: [
         // useFactory, bukan useValue: Nest menyerialisasi metadata modul dinamis untuk membuat token modul,
         // dan objek database (memori WASM) membuat serialisasi itu gagal.
@@ -80,7 +82,7 @@ export class AppModule {
         { provide: MAILER, useFactory: () => opts.mailer ?? mailerFromEnv() },
         { provide: CLOCK, useFactory: () => opts.clock ?? Date.now },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, AccountingService, ChannelService, PurchaseService, TransferService, HrService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
+        AdminService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, AccountingService, ChannelService, PurchaseService, TransferService, HrService, ReservationService, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
       ],
       exports: [AdminService, ConfigService],
     };

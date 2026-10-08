@@ -8,6 +8,7 @@ import { BillingService } from './billing.service';
 import { ChannelService } from './channel.service';
 import { HrService } from './hr.service';
 import { PurchaseService } from './purchase.service';
+import { ReservationService } from './reservation.service';
 import { TransferService } from './transfer.service';
 import { MemberService } from './member.service';
 import { StockService } from './stock.service';
@@ -353,6 +354,13 @@ async function main() {
     await hr.addManual(seeder, 'senopati', { staffId: 'budi', start: day + 9 * H, end: day + (d === 2 ? 19 : 17) * H, reason: 'Absensi demo' }, now);
     await hr.addManual(seeder, 'senopati', { staffId: 'sari', start: day + 13 * H, end: day + 21 * H, reason: 'Absensi demo' }, now);
   }
+
+  // Reservasi: satu sebentar lagi (bisa langsung didudukkan dari POS), satu malam ini dengan uang muka, satu keluarga besar besok.
+  const resv = app.get(ReservationService);
+  await resv.create(seeder, 'senopati', { guestName: 'Ibu Ratna', phone: '0812 7000 1111', partySize: 3, start: now + 30 * 60_000, tableNo: '5' });
+  const night = await resv.create(seeder, 'senopati', { guestName: 'Keluarga Wijaya', phone: '0813 7000 2222', partySize: 6, start: now + 4 * H, durationMin: 120, tableNo: 'T1', note: 'Ulang tahun, minta kue' });
+  await resv.setDeposit(seeder, night.id, { amount: 150_000, method: 'TRANSFER' }, now);
+  await resv.create(seeder, 'senopati', { guestName: 'Pak Hendra (rapat kantor)', partySize: 8, start: now + 26 * H, durationMin: 150, tableNo: 'T2' });
 
   const open = await call('/v1/outlets/senopati/incidents', owner);
   const old = open.find((i: { order_ids: string[] }) => i.order_ids.includes('A-007'));

@@ -6,6 +6,7 @@ import type { ApiAuth, DeviceAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { CLOCK, type Clock } from './pipeline.service';
+import { RateLimiter } from './rate-limit';
 import { DAY_MS, localDate, startOfLocalDay } from './sales-report';
 import { checkCart, MAX_WEB_TOTAL, phoneKey, SLUG_RE, validPhone, WEB_EXPIRE_MS, type MenuRow, type WebLine } from './web-order';
 
@@ -40,21 +41,14 @@ interface ShopOutlet {
 
 @Injectable()
 export class WebShopService {
-  private readonly orderHits = new Map<string, { count: number; resetAt: number }>();
-  private readonly readHits = new Map<string, { count: number; resetAt: number }>();
-
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(RateLimiter) private readonly limiter: RateLimiter,
   ) {}
 
-  private limit(map: Map<string, { count: number; resetAt: number }>, caller: string, max: number, windowMs: number, message: string): void {
-    const now = this.clock();
-    const h = map.get(caller);
-    if (!h || h.resetAt <= now) {
-      if (map.size > 5_000) map.clear();
-      map.set(caller, { count: 1, resetAt: now + windowMs });
-    } else if (++h.count > max) throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS);
+  private readLimit(caller: string): Promise<void> {
+    return this.limiter.enforce(`web:read:${caller}`, READS_PER_IP_PER_MINUTE, 60_000, this.clock(), 'terlalu banyak permintaan; coba lagi sebentar');
   }
 
   private audit(q: Queryable, tenantId: string, actor: string, action: string, detail: object) {
@@ -86,7 +80,7 @@ export class WebShopService {
   }
 
   async publicShop(slug: string, caller: string) {
-    this.limit(this.readHits, caller, READS_PER_IP_PER_MINUTE, 60_000, 'terlalu banyak permintaan; coba lagi sebentar');
+    await this.readLimit(caller);
     const o = await this.shopBySlug(slug);
     const menu = await this.db.tenantTx(o.tenant_id, (q) => this.menuOf(q, o.id));
     return {
@@ -99,7 +93,7 @@ export class WebShopService {
 
   async publicOrder(slug: string, input: WebOrderInput, caller: string): Promise<{ token: string; code: string; total: number }> {
     if (typeof input.website === 'string' && input.website.trim() !== '') return { token: randomBytes(16).toString('base64url'), code: 'W0', total: 0 }; // jebakan bot: pura-pura berhasil
-    this.limit(this.readHits, caller, READS_PER_IP_PER_MINUTE, 60_000, 'terlalu banyak permintaan; coba lagi sebentar');
+    await this.readLimit(caller);
     const o = await this.shopBySlug(slug);
     const name = clean(input.name, 2, 40);
     need(name, 'nama wajib diisi (2–40 karakter)');
@@ -115,32 +109,38 @@ export class WebShopService {
     const note = input.note === undefined || input.note === null || input.note === '' ? null : clean(input.note, 1, 200);
     need(input.note === undefined || input.note === null || input.note === '' || note !== null, 'catatan maksimal 200 karakter');
     const now = this.clock();
-    return this.db.tenantTx(o.tenant_id, async (q) => {
-      await this.sweep(q, o.id, now);
-      const cart = checkCart(input.items, new Map((await this.menuOf(q, o.id)).map((m) => [m.id, { id: m.id, name: m.name, price: m.price, modifierGroups: m.modifier_groups } as MenuRow])));
-      if (!cart.ok) throw new BadRequestException(cart.message);
-      const lines: CartLine[] = cart.lines.map((l) => ({ itemId: l.itemId, name: l.name, qty: l.qty, unitPrice: l.unitPrice, sentQty: 0 }));
-      const total = computeTotals(lines, 0, { taxPercent: o.tax_percent, servicePercent: o.service_charge_percent, taxOnService: o.tax_on_service, roundingUnit: o.rounding_unit }).total;
-      need(total <= MAX_WEB_TOTAL, `nilai pesanan maksimal Rp ${MAX_WEB_TOTAL.toLocaleString('id-ID')}; untuk pesanan lebih besar hubungi outlet`);
-      // Dibandingkan menurut bentuk bakunya: "0812-3456", "+62 812 3456" dan "0812 3456" adalah nomor yang sama.
-      const pendingPhones = (await q.query<{ phone: string }>("select phone from web_order where outlet_id = $1 and status = 'NEW'", [o.id])).rows;
-      const pending = { n: pendingPhones.length, mine: pendingPhones.filter((r) => phoneKey(r.phone) === phoneKey(phone!)).length };
-      if (pending.mine >= PENDING_PER_PHONE) throw new HttpException('masih ada pesanan Anda yang menunggu konfirmasi kasir', HttpStatus.TOO_MANY_REQUESTS);
-      if (pending.n >= PENDING_PER_OUTLET) throw new HttpException('toko sedang ramai; coba lagi sebentar', HttpStatus.TOO_MANY_REQUESTS);
-      // Hanya pesanan yang lolos pemeriksaan yang dihitung ke pembatas per alamat, supaya salah ketik tidak menghabiskan jatah.
-      this.limit(this.orderHits, caller, ORDERS_PER_IP_PER_HOUR, 3_600_000, 'terlalu banyak pesanan dari perangkat ini; coba lagi nanti atau pesan langsung di kasir');
-      const token = randomBytes(16).toString('base64url');
-      const id = num((await q.query<{ id: string }>(
-        `insert into web_order (tenant_id, outlet_id, token, customer_name, phone, order_type, table_no, items, estimated_total, note, created_at_ms, caller_hash)
-         values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12) returning id`,
-        [o.tenant_id, o.id, token, name, phone, input.type, tableNo, JSON.stringify(cart.lines), total, note, now, createHash('sha256').update(caller).digest('hex').slice(0, 16)],
-      )).rows[0]!.id);
-      return { token, code: codeOf(id), total };
-    });
+    // Dihitung SEBELUM transaksi (pembatas memakai koneksi lain) dan dibatalkan bila pesanan ternyata tidak sah, supaya salah ketik tidak menghabiskan jatah.
+    const key = `web:order:${caller}`;
+    await this.limiter.enforce(key, ORDERS_PER_IP_PER_HOUR, 3_600_000, now, 'terlalu banyak pesanan dari perangkat ini; coba lagi nanti atau pesan langsung di kasir');
+    try {
+      return await this.db.tenantTx(o.tenant_id, async (q) => {
+        await this.sweep(q, o.id, now);
+        const cart = checkCart(input.items, new Map((await this.menuOf(q, o.id)).map((m) => [m.id, { id: m.id, name: m.name, price: m.price, modifierGroups: m.modifier_groups } as MenuRow])));
+        if (!cart.ok) throw new BadRequestException(cart.message);
+        const lines: CartLine[] = cart.lines.map((l) => ({ itemId: l.itemId, name: l.name, qty: l.qty, unitPrice: l.unitPrice, sentQty: 0 }));
+        const total = computeTotals(lines, 0, { taxPercent: o.tax_percent, servicePercent: o.service_charge_percent, taxOnService: o.tax_on_service, roundingUnit: o.rounding_unit }).total;
+        need(total <= MAX_WEB_TOTAL, `nilai pesanan maksimal Rp ${MAX_WEB_TOTAL.toLocaleString('id-ID')}; untuk pesanan lebih besar hubungi outlet`);
+        // Dibandingkan menurut bentuk bakunya: "0812-3456", "+62 812 3456" dan "0812 3456" adalah nomor yang sama.
+        const pendingPhones = (await q.query<{ phone: string }>("select phone from web_order where outlet_id = $1 and status = 'NEW'", [o.id])).rows;
+        const pending = { n: pendingPhones.length, mine: pendingPhones.filter((r) => phoneKey(r.phone) === phoneKey(phone!)).length };
+        if (pending.mine >= PENDING_PER_PHONE) throw new HttpException('masih ada pesanan Anda yang menunggu konfirmasi kasir', HttpStatus.TOO_MANY_REQUESTS);
+        if (pending.n >= PENDING_PER_OUTLET) throw new HttpException('toko sedang ramai; coba lagi sebentar', HttpStatus.TOO_MANY_REQUESTS);
+        const token = randomBytes(16).toString('base64url');
+        const id = num((await q.query<{ id: string }>(
+          `insert into web_order (tenant_id, outlet_id, token, customer_name, phone, order_type, table_no, items, estimated_total, note, created_at_ms, caller_hash)
+           values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12) returning id`,
+          [o.tenant_id, o.id, token, name, phone, input.type, tableNo, JSON.stringify(cart.lines), total, note, now, createHash('sha256').update(caller).digest('hex').slice(0, 16)],
+        )).rows[0]!.id);
+        return { token, code: codeOf(id), total };
+      });
+    } catch (e) {
+      await this.limiter.undo(key); // pesanan tidak jadi dibuat: jatah dikembalikan
+      throw e;
+    }
   }
 
   async publicTrack(token: string, caller: string) {
-    this.limit(this.readHits, caller, READS_PER_IP_PER_MINUTE, 60_000, 'terlalu banyak permintaan; coba lagi sebentar');
+    await this.readLimit(caller);
     if (!/^[A-Za-z0-9_-]{22}$/.test(token)) throw new NotFoundException('pesanan tidak ditemukan');
     const r = (await this.db.admin.query<WebRow & { outlet_name: string }>(
       `select w.id, w.outlet_id, w.token, w.customer_name, w.phone, w.order_type, w.table_no, w.items, w.estimated_total, w.note, w.status, w.created_at_ms, w.decided_by, w.decided_at_ms, w.decided_reason,

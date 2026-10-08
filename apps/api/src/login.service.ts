@@ -6,6 +6,7 @@ import type { Queryable } from './db/driver';
 import { MAILER, type Mailer } from './mailer';
 import { burnVerify, checkPassword, hashPassword, PASSWORD_MAX, verifyPassword } from './password';
 import { CLOCK, type Clock } from './pipeline.service';
+import { RateLimiter } from './rate-limit';
 
 export const CODE_TTL_MS = 10 * 60_000;
 export const SESSION_TTL_MS = 7 * 24 * 3600_000;
@@ -27,11 +28,6 @@ type Purpose = 'login' | 'reset';
 const hashCode = (salt: string, code: string) => createHash('sha256').update(`${salt}:${code}`).digest('hex');
 const GENERIC_LOGIN_ERROR = 'email atau password salah';
 const GENERIC_CODE_ERROR = 'kode salah atau sudah kedaluwarsa';
-
-interface Bucket {
-  count: number;
-  resetAt: number;
-}
 
 export interface LoginResult {
   token: string;
@@ -67,31 +63,22 @@ const USER_SELECT = `
  */
 @Injectable()
 export class LoginService {
-  private readonly requests = new Map<string, Bucket>();
-  private readonly fails = new Map<string, Bucket>();
-
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(MAILER) private readonly mailer: Mailer,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(RateLimiter) private readonly limiter: RateLimiter,
   ) {}
 
   // ---------- pembatas per alamat ----------
 
-  private hit(map: Map<string, Bucket>, key: string, now: number): Bucket {
-    const cur = map.get(key);
-    if (!cur || cur.resetAt <= now) {
-      const b = { count: 1, resetAt: now + IP_WINDOW_MS };
-      map.set(key, b);
-      return b;
-    }
-    cur.count++;
-    return cur;
+  /** Mencatat satu kegagalan dari alamat ini (jendela IP_WINDOW_MS). */
+  private recordFail(caller: string, now: number): Promise<unknown> {
+    return this.limiter.hit(`login:fail:${caller}`, IP_WINDOW_MS, now);
   }
 
-  private assertNotThrottled(caller: string, now: number): void {
-    const f = this.fails.get(caller);
-    if (f && f.resetAt > now && f.count >= IP_MAX_FAILS) throw new HttpException('terlalu banyak percobaan; coba lagi nanti', HttpStatus.TOO_MANY_REQUESTS);
+  private assertNotThrottled(caller: string, now: number): Promise<void> {
+    return this.limiter.assertBelow(`login:fail:${caller}`, IP_MAX_FAILS, now, 'terlalu banyak percobaan; coba lagi nanti');
   }
 
   private async lookup(q: Queryable, emailLower: string, now: number): Promise<UserRow | undefined> {
@@ -105,7 +92,7 @@ export class LoginService {
     const now = this.clock();
     const email = normalizeEmail(emailRaw);
     if (email.length > 254 || !EMAIL_RE.test(email)) throw new BadRequestException('format email tidak valid');
-    if (this.hit(this.requests, caller, now).count > IP_MAX_REQUESTS) {
+    if ((await this.limiter.hit(`login:req:${caller}`, IP_WINDOW_MS, now)).count > IP_MAX_REQUESTS) {
       throw new HttpException('terlalu banyak permintaan; coba lagi nanti', HttpStatus.TOO_MANY_REQUESTS);
     }
 
@@ -197,11 +184,11 @@ export class LoginService {
   /** Masuk dengan kode email (jalur alternatif tanpa password). */
   async verifyCode(emailRaw: unknown, codeRaw: unknown, caller: string): Promise<LoginResult> {
     const now = this.clock();
-    this.assertNotThrottled(caller, now);
+    await this.assertNotThrottled(caller, now);
     const email = normalizeEmail(emailRaw);
     const code = typeof codeRaw === 'string' ? codeRaw.replace(/\s+/g, '') : '';
-    const fail = (): never => {
-      this.hit(this.fails, caller, now);
+    const fail = async (): Promise<never> => {
+      await this.recordFail(caller, now);
       throw new BadRequestException(GENERIC_CODE_ERROR);
     };
     if (!EMAIL_RE.test(email) || !/^[0-9]{6}$/.test(code)) return fail();
@@ -225,11 +212,11 @@ export class LoginService {
   /** Masuk dengan email dan password. Gagal dengan pesan dan waktu yang sama untuk email tak dikenal, nonaktif, atau belum punya password. */
   async login(emailRaw: unknown, passwordRaw: unknown, caller: string): Promise<LoginResult> {
     const now = this.clock();
-    this.assertNotThrottled(caller, now);
+    await this.assertNotThrottled(caller, now);
     const email = normalizeEmail(emailRaw);
     const password = typeof passwordRaw === 'string' ? passwordRaw.slice(0, PASSWORD_MAX + 1) : '';
     const fail = async (): Promise<never> => {
-      this.hit(this.fails, caller, now);
+      await this.recordFail(caller, now);
       throw new BadRequestException(GENERIC_LOGIN_ERROR);
     };
 
@@ -266,11 +253,11 @@ export class LoginService {
    */
   async resetPassword(emailRaw: unknown, codeRaw: unknown, passwordRaw: unknown, caller: string): Promise<LoginResult> {
     const now = this.clock();
-    this.assertNotThrottled(caller, now);
+    await this.assertNotThrottled(caller, now);
     const email = normalizeEmail(emailRaw);
     const code = typeof codeRaw === 'string' ? codeRaw.replace(/\s+/g, '') : '';
-    const fail = (): never => {
-      this.hit(this.fails, caller, now);
+    const fail = async (): Promise<never> => {
+      await this.recordFail(caller, now);
       throw new BadRequestException(GENERIC_CODE_ERROR);
     };
     if (!EMAIL_RE.test(email) || !/^[0-9]{6}$/.test(code)) return fail();
@@ -301,7 +288,7 @@ export class LoginService {
   /** Mengganti password dari dalam sesi. Perlu password lama; sesi lain pengguna itu diputus, sesi ini tetap. */
   async changePassword(auth: ApiAuth, currentToken: string, currentRaw: unknown, nextRaw: unknown, caller: string): Promise<void> {
     const now = this.clock();
-    this.assertNotThrottled(caller, now);
+    await this.assertNotThrottled(caller, now);
     const user = (
       await this.db.admin.query<UserRow>(`${USER_SELECT} where u.tenant_id = $1 and u.user_id = $3`, [auth.tenantId, now, auth.userId])
     ).rows[0];
@@ -311,7 +298,7 @@ export class LoginService {
     const current = typeof currentRaw === 'string' ? currentRaw.slice(0, PASSWORD_MAX + 1) : '';
     if (!current || current.length > PASSWORD_MAX || !(await verifyPassword(current, user.password_hash))) {
       await this.recordFailedPassword(user.id, now);
-      this.hit(this.fails, caller, now);
+      await this.recordFail(caller, now);
       throw new BadRequestException('password saat ini salah');
     }
     const next = checkPassword(nextRaw, user.email);

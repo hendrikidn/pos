@@ -4,6 +4,7 @@ import type { ApiAuth, DeviceAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { CLOCK, type Clock } from './pipeline.service';
+import { RateLimiter } from './rate-limit';
 import {
   checkCall, estimateWaitMin, labelOf, MAX_PARTY, MAX_WAITING, NO_SHOW_AFTER_MS, type QueueTicketFacts, type TicketStatus,
 } from './queue';
@@ -37,21 +38,14 @@ interface QueueOutlet { id: string; tenant_id: string; name: string; merchant_na
 
 @Injectable()
 export class QueueService {
-  private readonly takeHits = new Map<string, { count: number; resetAt: number }>();
-  private readonly readHits = new Map<string, { count: number; resetAt: number }>();
-
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(RateLimiter) private readonly limiter: RateLimiter,
   ) {}
 
-  private limit(map: Map<string, { count: number; resetAt: number }>, caller: string, max: number, windowMs: number, message: string): void {
-    const now = this.clock();
-    const h = map.get(caller);
-    if (!h || h.resetAt <= now) {
-      if (map.size > 5_000) map.clear();
-      map.set(caller, { count: 1, resetAt: now + windowMs });
-    } else if (++h.count > max) throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS);
+  private readLimit(caller: string): Promise<void> {
+    return this.limiter.enforce(`queue:read:${caller}`, READS_PER_IP_PER_MINUTE, 60_000, this.clock(), 'terlalu banyak permintaan; coba lagi sebentar');
   }
 
   private audit(q: Queryable, tenantId: string, actor: string, action: string, detail: object) {
@@ -98,7 +92,7 @@ export class QueueService {
   }
 
   async publicBoard(slug: string, caller: string) {
-    this.limit(this.readHits, caller, READS_PER_IP_PER_MINUTE, 60_000, 'terlalu banyak permintaan; coba lagi sebentar');
+    await this.readLimit(caller);
     const o = await this.bySlug(slug);
     const now = this.clock();
     return this.db.tenantTx(o.tenant_id, async (q) => {
@@ -113,7 +107,7 @@ export class QueueService {
 
   async publicTake(slug: string, input: TicketInput, caller: string): Promise<{ token: string; label: string; ahead: number; estimateMin: number }> {
     if (typeof input.website === 'string' && input.website.trim() !== '') return { token: randomBytes(16).toString('base64url'), label: 'A000', ahead: 0, estimateMin: 0 };
-    this.limit(this.readHits, caller, READS_PER_IP_PER_MINUTE, 60_000, 'terlalu banyak permintaan; coba lagi sebentar');
+    await this.readLimit(caller);
     const o = await this.bySlug(slug);
     need(Number.isInteger(input.partySize) && (input.partySize as number) >= 1 && (input.partySize as number) <= MAX_PARTY, `jumlah tamu 1–${MAX_PARTY}`);
     const name = input.name === undefined || input.name === null || input.name === '' ? null : clean(input.name, 2, 40);
@@ -121,25 +115,32 @@ export class QueueService {
     const phone = input.phone === undefined || input.phone === null || input.phone === '' ? null : clean(input.phone, 8, 20);
     need(input.phone === undefined || input.phone === null || input.phone === '' || (phone !== null && validPhone(phone)), 'nomor telepon tidak valid');
     const now = this.clock();
-    return this.db.tenantTx(o.tenant_id, async (q) => {
-      const day = await this.today(q, o, now);
-      await q.query('select pg_advisory_xact_lock(hashtext($1))', [`queue:${o.id}`]);
-      const waiting = num((await q.query<{ n: string }>("select count(*) as n from queue_ticket where outlet_id = $1 and day = $2 and status = 'WAITING'", [o.id, day])).rows[0]!.n);
-      if (waiting >= MAX_WAITING) throw new HttpException('antrian sedang penuh; silakan datang ke kasir', HttpStatus.TOO_MANY_REQUESTS);
-      if (phone) {
-        const active = (await q.query<{ phone: string }>("select phone from queue_ticket where outlet_id = $1 and day = $2 and phone is not null and status in ('WAITING', 'CALLED')", [o.id, day])).rows;
-        if (active.some((r) => phoneKey(r.phone) === phoneKey(phone))) throw new ConflictException('nomor ini sudah punya tiket antrian yang aktif');
-      }
-      this.limit(this.takeHits, caller, TICKETS_PER_IP_PER_HOUR, 3_600_000, 'terlalu banyak tiket dari perangkat ini; silakan datang ke kasir');
-      const seq = num((await q.query<{ n: string }>('select coalesce(max(seq), 0) + 1 as n from queue_ticket where outlet_id = $1 and day = $2', [o.id, day])).rows[0]!.n);
-      const token = randomBytes(16).toString('base64url');
-      await q.query(
-        `insert into queue_ticket (tenant_id, outlet_id, day, seq, token, party_size, name, phone, source, created_at_ms, caller_hash)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, 'SELF', $9, $10)`,
-        [o.tenant_id, o.id, day, seq, token, input.partySize, name, phone, now, createHash('sha256').update(caller).digest('hex').slice(0, 16)],
-      );
-      return { token, label: labelOf(seq), ahead: waiting, estimateMin: estimateWaitMin(waiting) };
-    });
+    // Dihitung sebelum transaksi (pembatas memakai koneksi lain) dan dikembalikan bila tiket tidak jadi dibuat.
+    const key = `queue:take:${caller}`;
+    await this.limiter.enforce(key, TICKETS_PER_IP_PER_HOUR, 3_600_000, now, 'terlalu banyak tiket dari perangkat ini; silakan datang ke kasir');
+    try {
+      return await this.db.tenantTx(o.tenant_id, async (q) => {
+        const day = await this.today(q, o, now);
+        await q.query('select pg_advisory_xact_lock(hashtext($1))', [`queue:${o.id}`]);
+        const waiting = num((await q.query<{ n: string }>("select count(*) as n from queue_ticket where outlet_id = $1 and day = $2 and status = 'WAITING'", [o.id, day])).rows[0]!.n);
+        if (waiting >= MAX_WAITING) throw new HttpException('antrian sedang penuh; silakan datang ke kasir', HttpStatus.TOO_MANY_REQUESTS);
+        if (phone) {
+          const active = (await q.query<{ phone: string }>("select phone from queue_ticket where outlet_id = $1 and day = $2 and phone is not null and status in ('WAITING', 'CALLED')", [o.id, day])).rows;
+          if (active.some((r) => phoneKey(r.phone) === phoneKey(phone))) throw new ConflictException('nomor ini sudah punya tiket antrian yang aktif');
+        }
+        const seq = num((await q.query<{ n: string }>('select coalesce(max(seq), 0) + 1 as n from queue_ticket where outlet_id = $1 and day = $2', [o.id, day])).rows[0]!.n);
+        const token = randomBytes(16).toString('base64url');
+        await q.query(
+          `insert into queue_ticket (tenant_id, outlet_id, day, seq, token, party_size, name, phone, source, created_at_ms, caller_hash)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, 'SELF', $9, $10)`,
+          [o.tenant_id, o.id, day, seq, token, input.partySize, name, phone, now, createHash('sha256').update(caller).digest('hex').slice(0, 16)],
+        );
+        return { token, label: labelOf(seq), ahead: waiting, estimateMin: estimateWaitMin(waiting) };
+      });
+    } catch (e) {
+      await this.limiter.undo(key); // tiket tidak jadi dibuat: jatah dikembalikan
+      throw e;
+    }
   }
 
   private async byToken(token: string) {
@@ -150,7 +151,7 @@ export class QueueService {
   }
 
   async publicTrack(token: string, caller: string) {
-    this.limit(this.readHits, caller, READS_PER_IP_PER_MINUTE, 60_000, 'terlalu banyak permintaan; coba lagi sebentar');
+    await this.readLimit(caller);
     const r = await this.byToken(token);
     return this.db.tenantTx(r.tenant_id, async (q) => {
       const o = await this.outletInfo(q, r.outlet_id);
@@ -165,7 +166,7 @@ export class QueueService {
   }
 
   async publicCancel(token: string, caller: string): Promise<void> {
-    this.limit(this.readHits, caller, READS_PER_IP_PER_MINUTE, 60_000, 'terlalu banyak permintaan; coba lagi sebentar');
+    await this.readLimit(caller);
     const r = await this.byToken(token);
     await this.db.tenantTx(r.tenant_id, async (q) => {
       const res = await q.query("update queue_ticket set status = 'CANCELED', closed_by = 'pelanggan', closed_at_ms = $2, closed_reason = 'dibatalkan pelanggan' where id = $1 and status in ('WAITING', 'CALLED')", [r.id, this.clock()]);

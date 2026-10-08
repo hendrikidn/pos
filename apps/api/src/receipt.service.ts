@@ -4,6 +4,7 @@ import { buildReceipt, type Receipt } from '@pos/order';
 import { Database } from './db/database';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { CLOCK, type Clock } from './pipeline.service';
+import { RateLimiter } from './rate-limit';
 
 export interface PublicReceipt {
   merchantName: string;
@@ -20,26 +21,14 @@ const MAX_PER_WINDOW = 60;
  */
 @Injectable()
 export class ReceiptService {
-  private readonly hits = new Map<string, { count: number; resetAt: number }>();
-
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(RateLimiter) private readonly limiter: RateLimiter,
   ) {}
 
-  private throttle(caller: string): void {
-    const now = this.clock();
-    const h = this.hits.get(caller);
-    if (!h || h.resetAt <= now) {
-      if (this.hits.size > 5_000) this.hits.clear();
-      this.hits.set(caller, { count: 1, resetAt: now + WINDOW_MS });
-    } else if (++h.count > MAX_PER_WINDOW) {
-      throw new HttpException('terlalu banyak permintaan; coba lagi sebentar', HttpStatus.TOO_MANY_REQUESTS);
-    }
-  }
-
   async byToken(token: string, caller: string): Promise<PublicReceipt> {
-    this.throttle(caller);
+    await this.limiter.enforce(`receipt:${caller}`, MAX_PER_WINDOW, WINDOW_MS, this.clock(), 'terlalu banyak permintaan; coba lagi sebentar');
     if (!RECEIPT_TOKEN.test(token)) throw new NotFoundException('struk tidak ditemukan');
     // Jalur tanpa tenant (publik): koneksi pemilik skema, jadi setiap kueri dibatasi eksplisit oleh outlet hasil pencarian token.
     const ref = (

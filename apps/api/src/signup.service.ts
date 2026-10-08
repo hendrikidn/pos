@@ -4,6 +4,7 @@ import { BillingService } from './billing.service';
 import { Database } from './db/database';
 import { EMAIL_RE, LoginService, normalizeEmail } from './login.service';
 import { CLOCK, type Clock } from './pipeline.service';
+import { RateLimiter } from './rate-limit';
 import { DEFAULT_SHADOW_DAYS } from './shadow';
 
 /** Pendaftaran dari satu alamat dibatasi: akun uji coba gratis tidak boleh jadi jalan membanjiri sistem. */
@@ -13,18 +14,14 @@ export const SIGNUPS_PER_HOUR_GLOBAL = 60;
 const slug = (s: string, max: number): string =>
   s.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, max).replace(/-+$/g, '');
 
-interface Bucket { count: number; resetAt: number }
-
 @Injectable()
 export class SignupService {
-  private readonly perIp = new Map<string, Bucket>();
-  private global: Bucket = { count: 0, resetAt: 0 };
-
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(LoginService) private readonly login: LoginService,
     @Inject(BillingService) private readonly billing: BillingService,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(RateLimiter) private readonly limiter: RateLimiter,
   ) {}
 
   private text(label: string, v: unknown, min: number, max: number): string {
@@ -33,13 +30,19 @@ export class SignupService {
     return s;
   }
 
-  private throttle(caller: string, now: number): void {
-    if (this.global.resetAt <= now) this.global = { count: 0, resetAt: now + 3_600_000 };
-    let b = this.perIp.get(caller);
-    if (!b || b.resetAt <= now) this.perIp.set(caller, (b = { count: 0, resetAt: now + 3_600_000 }));
-    if (b.count >= SIGNUPS_PER_IP_PER_HOUR || this.global.count >= SIGNUPS_PER_HOUR_GLOBAL) throw new HttpException('terlalu banyak pendaftaran; coba lagi nanti', HttpStatus.TOO_MANY_REQUESTS);
-    b.count++;
-    this.global.count++;
+  /**
+   * Per alamat, lalu global, per jam. Percobaan yang ditolak tidak menghabiskan jatah yang lain: alamat yang sudah kena batas tidak ikut
+   * menguras jatah global (yang akan memblokir pendaftar sah), dan penolakan global mengembalikan jatah alamatnya.
+   */
+  private async throttle(caller: string, now: number): Promise<void> {
+    const msg = 'terlalu banyak pendaftaran; coba lagi nanti';
+    const ipKey = `signup:ip:${caller}`;
+    if ((await this.limiter.hit(ipKey, 3_600_000, now)).count > SIGNUPS_PER_IP_PER_HOUR) throw new HttpException(msg, HttpStatus.TOO_MANY_REQUESTS);
+    if ((await this.limiter.hit('signup:global', 3_600_000, now)).count > SIGNUPS_PER_HOUR_GLOBAL) {
+      await this.limiter.undo('signup:global');
+      await this.limiter.undo(ipKey);
+      throw new HttpException(msg, HttpStatus.TOO_MANY_REQUESTS);
+    }
   }
 
   /**
@@ -54,7 +57,7 @@ export class SignupService {
     const ownerName = this.text('nama pemilik', input.ownerName ?? '', 2, 60);
     const email = normalizeEmail(input.email);
     if (email.length > 254 || !EMAIL_RE.test(email)) throw new BadRequestException('format email tidak valid');
-    this.throttle(caller, this.clock());
+    await this.throttle(caller, this.clock());
 
     const existing = (await this.db.admin.query('select 1 from dashboard_user where lower(email) = $1', [email])).rowCount > 0;
     if (!existing) {

@@ -6,6 +6,7 @@ import { newToken, sha256, SUSPENDED_MESSAGE, type ApiAuth } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { CLOCK, type Clock } from './pipeline.service';
+import { RateLimiter } from './rate-limit';
 
 export const PAIRING_TTL_MS = 15 * 60 * 1000;
 /** Tanpa 0/O/1/I agar mudah diketik dari layar. 32^8 ≈ 10^12 kemungkinan. */
@@ -63,13 +64,15 @@ async function followKdsCapability(q: Queryable, tenantId: string, outletId: str
   }
 }
 
+/** Kode pairing salah (penanda di dalam transaksi; kegagalan dicatat ke pembatas setelah transaksi selesai). */
+class BadCode extends Error {}
+
 @Injectable()
 export class PairingService {
-  private readonly fails = new Map<string, { count: number; resetAt: number }>();
-
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(RateLimiter) private readonly limiter: RateLimiter,
   ) {}
 
   /** Owner/ops membuat kode. Kode polos hanya dikembalikan sekali; yang tersimpan hanya hash-nya. */
@@ -146,7 +149,7 @@ export class PairingService {
   /** Perangkat menukar kode dengan token. Tanpa autentikasi: kodenya sendiri yang menjadi kredensial. */
   async redeem(rawCode: unknown, hardwareId: unknown, caller: string): Promise<EnrollResult> {
     const now = this.clock();
-    this.assertNotThrottled(caller, now);
+    await this.limiter.assertBelow(`pair:fail:${caller}`, MAX_FAILS, now, 'terlalu banyak percobaan; coba lagi nanti');
     const code = typeof rawCode === 'string' ? normalizeCode(rawCode) : '';
     const hw = typeof hardwareId === 'string' ? hardwareId.slice(0, 64) : null;
 
@@ -166,8 +169,8 @@ export class PairingService {
             ).rows[0]
           : undefined;
         if (!row || row.used || row.expired) {
-          this.recordFail(caller, now);
-          throw new BadRequestException('kode pairing tidak valid atau sudah kedaluwarsa');
+          // Dicatat SETELAH transaksi dibatalkan (pembatas memakai koneksi lain): lihat `badCode` di bawah.
+          throw new BadCode();
         }
         if (row.suspended) throw new ForbiddenException(SUSPENDED_MESSAGE);
         const token = newToken('dev');
@@ -183,6 +186,10 @@ export class PairingService {
         return { deviceId: row.device_id, token, kind: row.kind, outletId: row.outlet_id, terminalId: row.terminal_id };
       });
     } catch (e) {
+      if (e instanceof BadCode) {
+        await this.limiter.hit(`pair:fail:${caller}`, FAIL_WINDOW_MS, now);
+        throw new BadRequestException('kode pairing tidak valid atau sudah kedaluwarsa');
+      }
       if ((e as { code?: string }).code === '23505') throw new ConflictException('deviceId sudah terdaftar; minta kode pairing baru');
       throw e;
     }
@@ -201,18 +208,5 @@ export class PairingService {
         auth.tenantId, auth.userId, 'device.revoke', JSON.stringify({ deviceId }),
       ]);
     });
-  }
-
-  private assertNotThrottled(caller: string, now: number): void {
-    const f = this.fails.get(caller);
-    if (f && f.resetAt > now && f.count >= MAX_FAILS) {
-      throw new HttpException('terlalu banyak percobaan; coba lagi nanti', HttpStatus.TOO_MANY_REQUESTS);
-    }
-  }
-
-  private recordFail(caller: string, now: number): void {
-    const f = this.fails.get(caller);
-    if (!f || f.resetAt <= now) this.fails.set(caller, { count: 1, resetAt: now + FAIL_WINDOW_MS });
-    else f.count++;
   }
 }

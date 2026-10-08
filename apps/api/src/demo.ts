@@ -319,15 +319,22 @@ async function main() {
   for (const [id, name, unit, minStock] of [
     ['biji', 'Biji kopi', 'g', 500], ['susu', 'Susu segar', 'ml', 2_000], ['bubuk-matcha', 'Bubuk matcha', 'g', 100], ['oat', 'Susu oat', 'ml', 1_000], ['telur', 'Telur', 'pcs', 12], ['nasi', 'Nasi', 'g', 2_000],
   ] as const) await stockSvc.createIngredient(seeder, { id, name, unit, minStock });
+  // BOM bertingkat: sirup gula = bahan setengah jadi (1.000 ml per batch dari 600 g gula + 500 ml air), dipakai di Kopi Susu; bawang dengan susut kupas 85%.
+  await stockSvc.createIngredient(seeder, { id: 'gula', name: 'Gula pasir', unit: 'g', minStock: 500 });
+  await stockSvc.createIngredient(seeder, { id: 'air', name: 'Air', unit: 'ml', minStock: 0 });
+  await stockSvc.createIngredient(seeder, { id: 'bawang', name: 'Bawang merah', unit: 'g', minStock: 200, yieldPercent: 85 });
+  await stockSvc.createIngredient(seeder, { id: 'sirup-gula', name: 'Sirup gula', unit: 'ml', kind: 'SEMI', batchYield: 1000 });
+  await stockSvc.setBom(seeder, 'sirup-gula', { lines: [{ ingredientId: 'gula', qty: 600 }, { ingredientId: 'air', qty: 500 }] });
+  await db.admin.query("update ingredient set avg_cost = case id when 'gula' then 0.016 when 'air' then 0.001 when 'bawang' then 0.035 end where id in ('gula', 'air', 'bawang')");
   const R = (menuId: string, lines: [string, number][], optionId?: string) =>
     stockSvc.setRecipe(seeder, menuId, { ...(optionId ? { optionId } : {}), lines: lines.map(([ingredientId, qty]) => ({ ingredientId, qty })) });
-  await R('kopi-susu', [['biji', 18], ['susu', 150]]); await R('americano', [['biji', 18]]); await R('latte', [['biji', 18], ['susu', 200]]);
+  await R('kopi-susu', [['biji', 18], ['susu', 150], ['sirup-gula', 15]]); await R('americano', [['biji', 18]]); await R('latte', [['biji', 18], ['susu', 200]]);
   await R('matcha', [['bubuk-matcha', 5], ['susu', 150]]); await R('matcha', [['susu', 50]], 'large'); await R('matcha', [['oat', 200]], 'oat');
-  await R('nasi-goreng', [['nasi', 200], ['telur', 1]]); await R('nasi-goreng', [['telur', 1]], 'telur');
+  await R('nasi-goreng', [['nasi', 200], ['telur', 1], ['bawang', 20]]); await R('nasi-goreng', [['telur', 1]], 'telur');
   const H = 3_600_000;
   const mv = (hoursAgo: number, ingredientId: string, kind: 'PURCHASE' | 'WASTE' | 'COUNT', qty: number, note?: string) =>
     stockSvc.addMovement(seeder, 'senopati', { ingredientId, kind, qty, ...(note ? { note } : {}) }, now - hoursAgo * H);
-  for (const [id, qty] of [['biji', 5_000], ['susu', 20_000], ['bubuk-matcha', 600], ['oat', 5_000], ['telur', 60], ['nasi', 8_000]] as const) await mv(24, id, 'COUNT', qty);
+  for (const [id, qty] of [['biji', 5_000], ['susu', 20_000], ['bubuk-matcha', 600], ['oat', 5_000], ['telur', 60], ['nasi', 8_000], ['gula', 3_000], ['air', 10_000], ['bawang', 1_000]] as const) await mv(24, id, 'COUNT', qty);
   await mv(20, 'biji', 'PURCHASE', 2_000, 'Supplier Kopi Nusantara');
   await mv(10, 'susu', 'WASTE', 1_500, 'Kedaluwarsa');
   // Opname biji 6 jam lalu: 12% lebih sedikit dari perkiraan (selisih kurang yang ditandai).

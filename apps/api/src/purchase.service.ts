@@ -79,7 +79,7 @@ export class PurchaseService {
   }
 
   private async ingredientMap(q: Queryable) {
-    return new Map((await q.query<{ id: string; active: boolean }>('select id, active from ingredient')).rows.map((r) => [r.id, r]));
+    return new Map((await q.query<{ id: string; active: boolean }>("select id, active from ingredient where kind = 'RAW'")).rows.map((r) => [r.id, r]));
   }
 
   async createPo(auth: ApiAuth, input: PoInput): Promise<{ id: number }> {

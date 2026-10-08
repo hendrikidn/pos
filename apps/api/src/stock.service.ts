@@ -5,6 +5,7 @@ import { Database } from './db/database';
 import type { Queryable } from './db/driver';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { CLOCK, type Clock } from './pipeline.service';
+import { checkBom, flattenRecipes, resolveIngredient, type BomDefs, type BomIngredient } from './bom';
 import { buildStock, earliestBaseline, stockAt, varianceFlagged, type IngredientInfo, type Movement, type MovementKind, type StockRow } from './stock';
 
 const ID = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -16,7 +17,7 @@ const need = (ok: unknown, message: string): void => {
   if (!ok) throw new BadRequestException(message);
 };
 
-export interface IngredientInput { id?: string; name?: string; unit?: string; minStock?: number; active?: boolean }
+export interface IngredientInput { id?: string; name?: string; unit?: string; minStock?: number; active?: boolean; kind?: string; yieldPercent?: number; batchYield?: number }
 export interface RecipeInput { optionId?: string | null; lines?: { ingredientId?: string; qty?: number }[] }
 export interface MovementInput { ingredientId?: string; kind?: string; qty?: number; note?: string }
 
@@ -43,15 +44,40 @@ export class StockService {
   // ---------- bahan ----------
 
   listIngredients(auth: ApiAuth): Promise<IngredientInfo[]> {
-    return this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query<{ id: string; name: string; unit: IngredientInfo['unit']; min_stock: number; active: boolean; avg_cost: string }>('select id, name, unit, min_stock, active, avg_cost from ingredient order by name')).rows
-        .map((r) => ({ id: r.id, name: r.name, unit: r.unit, minStock: r.min_stock, active: r.active, avgCost: Number(r.avg_cost) })),
-    );
+    return this.db.tenantTx(auth.tenantId, async (q) => {
+      const { ings, defs, minStock } = await this.bomContext(q);
+      const memo = new Map();
+      return [...ings.values()].sort((a, b) => a.name.localeCompare(b.name)).map((i) => {
+        let avgCost = i.avgCost;
+        if (i.kind === 'SEMI') {
+          try { avgCost = Math.round(resolveIngredient(i.id, ings, defs, memo).cost * 10_000) / 10_000; } catch { avgCost = 0; }
+        }
+        return { id: i.id, name: i.name, unit: i.unit, minStock: minStock.get(i.id) ?? 0, active: i.active, avgCost, kind: i.kind, yieldPercent: i.yieldPercent, batchYield: i.batchYield };
+      });
+    });
+  }
+
+  /** Bahan beserta jenis, susut, hasil batch, dan BOM bahan setengah jadi (untuk uraian resep dan biaya). */
+  async bomContext(q: Queryable): Promise<{ ings: Map<string, BomIngredient>; defs: BomDefs; minStock: Map<string, number> }> {
+    const rows = (await q.query<{ id: string; name: string; unit: BomIngredient['unit']; kind: 'RAW' | 'SEMI'; yield_percent: number; batch_yield: number | null; active: boolean; avg_cost: string; min_stock: number }>(
+      'select id, name, unit, kind, yield_percent, batch_yield, active, avg_cost, min_stock from ingredient',
+    )).rows;
+    const ings = new Map(rows.map((r): [string, BomIngredient] => [r.id, { id: r.id, name: r.name, unit: r.unit, kind: r.kind, yieldPercent: r.yield_percent, batchYield: r.batch_yield, active: r.active, avgCost: Number(r.avg_cost) }]));
+    const defs: BomDefs = new Map();
+    for (const l of (await q.query<{ parent_id: string; child_id: string; qty: number }>('select parent_id, child_id, qty from bom_line')).rows) {
+      const m = defs.get(l.parent_id) ?? new Map<string, number>();
+      m.set(l.child_id, l.qty);
+      defs.set(l.parent_id, m);
+    }
+    return { ings, defs, minStock: new Map(rows.map((r) => [r.id, r.min_stock])) };
   }
 
   private checkIngredient(i: IngredientInput, partial: boolean) {
     if (!partial || i.name !== undefined) need(typeof i.name === 'string' && i.name.trim().length > 0 && i.name.length <= 60, 'nama bahan wajib (maks. 60)');
     if (!partial || i.unit !== undefined) need((UNITS as readonly string[]).includes(i.unit as string), 'satuan harus g, ml, atau pcs');
+    if (i.kind !== undefined) need(i.kind === 'RAW' || i.kind === 'SEMI', 'jenis harus RAW atau SEMI');
+    if (i.yieldPercent !== undefined) need(Number.isInteger(i.yieldPercent) && i.yieldPercent >= 1 && i.yieldPercent <= 100, 'susut: hasil terpakai harus 1–100 persen');
+    if (i.batchYield !== undefined) need(Number.isInteger(i.batchYield) && i.batchYield >= 1 && i.batchYield <= 1_000_000, 'hasil batch harus bilangan bulat 1–1.000.000');
     if (i.minStock !== undefined) need(Number.isInteger(i.minStock) && i.minStock >= 0 && i.minStock <= MAX_QTY, 'stok minimum harus bilangan bulat ≥ 0');
   }
 
@@ -60,28 +86,43 @@ export class StockService {
     this.checkIngredient(input, false);
     await this.db.tenantTx(auth.tenantId, async (q) => {
       if ((await q.query('select 1 from ingredient where id = $1', [input.id])).rowCount > 0) throw new BadRequestException('id bahan sudah dipakai');
-      await q.query('insert into ingredient (tenant_id, id, name, unit, min_stock) values ($1, $2, $3, $4, $5)', [auth.tenantId, input.id, input.name!.trim(), input.unit, input.minStock ?? 0]);
-      await this.audit(q, auth, 'ingredient.create', { id: input.id, unit: input.unit });
+      const kind = input.kind ?? 'RAW';
+      need(kind === 'RAW' || input.batchYield !== undefined, 'bahan setengah jadi wajib mengisi hasil batch');
+      need(kind === 'SEMI' || input.batchYield === undefined, 'hasil batch hanya untuk bahan setengah jadi');
+      need(kind === 'RAW' || input.yieldPercent === undefined, 'susut hanya untuk bahan baku');
+      await q.query('insert into ingredient (tenant_id, id, name, unit, min_stock, kind, yield_percent, batch_yield) values ($1, $2, $3, $4, $5, $6, $7, $8)', [auth.tenantId, input.id, input.name!.trim(), input.unit, kind === 'SEMI' ? 0 : input.minStock ?? 0, kind, input.yieldPercent ?? 100, input.batchYield ?? null]);
+      await this.audit(q, auth, 'ingredient.create', { id: input.id, unit: input.unit, kind, yieldPercent: input.yieldPercent, batchYield: input.batchYield });
     });
   }
 
   /** Satuan tidak bisa diubah: angka stok dan resep yang sudah ada akan salah arti. */
   async updateIngredient(auth: ApiAuth, id: string, input: IngredientInput): Promise<void> {
     need(input.unit === undefined, 'satuan bahan tidak bisa diubah; buat bahan baru');
+    need(input.kind === undefined, 'jenis bahan tidak bisa diubah; buat bahan baru');
     this.checkIngredient(input, true);
     await this.db.tenantTx(auth.tenantId, async (q) => {
-      const r = await q.query(
-        'update ingredient set name = coalesce($2, name), min_stock = coalesce($3, min_stock), active = coalesce($4, active) where id = $1',
-        [id, input.name?.trim() ?? null, input.minStock ?? null, input.active ?? null],
+      const cur = (await q.query<{ kind: 'RAW' | 'SEMI'; yield_percent: number; batch_yield: number | null }>('select kind, yield_percent, batch_yield from ingredient where id = $1', [id])).rows[0];
+      if (!cur) throw new NotFoundException('bahan tidak ditemukan');
+      need(input.yieldPercent === undefined || cur.kind === 'RAW', 'susut hanya untuk bahan baku');
+      need(input.batchYield === undefined || cur.kind === 'SEMI', 'hasil batch hanya untuk bahan setengah jadi');
+      await q.query(
+        'update ingredient set name = coalesce($2, name), min_stock = coalesce($3, min_stock), active = coalesce($4, active), yield_percent = coalesce($5, yield_percent), batch_yield = coalesce($6, batch_yield) where id = $1',
+        [id, input.name?.trim() ?? null, input.minStock ?? null, input.active ?? null, input.yieldPercent ?? null, input.batchYield ?? null],
       );
-      if (!r.rowCount) throw new NotFoundException('bahan tidak ditemukan');
-      await this.audit(q, auth, 'ingredient.update', { id, fields: Object.keys(input) });
+      await this.audit(q, auth, 'ingredient.update', { id, fields: Object.keys(input), ...(input.yieldPercent !== undefined ? { yieldFrom: cur.yield_percent, yieldTo: input.yieldPercent } : {}), ...(input.batchYield !== undefined ? { batchFrom: cur.batch_yield, batchTo: input.batchYield } : {}) });
     });
   }
 
   // ---------- resep ----------
 
-  private async loadRecipes(q: Queryable): Promise<Recipes> {
+  /** Resep yang dipakai hitungan (stok, HPP, jurnal): bahan setengah jadi sudah diuraikan ke bahan baku dan susut diperhitungkan. */
+  async loadRecipes(q: Queryable): Promise<Recipes> {
+    const { ings, defs } = await this.bomContext(q);
+    return flattenRecipes(await this.loadRecipesRaw(q), ings, defs);
+  }
+
+  /** Resep apa adanya, seperti yang ditulis owner (bahan setengah jadi belum diuraikan). */
+  async loadRecipesRaw(q: Queryable): Promise<Recipes> {
     const rows = (await q.query<{ menu_id: string; option_id: string; ingredient_id: string; qty: number }>('select menu_id, option_id, ingredient_id, qty from recipe_line')).rows;
     const recipes: Recipes = { base: new Map(), options: new Map() };
     for (const r of rows) {
@@ -97,7 +138,7 @@ export class StockService {
   /** Semua resep: `{ [menuId]: { base: {bahan: qty}, options: { [optionId]: {bahan: qty} } } }`. */
   recipes(auth: ApiAuth) {
     return this.db.tenantTx(auth.tenantId, async (q) => {
-      const r = await this.loadRecipes(q);
+      const r = await this.loadRecipesRaw(q);
       const out: Record<string, { base: Record<string, number>; options: Record<string, Record<string, number>> }> = {};
       const slot = (menu: string) => (out[menu] ??= { base: {}, options: {} });
       for (const [menu, lines] of r.base) slot(menu).base = Object.fromEntries(lines);
@@ -189,6 +230,35 @@ export class StockService {
     });
   }
 
+  // ---------- BOM bahan setengah jadi ----------
+
+  /** BOM semua bahan setengah jadi: `{ [bahanId]: { batchYield, lines: { [bahanId]: qty per batch } } }`. */
+  boms(auth: ApiAuth) {
+    return this.db.tenantTx(auth.tenantId, async (q) => {
+      const { ings, defs } = await this.bomContext(q);
+      const out: Record<string, { batchYield: number | null; lines: Record<string, number> }> = {};
+      for (const i of ings.values()) if (i.kind === 'SEMI') out[i.id] = { batchYield: i.batchYield, lines: Object.fromEntries(defs.get(i.id) ?? []) };
+      return out;
+    });
+  }
+
+  /** Mengganti seluruh BOM satu bahan setengah jadi (per batch). Siklus dan kedalaman lebih dari 5 tingkat ditolak. */
+  async setBom(auth: ApiAuth, parentId: string, input: { lines?: { ingredientId?: string; qty?: number }[] }): Promise<void> {
+    await this.db.tenantTx(auth.tenantId, async (q) => {
+      const { ings, defs } = await this.bomContext(q);
+      const proposed = new Map(defs);
+      proposed.set(parentId, new Map((Array.isArray(input.lines) ? input.lines : []).filter((l) => typeof l?.ingredientId === 'string' && Number.isInteger(l.qty)).map((l) => [l.ingredientId!, l.qty!])));
+      const problem = checkBom(parentId, input.lines, ings, proposed);
+      if (problem) {
+        if (problem === 'bahan tidak ditemukan') throw new NotFoundException(problem);
+        throw new BadRequestException(problem);
+      }
+      await q.query('delete from bom_line where parent_id = $1', [parentId]);
+      for (const l of input.lines!) await q.query('insert into bom_line (tenant_id, parent_id, child_id, qty) values ($1, $2, $3, $4)', [auth.tenantId, parentId, l.ingredientId, l.qty]);
+      await this.audit(q, auth, 'bom.set', { parentId, before: Object.fromEntries(defs.get(parentId) ?? []), after: Object.fromEntries(proposed.get(parentId)!) });
+    });
+  }
+
   // ---------- stok ----------
 
   private async assertOutlet(q: Queryable, outletId: string) {
@@ -206,7 +276,7 @@ export class StockService {
   }
 
   /** Event penjualan sejak `fromMs` (dilonggarkan 2 hari: terminal bisa mengirim terlambat), diubah menjadi pemakaian per order. */
-  private async consumptionSince(q: Queryable, outletId: string, fromMs: number, now: number) {
+  async consumptionSince(q: Queryable, outletId: string, fromMs: number, now: number) {
     const rows = (
       await q.query<EventRow>(
         `select ${EVENT_COLUMNS} from event
@@ -222,7 +292,7 @@ export class StockService {
   async stock(auth: ApiAuth, outletId: string, now = this.clock()): Promise<StockRow[]> {
     return this.db.tenantTx(auth.tenantId, async (q) => {
       await this.assertOutlet(q, outletId);
-      const ingredients = (await this.listIngredientsTx(q)).filter((i) => i.active);
+      const ingredients = (await this.listIngredientsTx(q)).filter((i) => i.active && i.kind !== 'SEMI');
       const movements = await this.loadMovements(q, outletId);
       const from = earliestBaseline(movements);
       const consumption = from === null ? [] : await this.consumptionSince(q, outletId, from, now);
@@ -231,8 +301,8 @@ export class StockService {
   }
 
   private async listIngredientsTx(q: Queryable): Promise<IngredientInfo[]> {
-    return (await q.query<{ id: string; name: string; unit: IngredientInfo['unit']; min_stock: number; active: boolean }>('select id, name, unit, min_stock, active from ingredient order by name')).rows
-      .map((r) => ({ id: r.id, name: r.name, unit: r.unit, minStock: r.min_stock, active: r.active }));
+    return (await q.query<{ id: string; name: string; unit: IngredientInfo['unit']; min_stock: number; active: boolean; kind: 'RAW' | 'SEMI' }>('select id, name, unit, min_stock, active, kind from ingredient order by name')).rows
+      .map((r) => ({ id: r.id, name: r.name, unit: r.unit, minStock: r.min_stock, active: r.active, kind: r.kind }));
   }
 
   /**
@@ -252,9 +322,10 @@ export class StockService {
 
     return this.db.tenantTx(auth.tenantId, async (q) => {
       await this.assertOutlet(q, outletId);
-      const ing = (await q.query<{ active: boolean }>('select active from ingredient where id = $1', [input.ingredientId])).rows[0];
+      const ing = (await q.query<{ active: boolean; kind: string }>('select active, kind from ingredient where id = $1', [input.ingredientId])).rows[0];
       if (!ing) throw new NotFoundException('bahan tidak ditemukan');
       need(ing.active, 'bahan nonaktif');
+      need(ing.kind === 'RAW', 'bahan setengah jadi tidak punya stok sendiri; catat stok bahan bakunya');
 
       let expected: number | null = null;
       let variance: number | null = null;

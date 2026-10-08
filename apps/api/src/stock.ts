@@ -23,6 +23,12 @@ export interface IngredientInfo {
   active: boolean;
   /** Harga pokok rata-rata per satuan terkecil (rupiah); 0 = belum pernah dibeli lewat pengadaan. Hanya pada daftar bahan. */
   avgCost?: number;
+  /** RAW (dibeli, punya stok) atau SEMI (setengah jadi, terurai ke bahan RAW); bawaan RAW. Hanya pada daftar bahan. */
+  kind?: 'RAW' | 'SEMI';
+  /** Bagian bahan yang terpakai setelah susut (1–100). */
+  yieldPercent?: number;
+  /** Hasil satu batch (bahan SEMI). */
+  batchYield?: number | null;
 }
 
 export interface StockPosition {
@@ -60,7 +66,8 @@ export function stockAt(
   const wasted = sum(after, 'WASTE');
   const transferIn = sum(after, 'TRANSFER_IN');
   const transferOut = sum(after, 'TRANSFER_OUT');
-  const used = usageByIngredient(consumption, recipes, b.at, at).get(ingredientId) ?? 0;
+  // Resep yang diuraikan dari bahan setengah jadi dan susut bisa berpecahan; stok dicatat bulat.
+  const used = Math.round(usageByIngredient(consumption, recipes, b.at, at).get(ingredientId) ?? 0);
   return { baseline: { at: b.at, counted: b.qty }, purchased, wasted, transferIn, transferOut, used, expected: b.qty + purchased + transferIn - wasted - transferOut - used };
 }
 

@@ -36,7 +36,7 @@ export function ProcurementManager({ view, outletId, outlets, role, pos, supplie
   const [tr, setTr] = useState({ to: '', note: '' });
   const [trLines, setTrLines] = useState([{ ingredientId: '', qty: '' }]);
   const [got, setGot] = useState<Record<string, string>>({});
-  const activeIng = ingredients.filter((i) => i.active);
+  const activeIng = ingredients.filter((i) => i.active && i.kind !== 'SEMI');
   const activeSup = suppliers.filter((s) => s.active);
 
   async function run(fn: () => Promise<{ ok: true; data?: unknown } | { ok: false; message: string }>, ok?: (d: unknown) => string) {

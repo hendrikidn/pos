@@ -321,7 +321,25 @@ export interface ShadowReport {
   }[];
 }
 
-export interface Ingredient { id: string; name: string; unit: 'g' | 'ml' | 'pcs'; minStock: number; active: boolean }
+export interface Ingredient { id: string; name: string; unit: 'g' | 'ml' | 'pcs'; minStock: number; active: boolean; kind?: 'RAW' | 'SEMI'; yieldPercent?: number; batchYield?: number | null; avgCost?: number }
+
+/** GET /v1/boms: BOM per batch bahan setengah jadi. */
+export type Boms = Record<string, { batchYield: number | null; lines: Record<string, number> }>;
+
+export interface BomNode { id: string; name: string; unit: string; kind: 'RAW' | 'SEMI'; qty: number; cost: number; children?: BomNode[] }
+export interface BomCalc {
+  outletId: string | null;
+  lines: { menuId: string; name: string; qty: number; options: string[]; revenue: number; cost: number; marginPct: number | null; tree: BomNode[] }[];
+  requirements: { ingredientId: string; name: string; unit: string; qty: number; cost: number; unitCost: number; onHand?: number | null; shortage?: number | null }[];
+  totals: { revenue: number; cost: number; margin: number; marginPct: number | null };
+  unpriced: string[];
+  noRecipe: string[];
+}
+export interface BomPlan {
+  outletId: string; days: number; history: number; activeDays: number; orders: number;
+  rows: { ingredientId: string; name: string; unit: string; need: number; onHand: number | null; shortage: number; daysOfCover: number | null; cost: number }[];
+  totals: { cost: number; short: number };
+}
 
 export interface StockMovement {
   id: number; ingredientId: string; kind: 'PURCHASE' | 'WASTE' | 'COUNT'; qty: number; expected: number | null; variance: number | null;
@@ -404,7 +422,7 @@ export interface PoDetail {
   lines: { lineNo: number; ingredientId: string; name: string; unit: string; qty: number; unitCost: number; receivedQty: number }[];
   receipts: { id: number; receivedAt: number; receivedBy: string; invoiceRef: string | null; amount: number; priceFlag: boolean }[];
 }
-export interface IngredientCostRow { id: string; name: string; unit: 'g' | 'ml' | 'pcs'; active: boolean; avgCost?: number }
+export interface IngredientCostRow { id: string; name: string; unit: 'g' | 'ml' | 'pcs'; active: boolean; avgCost?: number; kind?: 'RAW' | 'SEMI' }
 
 export interface TransferRow {
   id: number; fromOutlet: string; toOutlet: string; status: 'SENT' | 'RECEIVED' | 'CANCELED'; note: string | null; sentBy: string; sentAt: number; receivedBy: string | null;

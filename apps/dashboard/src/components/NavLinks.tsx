@@ -29,6 +29,7 @@ export function NavLinks({ role }: { role: string }) {
       href: '/online', label: 'Online', icon: <IconBox />, on: path.startsWith('/online'),
       show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER',
     },
+    { href: '/bom', label: 'BOM', icon: <IconBox />, on: path.startsWith('/bom'), show: role === 'OWNER' || role === 'OPS' || role === 'MANAGER' },
     { href: '/reservations', label: 'Reservasi', icon: <IconBook />, on: path.startsWith('/reservations'), show: role === 'OWNER' || role === 'MANAGER' },
     { href: '/queue', label: 'Antrian', icon: <IconBox />, on: path.startsWith('/queue'), show: role === 'OWNER' || role === 'MANAGER' },
     { href: '/web-orders', label: 'Toko Web', icon: <IconBox />, on: path.startsWith('/web-orders'), show: role === 'OWNER' || role === 'MANAGER' },

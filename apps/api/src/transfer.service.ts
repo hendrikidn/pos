@@ -54,7 +54,7 @@ export class TransferService {
         need(!seen.has(l.ingredientId as string), `baris ${i + 1}: bahan ${String(l.ingredientId)} muncul dua kali`);
         seen.add(l.ingredientId as string);
         need(Number.isInteger(l.qty) && (l.qty as number) >= 1 && (l.qty as number) <= MAX_QTY, `baris ${i + 1}: jumlah harus bilangan bulat ≥ 1`);
-        const ing = (await q.query<{ active: boolean; avg_cost: string }>('select active, avg_cost from ingredient where id = $1', [l.ingredientId])).rows[0];
+        const ing = (await q.query<{ active: boolean; avg_cost: string }>("select active, avg_cost from ingredient where id = $1 and kind = 'RAW'", [l.ingredientId])).rows[0];
         if (!ing) throw new NotFoundException(`bahan ${String(l.ingredientId)} tidak ditemukan`);
         need(ing.active, `bahan ${String(l.ingredientId)} nonaktif`);
         const have = await this.stock.onHand(q, input.fromOutletId as string, l.ingredientId as string, now);

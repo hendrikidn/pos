@@ -836,3 +836,91 @@ describe('status dapur dari layar dapur', () => {
   });
 });
 
+describe('bill tunai yang ditahan lama', () => {
+  let c: Ctx;
+  const MIN = 60_000;
+  beforeEach(async () => {
+    c = await setup();
+    await login(c, 'budi');
+    must(await c.engine.openShift(100_000));
+  });
+  const billed = async () => {
+    const id = must(await c.engine.createOrder('DINE_IN', { tableNo: '3' })).id;
+    must(await c.engine.addItem(id, 'kopi-susu', 1));
+    must(await c.engine.printBill(id));
+    return id;
+  };
+  const types = async () => (await c.events()).map((e) => e.type);
+
+  it('di bawah batas 60 menit: bayar tunai tanpa alasan, tidak ada event alasan', async () => {
+    const id = await billed();
+    c.tick(59 * MIN);
+    expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBeNull();
+    must(await c.engine.pay(id, { method: 'CASH' }));
+    expect(await types()).not.toContain('bill.hold_reason');
+  });
+
+  it('60 menit atau lebih: tunai ditolak tanpa alasan sah (tidak ada pembayaran tercatat); dengan alasan, event alasan mendahului pembayaran', async () => {
+    const id = await billed();
+    c.tick(60 * MIN);
+    expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBe(60);
+    expect(await c.engine.pay(id, { method: 'CASH' })).toMatchObject({ ok: false, code: 'HOLD_REASON_REQUIRED' });
+    expect(await c.engine.pay(id, { method: 'CASH', holdReason: 'MALAS' })).toMatchObject({ ok: false, code: 'HOLD_REASON_REQUIRED' });
+    expect(await types()).not.toContain('payment.received');
+    expect(c.engine.getOrder(id)!.state.status).toBe('BILLED');
+
+    must(await c.engine.pay(id, { method: 'CASH', holdReason: 'STILL_DINING' }));
+    const tail = (await types()).slice(-2);
+    expect(tail).toEqual(['bill.hold_reason', 'payment.received']);
+    const e = (await c.events()).find((x) => x.type === 'bill.hold_reason')!;
+    expect(e.type === 'bill.hold_reason' && e.payload).toEqual({ orderId: id, reason: 'STILL_DINING', heldMinutes: 60 });
+    expect(c.engine.getOrder(id)!.state.status).toBe('PAID');
+  });
+
+  it('pembayaran non-tunai tidak memerlukan alasan walau bill ditahan lama (rekonsiliasi bank yang mengawasinya)', async () => {
+    const id = await billed();
+    c.tick(180 * MIN);
+    must(await c.engine.pay(id, { method: 'QRIS', tid: '12345678' }));
+    expect(await types()).not.toContain('bill.hold_reason');
+  });
+
+  it('pembayaran sebagian: alasan dicatat satu kali; pembayaran tunai berikutnya tidak menanyakannya lagi', async () => {
+    const id = await billed();
+    c.tick(75 * MIN);
+    must(await c.engine.pay(id, { method: 'CASH', amount: 10_000, holdReason: 'WAITING_GROUP' }));
+    expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBeNull();
+    must(await c.engine.pay(id, { method: 'CASH' }));
+    expect((await types()).filter((t) => t === 'bill.hold_reason')).toHaveLength(1);
+  });
+
+  it('batas dihitung dari tagihan pertama: cetak ulang tidak mengulang waktu', async () => {
+    const id = await billed();
+    c.tick(40 * MIN);
+    must(await c.engine.printBill(id));
+    c.tick(25 * MIN);
+    expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBe(65);
+  });
+
+  it('kebijakan: batas bisa diubah (30 menit) atau dimatikan (0)', async () => {
+    const id = await billed();
+    const base = c.engine.config;
+    c.engine.setConfig({ ...base, policy: { ...base.policy!, holdBillMinutes: 30 } });
+    c.tick(31 * MIN);
+    expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBe(31);
+    c.engine.setConfig({ ...base, policy: { ...base.policy!, holdBillMinutes: 0 } });
+    expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBeNull();
+    must(await c.engine.pay(id, { method: 'CASH' }));
+  });
+
+  it('belum ditagih atau sudah lunas: tidak ada kewajiban alasan', async () => {
+    const id = must(await c.engine.createOrder('TAKE_AWAY')).id;
+    must(await c.engine.addItem(id, 'kopi-susu', 1));
+    c.tick(300 * MIN);
+    expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBeNull();
+    must(await c.engine.printBill(id));
+    must(await c.engine.pay(id, { method: 'QRIS', tid: '12345678' }));
+    c.tick(300 * MIN);
+    expect(c.engine.holdRequiredMinutes(c.engine.getOrder(id)!)).toBeNull();
+  });
+});
+

@@ -87,6 +87,10 @@ export interface OrderRecord {
   refunds: { amount: number; method: PaymentMethod }[];
   receipt: ReceiptStatus;
   kitchen: KitchenStatus | null;
+  /** Kapan bill pertama kali dicetak (jam perangkat). Dasar kontrol bill yang ditahan lama. */
+  billedAt?: number;
+  /** Alasan menahan bill sudah dicatat; pembayaran berikutnya untuk order ini tidak menanyakannya lagi. */
+  holdLogged?: boolean;
   /** Order ini dibuat dari pemisahan bill order lain. */
   splitFrom?: string;
   /** Seluruh item order ini sudah digabung ke order lain (status MERGED). */

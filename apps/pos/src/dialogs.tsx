@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { lineKey, type MenuItem, type OrderRecord, type StaffPublic } from '@pos/pos-core';
-import { resolveSelection } from '@pos/order';
+import { HOLD_REASONS, resolveSelection } from '@pos/order';
 import { METHOD_LABEL, rp, type Ctx } from './ui';
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
@@ -92,6 +92,9 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
   const amount = part === '' ? due : Number(part);
   const cash = Number(tendered || 0);
   const quick = [...new Set([amount, Math.ceil(amount / 10_000) * 10_000, Math.ceil(amount / 50_000) * 50_000, 100_000])].filter((n) => n >= amount);
+  const heldMin = engine.holdRequiredMinutes(order);
+  const [holdReason, setHoldReason] = useState('');
+  const needReason = method === 'CASH' && heldMin !== null;
   const partial = amount > 0 && amount < due;
   const amountOk = Number.isInteger(amount) && amount > 0 && amount <= due;
 
@@ -100,6 +103,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
     const r = await engine.pay(order.id, {
       method,
       amount,
+      ...(needReason ? { holdReason } : {}),
       ...(method === 'CASH' ? { tendered: cash || amount } : { tid, approvalCode: code.trim() || undefined }),
     });
     setBusy(false);
@@ -132,6 +136,18 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
       </div>
       {method === 'CASH' ? (
         <>
+          {needReason && (
+            <fieldset className="opt-group">
+              <legend>Bill sudah ditahan {heldMin} menit<small className={holdReason ? '' : 'need'}>Wajib pilih alasan</small></legend>
+              <div className="opts">
+                {HOLD_REASONS.map((r) => (
+                  <button key={r.code} type="button" role="radio" aria-checked={holdReason === r.code} className={`opt ${holdReason === r.code ? 'on' : ''}`} onClick={() => setHoldReason(r.code)}>
+                    <span>{r.label}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <label className="field">Uang diterima
             <input inputMode="numeric" value={tendered} onChange={(e) => setTendered(e.target.value.replace(/\D/g, ''))} placeholder={String(due)} />
           </label>
@@ -161,7 +177,7 @@ export function PayDialog({ ctx, order, onClose }: { ctx: Ctx; order: OrderRecor
       )}
       <div className="actions">
         <button className="secondary" onClick={onClose}>Batal</button>
-        <button disabled={busy || !amountOk || (method === 'CASH' && cash > 0 && cash < amount)} onClick={submit}>Konfirmasi</button>
+        <button disabled={busy || !amountOk || (needReason && !holdReason) || (method === 'CASH' && cash > 0 && cash < amount)} onClick={submit}>Konfirmasi</button>
       </div>
     </Modal>
   );

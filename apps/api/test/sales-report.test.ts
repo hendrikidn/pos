@@ -290,3 +290,25 @@ describe('laporan penjualan: pisah bill dan gabung order', () => {
   });
 });
 
+describe('laporan penjualan: bill tunai ditahan lama', () => {
+  const hold = (s: Sim, id: string, at: string, reason: string, heldMinutes: number) =>
+    s.pos({ type: 'bill.hold_reason', payload: { orderId: id, reason, heldMinutes } }, at, 'budi');
+
+  it('dikelompokkan per alasan dengan jumlah dan lama terlama; order void dan karyawan tidak dihitung', () => {
+    const s = new Sim('o1', DAY);
+    created(s, 'a', '10:00:00'); hold(s, 'a', '11:10:00', 'STILL_DINING', 70); pay(s, 'a', '11:10:01', 10_000);
+    created(s, 'b', '10:00:00'); hold(s, 'b', '12:30:00', 'STILL_DINING', 150); pay(s, 'b', '12:30:01', 10_000);
+    created(s, 'c', '10:00:00'); hold(s, 'c', '13:00:00', 'OTHER', 61); pay(s, 'c', '13:00:01', 10_000);
+    created(s, 'd', '10:00:00'); hold(s, 'd', '13:00:00', 'OTHER', 90); pay(s, 'd', '13:00:01', 10_000); voidOrder(s, 'd', '13:10:00', 10_000);
+    created(s, 'e', '10:00:00', 'budi', 'EMPLOYEE', 'andi'); hold(s, 'e', '13:00:00', 'OTHER', 99);
+    expect(report(s).holds).toEqual([
+      { reason: 'STILL_DINING', count: 2, longestMinutes: 150 },
+      { reason: 'OTHER', count: 1, longestMinutes: 61 },
+    ]);
+  });
+
+  it('tanpa bill ditahan: daftar kosong', () => {
+    expect(report(busyDay()).holds).toEqual([]);
+  });
+});
+

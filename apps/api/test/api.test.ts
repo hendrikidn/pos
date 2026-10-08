@@ -167,6 +167,23 @@ describe('ingest event', () => {
     expect((await h.postEvents(dev, big)).status).toBe(400);
   });
 
+  it('alasan menahan bill: yang benar diterima, yang cacat ditolak', async () => {
+    const t = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');
+    t.pos({ type: 'bill.hold_reason', payload: { orderId: 'h1', reason: 'STILL_DINING', heldMinutes: 75 } }, '10:00:00', 'budi');
+    expect((await h.postEvents(dev, t.events)).status).toBe(201);
+    const bad: object[] = [
+      { reason: 'X', heldMinutes: 5 }, { orderId: 'h', heldMinutes: 5 }, { orderId: 'h', reason: '', heldMinutes: 5 },
+      { orderId: 'h', reason: 'x'.repeat(41), heldMinutes: 5 }, { orderId: 'h', reason: 'X', heldMinutes: -1 }, { orderId: 'h', reason: 'X', heldMinutes: 1.5 },
+    ];
+    for (const [i, payload] of bad.entries()) {
+      const u = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');
+      u.pos({ type: 'bill.hold_reason', payload } as never, '11:00:00', 'budi');
+      const r = await h.postEvents(dev, u.events);
+      expect(r.status, `kasus ${i}`).toBe(400);
+      expect(r.body.message).toMatch(/bill\.hold_reason/);
+    }
+  });
+
   it('pindah meja dan pemindahan item: yang benar diterima, yang cacat ditolak', async () => {
     const item = { itemId: 'kopi-susu', name: 'Kopi Susu', qty: 1, unitPrice: 22_000 };
     const ok = new Sim('o1', '2026-10-01', 'term-1', 'sensor-1');

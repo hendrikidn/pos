@@ -7,6 +7,10 @@ import { RANGE_OPTIONS, rangeText, rp, shortDate, weekdayDate, wibDateTime, type
 
 export const dynamic = 'force-dynamic';
 
+const HOLD_LABEL: Record<string, string> = {
+  STILL_DINING: 'Customer masih makan/minum', WAITING_GROUP: 'Menunggu rombongan lain', CUSTOMER_AWAY: 'Customer meninggalkan meja sementara',
+  SYSTEM_ISSUE: 'Kendala sistem atau EDC', OTHER: 'Lainnya',
+};
 const METHOD_LABEL: Record<string, string> = { CASH: 'Tunai', QRIS: 'QRIS', EDC_DEBIT: 'Kartu debit', EDC_CREDIT: 'Kartu kredit' };
 
 /** Jam yang ditampilkan: dari satu jam sebelum aktivitas pertama sampai satu jam sesudah yang terakhir (minimal 8 jam). */
@@ -180,6 +184,25 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
                   <td data-label="Grup">{o.group}</td>
                   <td className="num" data-label="Dipilih">{o.qty.toLocaleString('id-ID')}×</td>
                   <td className="num" data-label="Tambahan harga">{o.amount > 0 ? rp(o.amount) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {r.holds.length > 0 && (
+        <section className="panel" aria-labelledby="tahan">
+          <h2 id="tahan">Bill tunai ditahan lama</h2>
+          <p className="muted small" style={{ marginTop: 0 }}>Bill tunai yang dibayar setelah terbuka melewati batas kebijakan outlet. Kasir wajib memilih alasan; alasan "Lainnya" perlu ditanyakan.</p>
+          <table className="table">
+            <thead><tr><th>Alasan</th><th className="num">Jumlah</th><th className="num">Terlama</th></tr></thead>
+            <tbody>
+              {r.holds.map((hld) => (
+                <tr key={hld.reason}>
+                  <td data-label="Alasan"><b>{HOLD_LABEL[hld.reason] ?? hld.reason}</b></td>
+                  <td className="num" data-label="Jumlah">{hld.count}</td>
+                  <td className="num" data-label="Terlama">{hld.longestMinutes} mnt</td>
                 </tr>
               ))}
             </tbody>

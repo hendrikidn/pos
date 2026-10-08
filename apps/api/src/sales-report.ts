@@ -39,6 +39,13 @@ export interface ProductRow {
   amount: number;
 }
 
+export interface HoldRow {
+  reason: string;
+  count: number;
+  /** Lama tahan terpanjang untuk alasan ini (menit). */
+  longestMinutes: number;
+}
+
 export interface OptionRow {
   group: string;
   name: string;
@@ -69,6 +76,8 @@ export interface SalesReport {
   byCashier: CashierRow[];
   /** Produk terjual dari order yang dihitung sebagai penjualan, urut nilai terbesar. Nilai kotor: sebelum diskon dan pajak. */
   byProduct: ProductRow[];
+  /** Bill tunai yang dibayar setelah ditahan melewati batas, dikelompokkan menurut alasan kasir (kontrol bill recycling). */
+  holds: HoldRow[];
   /** Varian dan tambahan yang dipilih pada order yang dihitung, urut jumlah terbanyak. */
   byOption: OptionRow[];
   /** Order terhitung yang tagihannya tidak membawa rincian item (terminal versi lama): tidak ada di `byProduct`. */
@@ -167,6 +176,7 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
   };
   const products = new Map<string, ProductRow>();
   const optionRows = new Map<string, OptionRow>();
+  const holdRows = new Map<string, HoldRow>();
   let ordersWithoutItems = 0;
   const ordered = [...events].sort((a, b) => t(a) - t(b) || a.seq - b.seq);
 
@@ -254,6 +264,14 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
         }
         break;
       }
+      case 'bill.hold_reason': {
+        if (!counts(e.payload.orderId)) break;
+        const row = holdRows.get(e.payload.reason) ?? { reason: e.payload.reason, count: 0, longestMinutes: 0 };
+        row.count += 1;
+        row.longestMinutes = Math.max(row.longestMinutes, e.payload.heldMinutes);
+        holdRows.set(e.payload.reason, row);
+        break;
+      }
       case 'order.created':
         if (e.payload.orderType === 'EMPLOYEE' && !voided.has(e.payload.orderId)) totals.employeeMeals += 1;
         break;
@@ -285,6 +303,7 @@ export function buildSalesReport(input: SalesReportInput): SalesReport {
     byMethod: METHODS.map((m) => ({ method: m, ...methods.get(m)! })),
     byCashier: [...cashiers.values()].sort((a, b) => b.sales - a.sales || a.userId.localeCompare(b.userId)),
     byProduct: [...products.values()].sort((a, b) => b.amount - a.amount || b.qty - a.qty || a.name.localeCompare(b.name)),
+    holds: [...holdRows.values()].sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason)),
     byOption: [...optionRows.values()].sort((a, b) => b.qty - a.qty || a.group.localeCompare(b.group) || a.name.localeCompare(b.name)),
     ordersWithoutItems,
     cashCounts: { toleranceAmount: DEFAULT_CONFIG.r14ToleranceAmount, shifts },

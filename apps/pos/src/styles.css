@@ -274,3 +274,5 @@ main { flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch
   .kds-col { display: none; } .kds-col.show { display: block; } .kds-col h2 { display: none; }
   .kds-counts { display: none; }
 }
+
+.pill.s-HOLD { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-line); }

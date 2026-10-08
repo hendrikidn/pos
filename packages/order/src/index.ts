@@ -85,7 +85,20 @@ export interface Policy {
   manualDiscountMaxAmount: number;
   /** Makan karyawan gratis per orang per hari. Yang berikutnya memerlukan persetujuan supervisor. */
   employeeMealQuota: number;
+  /** Bill tunai yang dibiarkan terbuka lebih lama dari ini (menit) memerlukan alasan sebelum dibayar. 0 = tidak dipakai. */
+  holdBillMinutes: number;
 }
+
+/** Alasan baku menahan bill tunai (kontrol bill recycling, CF4). */
+export const HOLD_REASONS = [
+  { code: 'STILL_DINING', label: 'Customer masih makan/minum' },
+  { code: 'WAITING_GROUP', label: 'Menunggu rombongan lain' },
+  { code: 'CUSTOMER_AWAY', label: 'Customer meninggalkan meja sementara' },
+  { code: 'SYSTEM_ISSUE', label: 'Kendala sistem atau EDC' },
+  { code: 'OTHER', label: 'Lainnya (laporkan ke supervisor)' },
+] as const;
+export type HoldReason = (typeof HOLD_REASONS)[number]['code'];
+export const isHoldReason = (v: unknown): v is HoldReason => HOLD_REASONS.some((r) => r.code === v);
 
 export const DEFAULT_POLICY: Policy = {
   reasonCodes: ['CUSTOMER_CANCEL', 'WRONG_ORDER', 'OUT_OF_STOCK', 'DUPLICATE', 'KITCHEN_ERROR'],
@@ -93,6 +106,7 @@ export const DEFAULT_POLICY: Policy = {
   manualDiscountMaxPercent: 15,
   manualDiscountMaxAmount: 50_000,
   employeeMealQuota: 1,
+  holdBillMinutes: 60,
 };
 
 export interface Ctx {

@@ -88,6 +88,7 @@ export function OrderPanel({ ctx, order }: { ctx: Ctx; order: OrderRecord }) {
           <div>
             <h2>#{order.number} · {orderLabel(order, engine.staff())}</h2>
             <span className={`pill s-${order.state.status}`}>{STATUS_LABEL[order.state.status]}</span>
+            {engine.holdRequiredMinutes(order) !== null && !final && <span className="pill s-HOLD" title="Pembayaran tunai memerlukan alasan">Ditahan {engine.holdRequiredMinutes(order)} mnt</span>}
             {order.kitchen && <span className="pill">Dapur: {order.kitchen === 'COOKING' ? 'dimasak' : order.kitchen === 'READY' ? 'siap' : 'disajikan'}</span>}
           </div>
           <button className="ghost" onClick={() => ctx.selectOrder(null)}>Tutup</button>

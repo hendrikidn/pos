@@ -193,6 +193,20 @@ describe('konfigurasi terminal: staf, menu, pengaturan', () => {
       expect((await h.http('GET', path, owner)).body).toMatchObject({ merchant_name: 'Kopi Senopati', tax_percent: 10 });
     });
 
+    it('batas tahan bill tunai: 0 (nonaktif) sampai 1440 menit diterima, di luar itu atau pecahan ditolak, dan sampai ke terminal', async () => {
+      const path = '/v1/outlets/o1/settings';
+      for (const bad of [-1, 1441, 30.5, '60']) {
+        const r = await put(path, owner, { policy: { secondApprovalAbove: 75_000, holdBillMinutes: bad } });
+        expect(r.status, String(bad)).toBe(400);
+        expect(r.body.message).toMatch(/holdBillMinutes/);
+      }
+      expect((await put(path, owner, { policy: { secondApprovalAbove: 75_000, holdBillMinutes: 0 } })).status).toBe(200);
+      expect((await put(path, owner, { policy: { secondApprovalAbove: 75_000, holdBillMinutes: 45 } })).status).toBe(200);
+      expect((await h.http('GET', '/v1/device/config', term)).body.outlet.policy).toMatchObject({ holdBillMinutes: 45 });
+      // kembalikan agar pemeriksaan berikutnya tidak berubah
+      expect((await put(path, owner, { policy: { secondApprovalAbove: 75_000 } })).status).toBe(200);
+    });
+
     it('outlet tenant lain tidak dapat diubah', async () => {
       expect((await put('/v1/outlets/ox/settings', owner, { taxPercent: 5 })).status).toBe(404);
     });

@@ -60,6 +60,7 @@ export interface SettingsInput {
     manualDiscountMaxPercent?: number;
     manualDiscountMaxAmount?: number;
     employeeMealQuota?: number;
+    holdBillMinutes?: number;
   } | null;
   cctvRetentionDays?: number;
   cctvClockOffsetSec?: number;
@@ -248,8 +249,9 @@ export class ConfigService {
     }
     if (s.policy) {
       for (const [k, v] of Object.entries(s.policy)) {
-        need(['secondApprovalAbove', 'manualDiscountMaxPercent', 'manualDiscountMaxAmount', 'employeeMealQuota'].includes(k), `kebijakan tidak dikenal: ${k}`);
-        if (k === 'employeeMealQuota') need(Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10, 'employeeMealQuota 0–10 (0 = setiap makan karyawan perlu persetujuan)');
+        need(['secondApprovalAbove', 'manualDiscountMaxPercent', 'manualDiscountMaxAmount', 'employeeMealQuota', 'holdBillMinutes'].includes(k), `kebijakan tidak dikenal: ${k}`);
+        if (k === 'holdBillMinutes') need(Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 1440, 'holdBillMinutes 0–1440 (0 = bill tunai tidak perlu alasan)');
+        else if (k === 'employeeMealQuota') need(Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 10, 'employeeMealQuota 0–10 (0 = setiap makan karyawan perlu persetujuan)');
         else need(Number.isInteger(v) && (v as number) > 0, `${k} harus bilangan bulat positif`);
       }
     }

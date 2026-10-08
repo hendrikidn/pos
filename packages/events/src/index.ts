@@ -38,6 +38,11 @@ export type EventBody =
       payload: { orderId: string; items?: LineItem[] };
     }
   | { type: 'kitchen.status_changed'; payload: { orderId: string; status: KitchenStatus } }
+  | {
+      type: 'bill.hold_reason';
+      /** Bill tunai dibayar setelah ditahan melebihi batas; `reason` dari daftar baku, `heldMinutes` lama sejak bill dicetak. */
+      payload: { orderId: string; reason: string; heldMinutes: number };
+    }
   | { type: 'order.table_changed'; payload: { orderId: string; from?: string; to: string } }
   | {
       type: 'order.items_moved';
@@ -114,7 +119,7 @@ export type EventBody =
 export type EventType = EventBody['type'];
 
 export const EVENT_TYPES = [
-  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
+  'order.created', 'order.sent_to_kitchen', 'order.table_changed', 'bill.hold_reason', 'order.items_moved', 'kitchen.status_changed', 'bill.printed', 'discount.applied',
   'payment.received', 'payment.method_changed', 'receipt.printed', 'receipt.declined', 'void.approved',
   'refund.created', 'drawer.opened', 'printer.status', 'printer.paper_claim', 'device.heartbeat',
   'presence.session', 'shift.opened', 'cash.counted', 'shift.closed', 'device.posture',
@@ -284,6 +289,7 @@ export function orderIdOf(e: PosEvent): string | undefined {
     case 'order.created':
     case 'order.sent_to_kitchen':
     case 'order.table_changed':
+    case 'bill.hold_reason':
     case 'kitchen.status_changed':
     case 'bill.printed':
     case 'discount.applied':

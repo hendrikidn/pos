@@ -169,7 +169,7 @@ export interface OutletSettings {
   merchant_name: string | null;
   tax_percent: number;
   edcs: { tid: string; bank: string; label: string }[];
-  policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number } | null;
+  policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number; holdBillMinutes?: number } | null;
   cctv_retention_days: number;
   cctv_clock_offset_sec: number;
   shadow_days: number;
@@ -247,6 +247,7 @@ export interface SalesReport {
   byCashier: CashierRow[];
   byProduct: { itemId: string; name: string; qty: number; amount: number }[];
   byOption: { group: string; name: string; qty: number; amount: number }[];
+  holds: { reason: string; count: number; longestMinutes: number }[];
   ordersWithoutItems: number;
   cashCounts: {
     toleranceAmount: number;

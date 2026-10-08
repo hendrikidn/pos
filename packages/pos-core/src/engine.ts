@@ -1,5 +1,5 @@
 import type { KitchenStatus, LineItem, OrderType, PaymentMethod, PosEvent, PrinterState } from '@pos/events';
-import { decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, MAX_NOTE_LENGTH, reduceOrder, resolveSelection, type Ctx } from '@pos/order';
+import { DEFAULT_POLICY, decideDiscount, decideEmployeeMeal, decideRefund, decideVoid, isHoldReason, MAX_NOTE_LENGTH, reduceOrder, resolveSelection, type Ctx } from '@pos/order';
 import { Directory } from './directory';
 import type { Printer } from './printer';
 import type { Recorder } from './recorder';
@@ -528,6 +528,7 @@ export class PosEngine {
     if (o.items.length === 0) return fail('EMPTY_ORDER', 'Order masih kosong.');
     const printed = await this.d.printer.print(renderBill(o, this.cfg));
     if (!printed && !opts.onScreen) return fail('PRINT_FAILED', 'Bill gagal dicetak. Tampilkan di layar customer atau periksa printer.');
+    o.billedAt ??= this.d.now();
     const e = await this.emit({
       type: 'bill.printed',
       payload: {
@@ -570,9 +571,24 @@ export class PosEngine {
     return ok(o);
   }
 
+  /**
+   * Berapa menit bill tunai ini sudah ditahan bila melewati batas kebijakan dan alasannya belum dicatat; selain itu null.
+   * Dipakai tampilan untuk meminta alasan sebelum kasir membayar.
+   */
+  holdRequiredMinutes(o: OrderRecord): number | null {
+    const limit = (this.cfg.policy ?? DEFAULT_POLICY).holdBillMinutes;
+    if (!limit || limit <= 0 || o.billedAt === undefined || o.holdLogged || o.state.status === 'PAID' || o.state.status === 'VOIDED') return null;
+    const minutes = Math.floor((this.d.now() - o.billedAt) / 60_000);
+    return minutes >= limit ? minutes : null;
+  }
+
+  /**
+   * Menerima pembayaran. Pembayaran TUNAI untuk bill yang sudah ditahan melewati batas (`holdBillMinutes`) memerlukan
+   * `holdReason` dari daftar baku; alasan dicatat sebagai event `bill.hold_reason` sebelum pembayarannya (kontrol bill recycling).
+   */
   async pay(
     orderId: string,
-    p: { method: PaymentMethod; amount?: number; tendered?: number; tid?: string; approvalCode?: string },
+    p: { method: PaymentMethod; amount?: number; tendered?: number; tid?: string; approvalCode?: string; holdReason?: string },
   ): Promise<Result<{ order: OrderRecord; change: number }>> {
     const w = this.who();
     if (!w.ok) return w;
@@ -602,6 +618,14 @@ export class PosEngine {
       if (!this.cfg.edcs.some((x) => x.tid === tid)) return fail('EDC_UNKNOWN', 'Mesin EDC tidak terdaftar di outlet ini.');
     }
 
+    const held = p.method === 'CASH' ? this.holdRequiredMinutes(o) : null;
+    if (held !== null) {
+      if (!isHoldReason(p.holdReason)) {
+        return fail('HOLD_REASON_REQUIRED', `Bill ini sudah ${held} menit terbuka. Pilih alasan sebelum menerima pembayaran tunai.`);
+      }
+      await this.emit({ type: 'bill.hold_reason', payload: { orderId, reason: p.holdReason, heldMinutes: held } });
+      o.holdLogged = true;
+    }
     const e = await this.emit({
       type: 'payment.received',
       payload: {

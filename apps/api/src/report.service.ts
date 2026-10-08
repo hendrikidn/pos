@@ -60,7 +60,7 @@ export class ReportService {
         await q.query<EventRow>(
           `select ${EVENT_COLUMNS} from event
            where outlet_id = $1 and device_time_ms >= $2 and device_time_ms < $3
-             and type in ('payment.received', 'refund.created', 'discount.applied', 'cash.counted', 'order.created', 'bill.printed')
+             and type in ('payment.received', 'refund.created', 'discount.applied', 'cash.counted', 'order.created', 'bill.printed', 'bill.hold_reason')
            order by device_id, seq`,
           [outletId, fromMs - 2 * DAY_MS, toMs + DAY_MS],
         )

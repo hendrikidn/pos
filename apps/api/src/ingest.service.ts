@@ -78,6 +78,9 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
   'order.table_changed': (p) =>
     str(p, 'orderId') && str(p, 'to') && (p['to'] as string).length <= 10 && (p['from'] === undefined || (str(p, 'from') && (p['from'] as string).length <= 10))
       ? null : 'orderId/to/from tidak valid',
+  'bill.hold_reason': (p) =>
+    str(p, 'orderId') && str(p, 'reason') && (p['reason'] as string).length <= 40 && Number.isInteger(p['heldMinutes']) && (p['heldMinutes'] as number) >= 0
+      ? null : 'orderId/reason/heldMinutes tidak valid',
   'order.items_moved': (p) =>
     str(p, 'fromOrderId') && str(p, 'toOrderId') && p['fromOrderId'] !== p['toOrderId'] && oneOf(p, 'kind', ['SPLIT', 'MERGE']) && bool(p, 'sent')
     && (p['kitchen'] === undefined || oneOf(p, 'kitchen', ['COOKING', 'READY', 'SERVED'])) && p['items'] !== undefined

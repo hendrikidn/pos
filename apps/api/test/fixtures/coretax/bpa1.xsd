@@ -1,0 +1,122 @@
+<xsd:schema id="A1" elementFormDefault="qualified" attributeFormDefault="unqualified" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns="">
+			<xsd:simpleType name="TinType">
+				<xsd:restriction base="xsd:string">
+					<xsd:pattern value="[0-9]{15,16}"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="TaxExemptCountType">
+				<xsd:restriction base="xsd:string">
+					<xsd:pattern value="[0-3]{1}"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="NonEmptyStringType">
+				<xsd:restriction base="xsd:string">
+					<xsd:minLength value="1"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="TaxBaseRateType">
+				<xsd:restriction base="xsd:decimal">
+					<xsd:minExclusive value="0"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="TaxType">
+				<xsd:restriction base="xsd:decimal">
+					<xsd:minInclusive value="0"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="CounterpartOptType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="Resident"/>
+					<xsd:enumeration value="Foreign"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="CountryType">
+				<xsd:restriction base="xsd:string">
+					<xsd:pattern value="[a-zA-Z]{3}"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="TaxExemptOptType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="TK/0"/>
+					<xsd:enumeration value="TK/1"/>
+					<xsd:enumeration value="TK/2"/>
+					<xsd:enumeration value="TK/3"/>
+					<xsd:enumeration value="K/0"/>
+					<xsd:enumeration value="K/1"/>
+					<xsd:enumeration value="K/2"/>
+					<xsd:enumeration value="K/3"/>
+					<xsd:enumeration value="HB/0"/>
+					<xsd:enumeration value="HB/1"/>
+					<xsd:enumeration value="HB/2"/>
+					<xsd:enumeration value="HB/3"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="StatusOfWithholdingType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="FullYear"/>
+					<xsd:enumeration value="PartialYear"/>
+					<xsd:enumeration value="Annualized"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="TaxCertificateType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="N/A"/>
+					<xsd:enumeration value="DTP"/>
+					<xsd:enumeration value="ETC"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="YesNoOptType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="Yes"/>
+					<xsd:enumeration value="No"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="ZakatReligiousDonationsType">
+				<xsd:restriction base="xsd:decimal">
+					<xsd:minInclusive value="0"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:element name="A1Bulk" type="A1BulkType"></xsd:element>
+			<xsd:complexType name="A1BulkType">
+				<xsd:sequence>
+					<xsd:element name="TIN" type="TinType" maxOccurs="1" minOccurs="1"></xsd:element>
+					<xsd:element name="ListOfA1" minOccurs="1" maxOccurs="1" type="ListOfA1Type"/>
+				</xsd:sequence>
+			</xsd:complexType>
+			<xsd:complexType name="ListOfA1Type">
+				<xsd:sequence>
+					<xsd:element name="A1" type="A1Type" maxOccurs="unbounded" minOccurs="1"/>
+				</xsd:sequence>
+			</xsd:complexType>
+			<xsd:complexType name="A1Type">
+				<xsd:sequence>
+					<xsd:element name="WorkForSecondEmployer" type="YesNoOptType" nillable="false"/>
+					<xsd:element name="TaxPeriodMonthStart" type="xsd:integer" nillable="false"/>
+					<xsd:element name="TaxPeriodMonthEnd" type="xsd:integer" nillable="false"/>
+					<xsd:element name="TaxPeriodYear" type="xsd:integer" nillable="false"/>
+					<xsd:element name="CounterpartOpt" type="CounterpartOptType"/>
+					<xsd:element name="CounterpartPassport" type="xsd:string" nillable="true"/>
+					<xsd:element name="CounterpartTin" type="xsd:string" nillable="false"/>
+					<xsd:element name="TaxExemptOpt" type="TaxExemptOptType"/>
+					<xsd:element name="StatusOfWithholding" type="StatusOfWithholdingType"/>
+					<xsd:element name="CounterpartPosition" type="xsd:string" nillable="false"/>
+					<xsd:element name="TaxObjectCode" type="NonEmptyStringType"/>
+					<xsd:element name="NumberOfMonths" type="xsd:integer" nillable="false"/>
+					<xsd:element name="SalaryPensionJhtTht" type="TaxType"/>
+					<xsd:element name="GrossUpOpt" type="YesNoOptType" nillable="false"/>
+					<xsd:element name="IncomeTaxBenefit" type="TaxType"/>
+					<xsd:element name="OtherBenefit" type="TaxType"/>
+					<xsd:element name="Honorarium" type="TaxType"/>
+					<xsd:element name="InsurancePaidByEmployer" type="TaxType"/>
+					<xsd:element name="Natura" type="TaxType"/>
+					<xsd:element name="TantiemBonusThr" type="TaxType"/>
+					<xsd:element name="PensionContributionJhtThtFee" type="TaxType"/>
+					<xsd:element name="Zakat" type="TaxType"/>
+					<xsd:element name="PrevWhTaxSlip" type="xsd:string" nillable="true"/>
+					<xsd:element name="TaxCertificate" type="TaxCertificateType"/>
+					<xsd:element name="Article21IncomeTax" type="TaxType"/>
+					<xsd:element name="IDPlaceOfBusinessActivity" type="xsd:string" nillable="false"/>
+					<xsd:element name="WithholdingDate" type="xsd:date"/>
+				</xsd:sequence>
+			</xsd:complexType>
+		</xsd:schema>

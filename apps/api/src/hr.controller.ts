@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
 import { IdPipe } from './id-pipe';
 import { requireApi, type AuthedRequest } from './auth';
+import { TaxFilingService, type EmployerInput } from './tax-filing.service';
 import { HrService, type LineInput, type ManualInput, type PayInput, type RunInput, type StaffTaxInput } from './hr.service';
 import { CLOCK, type Clock } from './pipeline.service';
 
@@ -9,6 +10,7 @@ import { CLOCK, type Clock } from './pipeline.service';
 export class HrController {
   constructor(
     @Inject(HrService) private readonly hr: HrService,
+    @Inject(TaxFilingService) private readonly filing: TaxFilingService,
     @Inject(CLOCK) private readonly clock: Clock,
   ) {}
 
@@ -115,5 +117,49 @@ export class HrController {
     res.setHeader('content-disposition', `attachment; filename="${out.filename}"`);
     res.setHeader('cache-control', 'no-store');
     return out.csv;
+  }
+
+  @Get('hr/employer-tax')
+  employerTax(@Req() req: AuthedRequest) {
+    return this.filing.getEmployer(requireApi(req, ['OWNER']));
+  }
+
+  @Put('hr/employer-tax')
+  async setEmployerTax(@Req() req: AuthedRequest, @Body() body: EmployerInput) {
+    await this.filing.setEmployer(requireApi(req, ['OWNER']), body ?? {});
+    return { ok: true };
+  }
+
+  /** BPMP (bukti pemotongan PPh 21 bulanan) untuk Coretax: pratinjau JSON, atau `format=xml` (hanya bila data lengkap). */
+  @Get('hr/tax/bpmp')
+  async bpmp(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void }, @Query('year') year?: string, @Query('month') month?: string, @Query('format') format?: string) {
+    const auth = requireApi(req, ['OWNER']);
+    const r = await this.filing.bpmp(auth, year, month);
+    if (format !== 'xml') return { ...r, xml: undefined };
+    if (!r.xml) throw new BadRequestException(`BPMP belum bisa dibuat: ${[...r.problems, ...(r.rows.length === 0 ? ['tidak ada pegawai'] : [])].join('; ')}`);
+    await this.filing.logExport(auth, 'bpmp', { year: r.year, month: r.month, rows: r.rows.length });
+    res.setHeader('content-type', 'application/xml; charset=utf-8');
+    res.setHeader('content-disposition', `attachment; filename="bpmp-${r.year}-${String(r.month).padStart(2, '0')}.xml"`);
+    res.setHeader('cache-control', 'no-store');
+    return r.xml;
+  }
+
+  /** BPA1 (bukti pemotongan A1 tahunan) untuk Coretax. */
+  @Get('hr/tax/a1')
+  async a1(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void }, @Query('year') year?: string, @Query('format') format?: string) {
+    const auth = requireApi(req, ['OWNER']);
+    const r = await this.filing.a1(auth, year);
+    if (format !== 'xml') return { ...r, xml: undefined };
+    if (!r.xml) throw new BadRequestException(`BPA1 belum bisa dibuat: ${[...r.problems, ...(r.rows.length === 0 ? ['tidak ada pegawai dengan masa pajak terakhir'] : [])].join('; ')}`);
+    await this.filing.logExport(auth, 'a1', { year: r.year, rows: r.rows.length });
+    res.setHeader('content-type', 'application/xml; charset=utf-8');
+    res.setHeader('content-disposition', `attachment; filename="bpa1-${r.year}.xml"`);
+    res.setHeader('cache-control', 'no-store');
+    return r.xml;
+  }
+
+  @Get('hr/tax/pph21-summary')
+  pph21Summary(@Req() req: AuthedRequest, @Query('year') year?: string) {
+    return this.filing.summary(requireApi(req, ['OWNER']), year);
   }
 }

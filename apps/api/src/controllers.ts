@@ -139,6 +139,14 @@ export class ApiController {
     return out.report;
   }
 
+  /** Ringkasan pajak setahun (PBJT bulanan dan PPh Final UMKM bila dinyalakan). `outletId` = `all` menjumlahkan semua outlet (hanya OWNER). */
+  @Get('v1/outlets/:outletId/reports/annual-tax')
+  async annualTax(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Query('year') year?: string) {
+    const auth = requireApi(req, outletId === 'all' ? ['OWNER'] : ['OWNER', 'OPS', 'MANAGER']);
+    if (outletId !== 'all') await this.assertOutlet(auth.tenantId, outletId);
+    return this.reports.annualTax(auth, outletId, year, this.clock());
+  }
+
   @Post('v1/outlets/:outletId/evaluate')
   async evaluate(@Req() req: AuthedRequest, @Param('outletId') outletId: string) {
     const auth = requireApi(req, ['OWNER', 'OPS']);

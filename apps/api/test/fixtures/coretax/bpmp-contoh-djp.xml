@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<MmPayrollBulk xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<TIN>0029482015507000</TIN>
+	<ListOfMmPayroll>
+		<MmPayroll>
+			<TaxPeriodMonth>10</TaxPeriodMonth>
+			<TaxPeriodYear>2024</TaxPeriodYear>
+			<CounterpartOpt>Resident</CounterpartOpt>
+			<CounterpartPassport xsi:nil="true"/>
+			<CounterpartTin>3275010905770021</CounterpartTin>
+			<StatusTaxExemption>TK/0</StatusTaxExemption>
+			<Position>Sifu</Position>
+			<TaxCertificate>N/A</TaxCertificate>
+			<TaxObjectCode>21-100-01</TaxObjectCode>
+			<Gross>40000000</Gross>
+			<Rate>16</Rate>
+			<IDPlaceOfBusinessActivity>0029482015507000000000</IDPlaceOfBusinessActivity>
+			<WithholdingDate>2024-10-21</WithholdingDate>
+		</MmPayroll>
+		<MmPayroll>
+			<TaxPeriodMonth>10</TaxPeriodMonth>
+			<TaxPeriodYear>2024</TaxPeriodYear>
+			<CounterpartOpt>Resident</CounterpartOpt>
+			<CounterpartPassport xsi:nil="true"/>
+			<CounterpartTin>3273062212790005</CounterpartTin>
+			<StatusTaxExemption>K/2</StatusTaxExemption>
+			<Position>Sifu</Position>
+			<TaxCertificate>DTP</TaxCertificate>
+			<TaxObjectCode>21-100-02</TaxObjectCode>
+			<Gross>30000000</Gross>
+			<Rate>12</Rate>
+			<IDPlaceOfBusinessActivity>0029482015507000000000</IDPlaceOfBusinessActivity>
+			<WithholdingDate>2024-10-21</WithholdingDate>
+		</MmPayroll>
+		<MmPayroll>
+			<TaxPeriodMonth>10</TaxPeriodMonth>
+			<TaxPeriodYear>2024</TaxPeriodYear>
+			<CounterpartOpt>Resident</CounterpartOpt>
+			<CounterpartPassport xsi:nil="true"/>
+			<CounterpartTin>3175031412770017</CounterpartTin>
+			<StatusTaxExemption>K/0</StatusTaxExemption>
+			<Position>Sifu</Position>
+			<TaxCertificate>ETC</TaxCertificate>
+			<TaxObjectCode>21-100-32</TaxObjectCode>
+			<Gross>20000000</Gross>
+			<Rate>2</Rate>
+			<IDPlaceOfBusinessActivity>0029482015507000000000</IDPlaceOfBusinessActivity>
+			<WithholdingDate>2024-10-21</WithholdingDate>
+		</MmPayroll>
+	</ListOfMmPayroll>
+</MmPayrollBulk>

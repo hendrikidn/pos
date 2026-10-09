@@ -63,6 +63,7 @@ import { SettlementService } from './settlement.service';
 import { CLOCK, EVALUATE_MIN_GAP_MS, EVALUATE_MODE, NOTIFIER, PipelineService, type Clock, type EvaluateMode, type Notifier } from './pipeline.service';
 import { Alerter, type AlertSink } from './alerter';
 import { OpsController } from './ops.controller';
+import { TaxFilingService } from './tax-filing.service';
 import { FirmwareController } from './firmware.controller';
 import { FirmwareService } from './firmware.service';
 import { AdminAuthController } from './admin-auth.controller';
@@ -112,7 +113,7 @@ export class AppModule {
         Telemetry,
         { provide: Alerter, useFactory: () => { const a = new Alerter(); if (opts.alertSink) a.sink = opts.alertSink; return a; } },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, AdminAuthService, FirmwareService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, AccountingService, ChannelService, ChannelInboundService, PurchaseService, TransferService, HrService, ReservationService, WebShopService, QueueService, BomService, PaperService, AttendancePhotoService, RateLimiter, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
+        AdminService, AdminAuthService, FirmwareService, TaxFilingService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, AccountingService, ChannelService, ChannelInboundService, PurchaseService, TransferService, HrService, ReservationService, WebShopService, QueueService, BomService, PaperService, AttendancePhotoService, RateLimiter, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
       ],
       exports: [AdminService, ConfigService],
     };

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Shell } from '@/components/Shell';
-import { api, authed, type Me, type Outlet, type TaxReport } from '@/lib/api';
+import { api, authed, type AnnualTax, type Me, type Outlet, type TaxReport } from '@/lib/api';
 import { rp } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +20,9 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
   const id = encodeURIComponent(outlet.id);
   const r = await authed(() => api<TaxReport>(`/v1/outlets/${id}/reports/tax?month=${month}`));
   const t = r.totals;
+  // Batas bebas PPh Final orang pribadi berlaku atas omzet seluruh usaha, jadi owner melihat gabungan semua outlet; peran lain hanya outlet ini.
+  const annualScope = me.role === 'OWNER' ? 'all' : id;
+  const annual = await authed(() => api<AnnualTax>(`/v1/outlets/${annualScope}/reports/annual-tax?year=${month.slice(0, 4)}`));
   const href = (o: string, m: string) => `/tax?outlet=${encodeURIComponent(o)}&month=${m}`;
   return (
     <Shell me={me}>
@@ -51,6 +54,23 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
           <a className="btn-like secondary" href={`/api/tax-export?outlet=${id}&month=${month}`} download>CSV per hari</a>
         </div>
         <ul className="plain muted small">{r.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+      </section>
+
+      <section className="panel">
+        <h2>Setahun {annual.year} · {annualScope === 'all' ? 'semua outlet' : outlet.name}</h2>
+        <table className="table">
+          <thead><tr><th>Bulan</th><th className="num">Order</th><th className="num">Omzet</th><th className="num">PBJT</th>{annual.umkmFinal && <th className="num">Omzet kumulatif</th>}{annual.umkmFinal && <th className="num">PPh Final</th>}</tr></thead>
+          <tbody>
+            {annual.months.map((m) => (
+              <tr key={m.month}>
+                <td data-label="Bulan">{label(m.month)}</td><td data-label="Order" className="num">{m.orders}</td><td data-label="Omzet" className="num">{rp(m.omzet)}</td><td data-label="PBJT" className="num">{rp(m.pbjt)}</td>
+                {annual.umkmFinal && <td data-label="Omzet kumulatif" className="num">{rp(m.cumulativeOmzet)}</td>}{annual.umkmFinal && <td data-label="PPh Final" className="num">{rp(m.pphFinal)}</td>}
+              </tr>
+            ))}
+            <tr><th scope="row" colSpan={2}>Total</th><td className="num"><b>{rp(annual.totals.omzet)}</b></td><td className="num"><b>{rp(annual.totals.pbjt)}</b></td>{annual.umkmFinal && <td />}{annual.umkmFinal && <td className="num"><b>{rp(annual.totals.pphFinal)}</b></td>}</tr>
+          </tbody>
+        </table>
+        <ul className="plain muted small">{annual.notes.map((n) => <li key={n}>{n}</li>)}</ul>
       </section>
 
       <section className="panel">

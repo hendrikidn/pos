@@ -122,25 +122,27 @@ describe('potongan wajib penggajian (PPh 21 TER dan BPJS)', () => {
     expect(l.taxNote).toContain('TER 2%');
   });
 
-  it('masa pajak terakhir (Desember): pajak setahun tarif Pasal 17, PTKP sebanding bulan, dikurangi yang sudah dipotong', async () => {
-    // budi: Agustus 10.000.000 (dipotong 200.000), Oktober 8.000.000, November 10.000.000, Desember 12.000.000
-    await work('budi', '2026-10-05', 8, 'o2'); // 64 jam = 8.000.000
+  it('masa pajak terakhir (Desember): pajak setahun tarif Pasal 17 dengan PTKP penuh, dikurangi yang sudah dipotong', async () => {
+    expect((await post('/v1/staff', owner, { id: 'wati', name: 'Wati', role: 'CASHIER', pin: '2468' })).status).toBe(201);
+    expect((await put('/v1/hr/staff-tax/wati', owner, { taxEnabled: true, ptkp: 'TK/0', npwp: true, bpjsTk: false, bpjsKes: false })).status).toBe(200);
+    expect((await put('/v1/hr/pay/wati', owner, { payType: 'HOURLY', rate: 625_000 })).status).toBe(200);
+    // Oktober dan November masing-masing 1 hari x 8 jam x 625.000 = 5.000.000 (TER A sampai 5.400.000 = 0%); Desember 12 hari = 60.000.000
+    await work('wati', '2026-10-05', 1, 'o2');
     const oct = await run('2026-10-01', '2026-10-31', '2026-10-31', 'o2');
-    expect((await line(oct, 'budi')).pph21).toBe(120_000); // 8.000.000 -> 1,5% (7.500.001-8.550.000)
-    await work('budi', '2026-11-03', 10, 'o2'); // 80 jam = 10.000.000
+    expect(await line(oct, 'wati')).toMatchObject({ taxableGross: 5_000_000, terRate: 0, pph21: 0 });
+    await work('wati', '2026-11-03', 1, 'o2');
     const nov = await run('2026-11-01', '2026-11-30', '2026-11-30', 'o2');
-    expect((await line(nov, 'budi')).pph21).toBe(200_000);
-    await work('budi', '2026-12-02', 12, 'o2'); // 96 jam = 12.000.000
+    expect((await line(nov, 'wati')).pph21).toBe(0);
+    await work('wati', '2026-12-02', 12, 'o2');
     const dec = await run('2026-12-01', '2026-12-31', '2026-12-31', 'o2');
-    const l = await line(dec, 'budi');
-    // setahun: bruto Ags 10M + Okt 8M + Nov 10M + Des 12M = 40.000.000 ; 4 bulan; biaya jabatan min(5% x 40M = 2M ; 4 x 500rb = 2M) = 2.000.000
-    // PTKP TK/0 54.000.000 x 4/12 = 18.000.000 ; PKP = 40.000.000 - 2.000.000 - 18.000.000 = 20.000.000 ; pajak 5% = 1.000.000
-    // sudah dipotong: Ags 200.000 + Okt 120.000 + Nov 200.000 = 520.000 -> Desember 480.000
+    const l = await line(dec, 'wati');
+    // setahun: bruto 5 + 5 + 60 = 70.000.000 ; 3 bulan ; biaya jabatan min(3.500.000; 3 x 500.000 = 1.500.000) = 1.500.000 ; neto 68.500.000
+    // PTKP TK/0 SETAHUN PENUH 54.000.000 (kewajiban subjektif ada sejak awal tahun) ; PKP 14.500.000 ; pajak 5% = 725.000 ; belum ada yang dipotong
     expect(l.finalPeriod).toBe(true);
-    expect(l.pph21).toBe(480_000);
+    expect(l.pph21).toBe(725_000);
     expect(l.terCategory).toBeNull();
     expect(l.taxNote).toContain('Masa pajak terakhir');
-    expect(l.taxNote).toContain('4 bulan');
+    expect(l.taxNote).toContain('3 bulan');
   });
 
   it('bendera masa pajak terakhir manual dan hitung ulang mengikuti tunjangan; lebih potong tidak menghasilkan potongan negatif', async () => {
@@ -153,20 +155,18 @@ describe('potongan wajib penggajian (PPh 21 TER dan BPJS)', () => {
     // tunjangan menaikkan bruto -> TER ikut naik (7.000.000 ada di lapisan 6.750.001-7.500.000 = 1,25%)
     expect((await put(`/v1/payroll-runs/${id}/lines/tono`, owner, { allowance: 5_000_000 })).status).toBe(200);
     expect(await line(id, 'tono')).toMatchObject({ taxableGross: 7_000_000, terRate: 1.25, pph21: 87_500 });
-    // ditandai masa pajak terakhir: setahun. 7.000.000 - biaya jabatan 350.000 - PTKP 54.000.000/12 = 4.500.000 -> PKP 2.150.000 -> 5% = 107.500
+    // ditandai masa pajak terakhir: setahun dengan PTKP penuh. 7.000.000 - biaya jabatan 350.000 = 6.650.000 < PTKP 54.000.000 -> PKP 0 -> tidak ada pajak
     expect((await put(`/v1/payroll-runs/${id}/lines/tono`, owner, { finalPeriod: true })).status).toBe(200);
-    const l = await line(id, 'tono');
-    expect(l).toMatchObject({ finalPeriod: true, pph21: 107_500 });
+    expect(await line(id, 'tono')).toMatchObject({ finalPeriod: true, pph21: 0 });
     expect((await put(`/v1/payroll-runs/${id}/lines/tono`, owner, { finalPeriod: 'ya' })).status).toBe(400);
     expect((await put(`/v1/payroll-runs/${id}/lines/tono`, manager, { allowance: 1 })).status).toBe(403);
-    // kembali bukan masa terakhir, lalu bulan Mei: bruto kecil tetapi ditandai terakhir -> pajak setahun lebih kecil dari yang sudah dipotong
+    // kembali bukan masa terakhir, lalu bulan Mei ditandai terakhir: pajak setahun 0 padahal Maret sudah dipotong 87.500 -> lebih potong, bukan negatif
     expect((await put(`/v1/payroll-runs/${id}/lines/tono`, owner, { finalPeriod: false })).status).toBe(200);
     expect((await line(id, 'tono')).pph21).toBe(87_500);
     await work('tono', '2026-05-04', 1, 'o2'); // 1.000.000
     const may = await run('2026-05-01', '2026-05-31', '2026-05-31', 'o2');
     expect((await put(`/v1/payroll-runs/${may}/lines/tono`, owner, { finalPeriod: true })).status).toBe(200);
     const m = await line(may, 'tono');
-    // setahun: 7.000.000 + 1.000.000 = 8.000.000 ; 2 bulan ; biaya jabatan 400.000 ; PTKP 9.000.000 -> PKP 0 ; sudah dipotong 87.500 -> lebih potong
     expect(m.pph21).toBe(0);
     expect(m.net).toBe(m.base);
     expect(m.taxNote).toContain('LEBIH POTONG Rp 87.500');

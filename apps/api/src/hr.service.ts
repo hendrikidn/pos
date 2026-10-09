@@ -20,7 +20,7 @@ export interface PayInput { payType?: unknown; rate?: unknown; overtimeMultiplie
 export interface ManualInput { staffId?: unknown; start?: unknown; end?: unknown; reason?: unknown }
 export interface RunInput { from?: unknown; to?: unknown; dailyRegularHours?: unknown }
 export interface LineInput { allowance?: unknown; deduction?: unknown; note?: unknown; finalPeriod?: unknown }
-export interface StaffTaxInput { taxEnabled?: unknown; ptkp?: unknown; npwp?: unknown; bpjsTk?: unknown; bpjsKes?: unknown }
+export interface StaffTaxInput { taxEnabled?: unknown; ptkp?: unknown; npwp?: unknown; bpjsTk?: unknown; bpjsKes?: unknown; nik?: unknown; position?: unknown; foreign?: unknown; passport?: unknown; annualize?: unknown }
 
 type RunStatus = 'DRAFT' | 'FINAL' | 'PAID' | 'CANCELED';
 
@@ -173,23 +173,33 @@ export class HrService {
 
   async listStaffTax(auth: ApiAuth) {
     return this.db.tenantTx(auth.tenantId, async (q) =>
-      (await q.query<{ id: string; name: string; active: boolean; tax_enabled: boolean | null; ptkp: string | null; npwp: boolean | null; bpjs_tk: boolean | null; bpjs_kes: boolean | null }>(
-        `select s.id, s.name, s.active, t.tax_enabled, t.ptkp, t.npwp, t.bpjs_tk, t.bpjs_kes from staff s left join staff_tax t on t.tenant_id = s.tenant_id and t.staff_id = s.id order by s.active desc, s.name`,
-      )).rows.map((r) => ({ id: r.id, name: r.name, active: r.active, taxEnabled: r.tax_enabled ?? false, ptkp: r.ptkp ?? 'TK/0', npwp: r.npwp ?? true, bpjsTk: r.bpjs_tk ?? false, bpjsKes: r.bpjs_kes ?? false })),
+      (await q.query<{ id: string; name: string; active: boolean; tax_enabled: boolean | null; ptkp: string | null; npwp: boolean | null; bpjs_tk: boolean | null; bpjs_kes: boolean | null; nik: string | null; position: string | null; foreign_national: boolean | null; passport: string | null; annualize: boolean | null }>(
+        `select s.id, s.name, s.active, t.tax_enabled, t.ptkp, t.npwp, t.bpjs_tk, t.bpjs_kes, t.nik, t.position, t.foreign_national, t.passport, t.annualize
+         from staff s left join staff_tax t on t.tenant_id = s.tenant_id and t.staff_id = s.id order by s.active desc, s.name`,
+      )).rows.map((r) => ({ id: r.id, name: r.name, active: r.active, taxEnabled: r.tax_enabled ?? false, ptkp: r.ptkp ?? 'TK/0', npwp: r.npwp ?? true, bpjsTk: r.bpjs_tk ?? false, bpjsKes: r.bpjs_kes ?? false, nik: r.nik ?? '', position: r.position ?? '', foreign: r.foreign_national ?? false, passport: r.passport ?? '', annualize: r.annualize ?? false })),
     );
   }
 
   async setStaffTax(auth: ApiAuth, staffId: string, input: StaffTaxInput): Promise<void> {
     need(typeof input.taxEnabled === 'boolean' && typeof input.npwp === 'boolean' && typeof input.bpjsTk === 'boolean' && typeof input.bpjsKes === 'boolean', 'taxEnabled, npwp, bpjsTk, dan bpjsKes harus true atau false');
     need(typeof input.ptkp === 'string' && (PTKP_STATUSES as readonly string[]).includes(input.ptkp), `ptkp harus salah satu dari ${PTKP_STATUSES.join(', ')}`);
+    // Identitas untuk bukti potong (opsional di sini; wajib saat membuat XML): NIK/NPWP 15–16 digit, jabatan maks. 50 karakter.
+    const nik = input.nik === undefined || input.nik === null || input.nik === '' ? null : typeof input.nik === 'string' ? input.nik.replace(/[\s.\-]/g, '') : undefined;
+    need(nik === null || (nik !== undefined && /^[0-9]{15,16}$/.test(nik)), 'NIK/NPWP harus 15 atau 16 digit');
+    const position = input.position === undefined || input.position === null || input.position === '' ? null : typeof input.position === 'string' && input.position.trim().length <= 50 ? input.position.trim() : undefined;
+    need(position !== undefined, 'jabatan maksimal 50 karakter');
+    const passport = input.passport === undefined || input.passport === null || input.passport === '' ? null : typeof input.passport === 'string' && /^[A-Za-z0-9]{3,30}$/.test(input.passport.trim()) ? input.passport.trim() : undefined;
+    need(passport !== undefined, 'nomor paspor 3–30 huruf/angka');
+    need((input.foreign === undefined || typeof input.foreign === 'boolean') && (input.annualize === undefined || typeof input.annualize === 'boolean'), 'foreign dan annualize harus true atau false');
     await this.db.tenantTx(auth.tenantId, async (q) => {
       if ((await q.query('select 1 from staff where id = $1', [staffId])).rowCount === 0) throw new NotFoundException('staf tidak ditemukan');
       await q.query(
-        `insert into staff_tax (tenant_id, staff_id, tax_enabled, ptkp, npwp, bpjs_tk, bpjs_kes) values ($1, $2, $3, $4, $5, $6, $7)
-         on conflict (tenant_id, staff_id) do update set tax_enabled = excluded.tax_enabled, ptkp = excluded.ptkp, npwp = excluded.npwp, bpjs_tk = excluded.bpjs_tk, bpjs_kes = excluded.bpjs_kes`,
-        [auth.tenantId, staffId, input.taxEnabled, input.ptkp, input.npwp, input.bpjsTk, input.bpjsKes],
+        `insert into staff_tax (tenant_id, staff_id, tax_enabled, ptkp, npwp, bpjs_tk, bpjs_kes, nik, position, foreign_national, passport, annualize) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         on conflict (tenant_id, staff_id) do update set tax_enabled = excluded.tax_enabled, ptkp = excluded.ptkp, npwp = excluded.npwp, bpjs_tk = excluded.bpjs_tk, bpjs_kes = excluded.bpjs_kes,
+           nik = excluded.nik, position = excluded.position, foreign_national = excluded.foreign_national, passport = excluded.passport, annualize = excluded.annualize`,
+        [auth.tenantId, staffId, input.taxEnabled, input.ptkp, input.npwp, input.bpjsTk, input.bpjsKes, nik, position, input.foreign ?? false, passport, input.annualize ?? false],
       );
-      await this.audit(q, auth, 'staff.tax', { staffId, taxEnabled: input.taxEnabled, ptkp: input.ptkp, npwp: input.npwp, bpjsTk: input.bpjsTk, bpjsKes: input.bpjsKes });
+      await this.audit(q, auth, 'staff.tax', { staffId, taxEnabled: input.taxEnabled, ptkp: input.ptkp, npwp: input.npwp, bpjsTk: input.bpjsTk, bpjsKes: input.bpjsKes, nik: nik ? `${nik.slice(0, 4)}…` : null, annualize: input.annualize ?? false });
     });
   }
 
@@ -201,6 +211,7 @@ export class HrService {
   private async statutory(q: Queryable, tenantId: string, run: { id: number | string; period_end: string }, staffId: string, c: { base: number; overtime: number; allowance: number }, finalOverride: boolean | null) {
     const settings = await this.taxSettings(q);
     const prof = (await q.query<{ tax_enabled: boolean; ptkp: PtkpStatus; npwp: boolean; bpjs_tk: boolean; bpjs_kes: boolean }>('select tax_enabled, ptkp, npwp, bpjs_tk, bpjs_kes from staff_tax where staff_id = $1', [staffId])).rows[0];
+    const annualize = ((await q.query<{ a: boolean | null }>('select annualize as a from staff_tax where staff_id = $1', [staffId])).rows[0]?.a) === true;
     const bpjs = computeBpjs(settings, c.base + c.allowance, { tk: prof?.bpjs_tk ?? false, kes: prof?.bpjs_kes ?? false });
     const gross = prof?.tax_enabled ? taxableGross(settings, c, bpjs) : c.base + c.overtime + c.allowance;
     const out = { bpjs, gross, pph21: 0, category: null as string | null, rate: null as number | null, finalPeriod: false, note: null as string | null };
@@ -225,7 +236,7 @@ export class HrService {
       return out;
     }
     const months = new Set([month, ...others.map((o) => o.month)]).size;
-    const a = pph21Annual(settings, { grossYear: gross + others.reduce((s, o) => s + o.gross, 0), months, status: prof.ptkp, npwp: prof.npwp, employeePensionYear: bpjs.jhtEmployee + bpjs.jpEmployee + others.reduce((s, o) => s + o.pension, 0) });
+    const a = pph21Annual(settings, { grossYear: gross + others.reduce((s, o) => s + o.gross, 0), months, status: prof.ptkp, npwp: prof.npwp, annualize, employeePensionYear: bpjs.jhtEmployee + bpjs.jpEmployee + others.reduce((s, o) => s + o.pension, 0) });
     const withheld = others.reduce((s, o) => s + o.pph21, 0);
     out.pph21 = Math.max(0, a.tax - withheld);
     out.note = `Masa pajak terakhir: PPh 21 setahun Rp ${a.tax.toLocaleString('id-ID')} (PKP Rp ${a.pkp.toLocaleString('id-ID')}, ${months} bulan), sudah dipotong Rp ${withheld.toLocaleString('id-ID')}${a.tax < withheld ? `; LEBIH POTONG Rp ${(withheld - a.tax).toLocaleString('id-ID')} (dikembalikan lewat SPT/restitusi, tidak dikurangi di sini)` : ''}`;

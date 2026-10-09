@@ -1,0 +1,98 @@
+<xsd:schema id="MONTHLYPAYROLL" elementFormDefault="qualified" attributeFormDefault="unqualified" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns="">
+			<xsd:simpleType name="TinType">
+				<xsd:restriction base="xsd:string">
+					<xsd:pattern value="[0-9]{15,16}"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="NonEmptyStringType">
+				<xsd:restriction base="xsd:string">
+					<xsd:minLength value="1"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="TaxBaseRateType">
+				<xsd:restriction base="xsd:decimal">
+					<xsd:minExclusive value="0"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="TaxType">
+				<xsd:restriction base="xsd:decimal">
+					<xsd:minInclusive value="0"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="CounterpartOptType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="Resident"/>
+					<xsd:enumeration value="Foreign"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="CountryType">
+				<xsd:restriction base="xsd:string">
+					<xsd:pattern value="[a-zA-Z]{3}"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="TaxCertificateType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="N/A"/>
+					<xsd:enumeration value="DTP"/>
+					<xsd:enumeration value="ECT"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:simpleType name="DocType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="TaxInvoice"/>
+					<xsd:enumeration value="CommercialInvoice"/>
+					<xsd:enumeration value="Announchment"/>
+					<xsd:enumeration value="Contract"/>
+					<xsd:enumeration value="PaymentProof"/>
+					<xsd:enumeration value="DeedofEngangement"/>
+					<xsd:enumeration value="DeedofGeneralMeetingStakeholder"/>
+					<xsd:enumeration value="StatementLetter"/>
+					<xsd:enumeration value="BankAccountNumber"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:element name="MmPayrollBulk" type="MmPayrollBulkType"></xsd:element>
+			<xsd:complexType name="MmPayrollBulkType">
+				<xsd:sequence>
+					<xsd:element name="TIN" type="TinType" maxOccurs="1" minOccurs="1"></xsd:element>
+					<xsd:element name="ListOfMmPayroll" minOccurs="1" maxOccurs="1" type="ListOfMmPayrollType"/>
+				</xsd:sequence>
+			</xsd:complexType>
+			<xsd:complexType name="ListOfMmPayrollType">
+				<xsd:sequence>
+					<xsd:element name="MmPayroll" type="MmPayrollType" maxOccurs="unbounded" minOccurs="1"/>
+				</xsd:sequence>
+			</xsd:complexType>
+			<xsd:simpleType name="PtkpType" final="restriction">
+				<xsd:restriction base="xsd:string">
+					<xsd:enumeration value="TK/0"/>
+					<xsd:enumeration value="TK/1"/>
+					<xsd:enumeration value="TK/2"/>
+					<xsd:enumeration value="TK/3"/>
+					<xsd:enumeration value="K/0"/>
+					<xsd:enumeration value="K/1"/>
+					<xsd:enumeration value="K/2"/>
+					<xsd:enumeration value="K/3"/>
+					<xsd:enumeration value="HB/0"/>
+					<xsd:enumeration value="HB/1"/>
+					<xsd:enumeration value="HB/2"/>
+					<xsd:enumeration value="HB/3"/>
+				</xsd:restriction>
+			</xsd:simpleType>
+			<xsd:complexType name="MmPayrollType">
+				<xsd:sequence>
+					<xsd:element name="TaxPeriodMonth" type="xsd:integer" nillable="false"/>
+					<xsd:element name="TaxPeriodYear" type="xsd:integer" nillable="false"/>
+					<xsd:element name="CounterpartOpt" type="CounterpartOptType"/>
+					<xsd:element name="CounterpartPassport" type="xsd:string" nillable="true"/>
+					<xsd:element name="CounterpartTin" type="xsd:string" nillable="true"/>
+					<xsd:element name="StatusTaxExemption" type="PtkpType"/>
+					<xsd:element name="Position" type="xsd:string" nillable="false"/>
+					<xsd:element name="TaxCertificate" type="TaxCertificateType"/>
+					<xsd:element name="TaxObjectCode" type="NonEmptyStringType"/>
+					<xsd:element name="Gross" type="TaxBaseRateType"/>
+					<xsd:element name="Rate" type="TaxType"/>
+					<xsd:element name="IDPlaceOfBusinessActivity" type="xsd:string"/>
+					<xsd:element name="WithholdingDate" type="xsd:date"/>
+				</xsd:sequence>
+			</xsd:complexType>
+		</xsd:schema>

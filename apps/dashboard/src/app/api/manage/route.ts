@@ -22,6 +22,7 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['PUT'], path: /^\/v1\/payroll-runs\/[0-9]+\/lines\/[a-z0-9_-]+$/ },
   { methods: ['PUT'], path: /^\/v1\/hr\/staff-tax\/[a-z0-9_-]+$/ },
   { methods: ['PUT'], path: /^\/v1\/hr\/tax-settings$/ },
+  { methods: ['PUT'], path: /^\/v1\/hr\/employer-tax$/ },
   { methods: ['POST'], path: /^\/v1\/payroll-runs\/[0-9]+\/(finalize|pay|cancel)$/ },
   { methods: ['POST', 'PUT'], path: /^\/v1\/suppliers(\/[a-z0-9_-]+)?$/ },
   { methods: ['POST'], path: /^\/v1\/suppliers\/[a-z0-9_-]+\/payments$/ },

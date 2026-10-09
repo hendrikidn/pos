@@ -495,7 +495,7 @@ export interface PayrollDetail {
   total: number;
   statutory: { pph21: number; bpjsEmployee: number; bpjsEmployer: number };
 }
-export interface StaffTaxRow { id: string; name: string; active: boolean; taxEnabled: boolean; ptkp: 'TK/0' | 'TK/1' | 'TK/2' | 'TK/3' | 'K/0' | 'K/1' | 'K/2' | 'K/3'; npwp: boolean; bpjsTk: boolean; bpjsKes: boolean }
+export interface StaffTaxRow { id: string; name: string; active: boolean; taxEnabled: boolean; ptkp: 'TK/0' | 'TK/1' | 'TK/2' | 'TK/3' | 'K/0' | 'K/1' | 'K/2' | 'K/3'; npwp: boolean; bpjsTk: boolean; bpjsKes: boolean; nik: string; position: string; foreign: boolean; passport: string; annualize: boolean }
 export interface TaxSettings {
   jhtEmployee: number; jhtEmployer: number; jpEmployee: number; jpEmployer: number; jkk: number; jkm: number; kesEmployee: number; kesEmployer: number;
   jpWageCap: number; kesWageCap: number; biayaJabatanPercent: number; biayaJabatanCapMonthly: number; employerPremiumsTaxable: boolean; noNpwpMultiplier: number;
@@ -509,3 +509,23 @@ export interface ReservationRow {
   settle: { kind: 'REFUND' | 'FORFEIT'; amount: number; by: string; at: number; reason: string } | null;
 }
 export interface ReservationList { range: { from: string; to: string }; reservations: ReservationRow[]; tables: string[] }
+
+export interface EmployerTaxProfile { npwp: string; tkuSuffix: string; legalName: string; address: string | null; signerName: string | null; signerTitle: string | null; umkmFinal: boolean; taxpayerType: 'OP' | 'BADAN' }
+export interface FilingDeadlines { pay: string; file: string }
+export interface BpmpPreview {
+  year: number; month: number; employer: EmployerTaxProfile | null; ready: boolean; problems: string[]; warnings: string[]; notes: string[]; deadlines: FilingDeadlines;
+  rows: { staffId: string; name: string; gross: number; rate: number; tax: number; ptkp: string }[];
+  excluded: { staffId: string; name: string; reason: string }[];
+  totals: { gross: number; tax: number };
+}
+export interface A1Preview {
+  year: number; employer: EmployerTaxProfile | null; ready: boolean; problems: string[]; warnings: string[]; notes: string[];
+  rows: { staffId: string; name: string; salary: number; otherBenefit: number; pension: number; withheld: number; status: string; monthStart: number; monthEnd: number }[];
+  pending: { staffId: string; name: string }[];
+}
+export interface Pph21Summary { year: number; totalPph21: number; notes: string[]; months: { month: number; staff: number; gross: number; pph21: number; ofWhichFinalPeriod: number; deadlines: FilingDeadlines }[] }
+export interface AnnualTax {
+  year: number; outletId: string; umkmFinal: boolean; taxpayerType: 'OP' | 'BADAN' | null; notes: string[];
+  months: { month: string; orders: number; omzet: number; taxBase: number; pbjt: number; service: number; cumulativeOmzet: number; pphFinal: number }[];
+  totals: { omzet: number; pbjt: number; pphFinal: number };
+}

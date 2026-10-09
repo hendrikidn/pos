@@ -129,14 +129,21 @@ export function pph21Monthly(s: TaxSettings, monthlyGross: number, status: PtkpS
 
 /**
  * PPh 21 setahun untuk masa pajak terakhir (Desember, atau bulan berhenti bekerja): (bruto setahun - biaya jabatan - iuran pensiun/JHT/JP yang
- * dibayar pegawai - PTKP) dengan tarif Pasal 17. `months` = jumlah bulan bekerja di tahun itu; PTKP dan batas biaya jabatan dihitung sebanding.
- * Penghasilan Kena Pajak dibulatkan ke bawah ke ribuan penuh. Hasilnya total setahun; yang dipotong di masa terakhir = ini dikurangi yang sudah dipotong.
+ * dibayar pegawai - PTKP) dengan tarif Pasal 17. Penghasilan Kena Pajak dibulatkan ke bawah ke ribuan penuh.
+ *  - Biasa (pegawai dalam negeri yang kewajiban pajak subjektifnya ada sejak awal tahun, termasuk yang baru mulai bekerja di tengah tahun atau berhenti
+ *    sebelum Desember): PTKP SETAHUN PENUH; hanya batas biaya jabatan yang mengikuti jumlah bulan (maks. 500 rb x bulan). Contoh DJP "Tuan B/D".
+ *  - `annualize` (kewajiban pajak subjektif parsial, mis. pegawai asing yang baru menjadi subjek pajak dalam negeri di tengah tahun): penghasilan neto
+ *    DISETAHUNKAN (x 12/bulan), PKP dan pajak setahun dihitung, lalu pajaknya dikalikan bulan/12.
+ * Hasilnya total pajak untuk tahun itu; yang dipotong di masa terakhir = ini dikurangi yang sudah dipotong.
  */
-export function pph21Annual(s: TaxSettings, p: { grossYear: number; months: number; status: PtkpStatus; npwp: boolean; employeePensionYear: number }): { biayaJabatan: number; ptkp: number; pkp: number; tax: number } {
+export function pph21Annual(s: TaxSettings, p: { grossYear: number; months: number; status: PtkpStatus; npwp: boolean; employeePensionYear: number; annualize?: boolean }): { biayaJabatan: number; ptkp: number; pkp: number; tax: number } {
   const months = Math.min(12, Math.max(1, p.months));
   const biayaJabatan = Math.min(Math.floor((p.grossYear * s.biayaJabatanPercent) / 100), s.biayaJabatanCapMonthly * months);
-  const ptkp = Math.round((ptkpAnnual(p.status) * months) / 12);
-  const pkp = Math.max(0, Math.floor((p.grossYear - biayaJabatan - p.employeePensionYear - ptkp) / 1000) * 1000);
-  const tax = Math.floor(pasal17(pkp) * (p.npwp ? 1 : s.noNpwpMultiplier) + 1e-9);
+  const ptkp = ptkpAnnual(p.status);
+  const neto = p.grossYear - biayaJabatan - p.employeePensionYear;
+  const base = p.annualize ? Math.round((neto * 12) / months) : neto;
+  const pkp = Math.max(0, Math.floor((base - ptkp) / 1000) * 1000);
+  const annual = pasal17(pkp);
+  const tax = Math.floor((p.annualize ? (annual * months) / 12 : annual) * (p.npwp ? 1 : s.noNpwpMultiplier) + 1e-9);
   return { biayaJabatan, ptkp, pkp, tax };
 }

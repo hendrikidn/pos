@@ -85,11 +85,20 @@ describe('PPh 21 setahun (masa pajak terakhir) dan Pasal 17', () => {
     expect(r.tax).toBe(3_000_000 + 28_500_000 + 33_815_000);
   });
 
-  it('bekerja sebagian tahun: PTKP dan batas biaya jabatan sebanding dengan bulan (8 bulan, TK/0, 17,5 juta/bulan, iuran pensiun 100 ribu)', () => {
-    // bruto 140.000.000; biaya jabatan min(7.000.000; 8 x 500.000 = 4.000.000) = 4.000.000; PTKP 54.000.000 x 8/12 = 36.000.000; PKP = 99.200.000
+  it('bekerja sebagian tahun (kewajiban subjektif sejak awal tahun): PTKP SETAHUN PENUH; hanya batas biaya jabatan mengikuti bulan (8 bulan, TK/0, 17,5 jt/bulan, iuran pensiun 100 rb)', () => {
+    // bruto 140.000.000; biaya jabatan min(7.000.000; 8 x 500.000 = 4.000.000) = 4.000.000 ; neto 135.200.000 ; PTKP 54.000.000 ; PKP 81.200.000
     const r = pph21Annual(S, { grossYear: 140_000_000, months: 8, status: 'TK/0', npwp: true, employeePensionYear: 800_000 });
-    expect(r).toMatchObject({ biayaJabatan: 4_000_000, ptkp: 36_000_000, pkp: 99_200_000 });
-    expect(r.tax).toBe(3_000_000 + 5_880_000); // 5% x 60 juta + 15% x 39,2 juta
+    expect(r).toMatchObject({ biayaJabatan: 4_000_000, ptkp: 54_000_000, pkp: 81_200_000 });
+    expect(r.tax).toBe(3_000_000 + 3_180_000); // 5% x 60 juta + 15% x 21,2 juta
+  });
+
+  it('kewajiban pajak subjektif parsial (annualize): neto disetahunkan x 12/bulan, pajak setahun lalu x bulan/12', () => {
+    // neto 135.200.000 dalam 8 bulan -> disetahunkan 202.800.000 ; PKP 148.800.000 ; pajak setahun 3.000.000 + 15% x 88.800.000 = 16.320.000 ; x 8/12 = 10.880.000
+    const r = pph21Annual(S, { grossYear: 140_000_000, months: 8, status: 'TK/0', npwp: true, employeePensionYear: 800_000, annualize: true });
+    expect(r).toMatchObject({ ptkp: 54_000_000, pkp: 148_800_000, tax: 10_880_000 });
+    // bila bekerja 12 bulan, disetahunkan sama dengan biasa
+    const a = pph21Annual(S, { grossYear: 120_000_000, months: 12, status: 'TK/0', npwp: true, employeePensionYear: 0, annualize: true });
+    expect(a.tax).toBe(pph21Annual(S, { grossYear: 120_000_000, months: 12, status: 'TK/0', npwp: true, employeePensionYear: 0 }).tax);
   });
 
   it('PKP dibulatkan ke bawah ke ribuan; penghasilan di bawah PTKP tidak kena pajak; tanpa NPWP 120%', () => {

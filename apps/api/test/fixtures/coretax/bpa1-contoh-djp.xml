@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<A1Bulk xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<TIN>0029482015507000</TIN>
+	<ListOfA1>
+		<A1>
+			<WorkForSecondEmployer>No</WorkForSecondEmployer>
+			<TaxPeriodMonthStart>1</TaxPeriodMonthStart>
+			<TaxPeriodMonthEnd>4</TaxPeriodMonthEnd>
+			<TaxPeriodYear>2024</TaxPeriodYear>
+			<CounterpartOpt>Resident</CounterpartOpt>
+			<CounterpartPassport xsi:nil="true"/>
+			<CounterpartTin>3275101001720010</CounterpartTin>
+			<TaxExemptOpt>K/3</TaxExemptOpt>
+			<StatusOfWithholding>PartialYear</StatusOfWithholding>
+			<CounterpartPosition>TESTER</CounterpartPosition>
+			<TaxObjectCode>21-100-01</TaxObjectCode>
+			<NumberOfMonths>0</NumberOfMonths>
+			<SalaryPensionJhtTht>150000000</SalaryPensionJhtTht>
+			<GrossUpOpt>Yes</GrossUpOpt>
+			<IncomeTaxBenefit>0</IncomeTaxBenefit>
+			<OtherBenefit>15000000</OtherBenefit>
+			<Honorarium>10000000</Honorarium>
+			<InsurancePaidByEmployer>2500000</InsurancePaidByEmployer>
+			<Natura>8500000</Natura>
+			<TantiemBonusThr>50000000</TantiemBonusThr>
+			<PensionContributionJhtThtFee>15000000</PensionContributionJhtThtFee>
+			<Zakat>10000000</Zakat>
+			<PrevWhTaxSlip xsi:nil="true"/>
+			<TaxCertificate>N/A</TaxCertificate>
+			<Article21IncomeTax>0</Article21IncomeTax>
+			<IDPlaceOfBusinessActivity>0029482015507000000000</IDPlaceOfBusinessActivity>
+			<WithholdingDate>2024-04-30</WithholdingDate>
+		</A1>
+		<A1>
+			<WorkForSecondEmployer>No</WorkForSecondEmployer>
+			<TaxPeriodMonthStart>5</TaxPeriodMonthStart>
+			<TaxPeriodMonthEnd>6</TaxPeriodMonthEnd>
+			<TaxPeriodYear>2024</TaxPeriodYear>
+			<CounterpartOpt>Resident</CounterpartOpt>
+			<CounterpartPassport xsi:nil="true"/>
+			<CounterpartTin>3578154612790001</CounterpartTin>
+			<TaxExemptOpt>K/3</TaxExemptOpt>
+			<StatusOfWithholding>Annualized</StatusOfWithholding>
+			<CounterpartPosition>TESTER</CounterpartPosition>
+			<TaxObjectCode>21-100-02</TaxObjectCode>
+			<NumberOfMonths>2</NumberOfMonths>
+			<SalaryPensionJhtTht>90000000</SalaryPensionJhtTht>
+			<GrossUpOpt>No</GrossUpOpt>
+			<IncomeTaxBenefit>15000000</IncomeTaxBenefit>
+			<OtherBenefit>10000000</OtherBenefit>
+			<Honorarium>8000000</Honorarium>
+			<InsurancePaidByEmployer>1500000</InsurancePaidByEmployer>
+			<Natura>5000000</Natura>
+			<TantiemBonusThr>25000000</TantiemBonusThr>
+			<PensionContributionJhtThtFee>9000000</PensionContributionJhtThtFee>
+			<Zakat>8000000</Zakat>
+			<PrevWhTaxSlip xsi:nil="true"/>
+			<TaxCertificate>DTP</TaxCertificate>
+			<Article21IncomeTax>0</Article21IncomeTax>
+			<IDPlaceOfBusinessActivity>0029482015507000000000</IDPlaceOfBusinessActivity>
+			<WithholdingDate>2024-06-30</WithholdingDate>
+		</A1>
+	</ListOfA1>
+</A1Bulk>

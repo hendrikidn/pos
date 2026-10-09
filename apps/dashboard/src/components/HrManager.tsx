@@ -95,6 +95,11 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
   if (view === 'tax') {
     const rows = staffTax.map((s) => taxEdit[s.id] ?? s);
     const set = (s: StaffTaxRow, patch: Partial<StaffTaxRow>) => setTaxEdit({ ...taxEdit, [s.id]: { ...(taxEdit[s.id] ?? s), ...patch } });
+    // Selalu kirim seluruh profil (termasuk identitas bukti potong): API menimpa baris staf, jadi field yang tidak dikirim akan terhapus.
+    const saveTax = (s: StaffTaxRow) => act(
+      () => manage('PUT', `/v1/hr/staff-tax/${s.id}`, { taxEnabled: s.taxEnabled, ptkp: s.ptkp, npwp: s.npwp, bpjsTk: s.bpjsTk, bpjsKes: s.bpjsKes, nik: s.nik, position: s.position, foreign: s.foreign, passport: s.foreign ? s.passport : '', annualize: s.annualize }),
+      () => { const n = { ...taxEdit }; delete n[s.id]; setTaxEdit(n); return 'Profil disimpan.'; },
+    );
     const field = (k: keyof TaxSettings, label: string, unit: string) => taxSettings && (
       <label key={k}>{label} ({unit})<input inputMode="decimal" value={cfg[k] ?? String(taxSettings[k])} onChange={(e) => setCfg({ ...cfg, [k]: e.target.value.replace(/[^0-9.]/g, '') })} /></label>
     );
@@ -116,10 +121,31 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
                   <td data-label="NPWP"><input type="checkbox" checked={s.npwp} aria-label={`Punya NPWP ${s.name}`} onChange={(e) => set(s, { npwp: e.target.checked })} /></td>
                   <td data-label="BPJS Ketenagakerjaan"><input type="checkbox" checked={s.bpjsTk} aria-label={`BPJS Ketenagakerjaan ${s.name}`} onChange={(e) => set(s, { bpjsTk: e.target.checked })} /></td>
                   <td data-label="BPJS Kesehatan"><input type="checkbox" checked={s.bpjsKes} aria-label={`BPJS Kesehatan ${s.name}`} onChange={(e) => set(s, { bpjsKes: e.target.checked })} /></td>
-                  <td className="row-actions">{taxEdit[s.id] && <button disabled={busy} onClick={() => void act(() => manage('PUT', `/v1/hr/staff-tax/${s.id}`, { taxEnabled: s.taxEnabled, ptkp: s.ptkp, npwp: s.npwp, bpjsTk: s.bpjsTk, bpjsKes: s.bpjsKes }), () => { const n = { ...taxEdit }; delete n[s.id]; setTaxEdit(n); return 'Profil disimpan.'; })}>Simpan</button>}</td>
+                  <td className="row-actions">{taxEdit[s.id] && <button disabled={busy} onClick={() => void saveTax(s)}>Simpan</button>}</td>
                 </tr>
               ))}
               {rows.length === 0 && <tr><td colSpan={7} className="muted">Belum ada staf.</td></tr>}
+            </tbody>
+          </table>
+        </section>
+        <section className="panel">
+          <h2>Identitas untuk bukti potong (Coretax)</h2>
+          <p className="muted small" style={{ marginTop: 0 }}>Bukti potong BPMP dan BPA1 memerlukan NIK (16 digit) atau NPWP pegawai. Pegawai asing wajib nomor paspor. Centang &quot;hitung setahun&quot; hanya bila pegawai bekerja sebagian tahun karena status subjek pajak (mis. WNA yang baru tiba atau pergi), bukan untuk karyawan yang sekadar masuk di tengah tahun.</p>
+          <table className="table">
+            <thead><tr><th>Staf</th><th>NIK / NPWP</th><th>Jabatan</th><th>Warga asing</th><th>Paspor</th><th>Hitung setahun</th><th /></tr></thead>
+            <tbody>
+              {rows.filter((s) => s.taxEnabled).map((s) => (
+                <tr key={s.id}>
+                  <td data-label="Staf">{s.name}</td>
+                  <td data-label="NIK / NPWP"><input inputMode="numeric" value={s.nik} maxLength={20} aria-label={`NIK atau NPWP ${s.name}`} onChange={(e) => set(s, { nik: e.target.value.replace(/[^0-9.\- ]/g, '') })} />{!/^[0-9]{15,16}$/.test(s.nik.replace(/[\s.\-]/g, '')) && <div className="muted small">belum lengkap</div>}</td>
+                  <td data-label="Jabatan"><input value={s.position} maxLength={50} aria-label={`Jabatan ${s.name}`} onChange={(e) => set(s, { position: e.target.value })} /></td>
+                  <td data-label="Warga asing"><input type="checkbox" checked={s.foreign} aria-label={`Warga asing ${s.name}`} onChange={(e) => set(s, { foreign: e.target.checked })} /></td>
+                  <td data-label="Paspor"><input value={s.passport} disabled={!s.foreign} maxLength={30} aria-label={`Paspor ${s.name}`} onChange={(e) => set(s, { passport: e.target.value.replace(/[^A-Za-z0-9]/g, '') })} /></td>
+                  <td data-label="Hitung setahun"><input type="checkbox" checked={s.annualize} aria-label={`Hitung setahun ${s.name}`} onChange={(e) => set(s, { annualize: e.target.checked })} /></td>
+                  <td className="row-actions">{taxEdit[s.id] && <button disabled={busy} onClick={() => void saveTax(s)}>Simpan</button>}</td>
+                </tr>
+              ))}
+              {rows.filter((s) => s.taxEnabled).length === 0 && <tr><td colSpan={7} className="muted">Aktifkan &quot;Hitung PPh 21&quot; pada staf di atas lebih dulu.</td></tr>}
             </tbody>
           </table>
         </section>

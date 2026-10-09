@@ -271,8 +271,8 @@ Zona dan ambang bergantung pada tempat. **Jangan memakai nilai bawaan di outlet 
 
 ## Batas yang perlu diketahui
 
-- HTTP polos hanya untuk jaringan uji. Produksi wajib HTTPS (`https://anatta-pos.dolanyu.com`): firmware memvalidasi sertifikat terhadap bundel root CA bawaan. HTTPS **belum dijalankan di perangkat** (hanya dikompilasi dan bundelnya diverifikasi di komputer). Penyematan sertifikat (pinning) belum ada.
-- Tanda tangan event dengan kunci perangkat (eFuse/HMAC) belum ada di sensor: pemegang token yang tahu format rantai bisa memalsukan event.
+- HTTP polos hanya untuk jaringan uji. Produksi wajib HTTPS (`https://anatta-pos.dolanyu.com`): firmware memvalidasi sertifikat terhadap bundel root CA bawaan, dan penyematan kunci publik sertifikat (`SERVER_PIN_SPKI_SHA256`) tersedia. HTTPS dan pin **belum dijalankan di perangkat** (hanya dikompilasi, dan logikanya diuji di komputer).
+- Event sensor ditandatangani dengan kunci yang dibuat di perangkat (disimpan di NVS tanpa enkripsi flash), jadi pemegang token saja tidak bisa memalsukan event; pemegang chip fisik masih bisa membaca kunci. Pembaruan firmware lewat udara (OTA) bertanda tangan juga tersedia dan belum dijalankan di perangkat. Rinciannya di [firmware/sensor-node/README.md](firmware/sensor-node/README.md).
 - Radar mendeteksi keberadaan, bukan identitas. Alert dari sensor adalah indikasi untuk dicek dengan CCTV.
 
 Server produksi di VPS (Docker, HTTPS): [deploy/README.md](deploy/README.md).

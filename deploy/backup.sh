@@ -31,8 +31,10 @@ pg_dump_cmd > "$TMP"
 [ -s "$TMP" ] || { echo "dump kosong" >&2; exit 1; }
 # Arsip harus terbaca dan memuat tabel utama; dump yang terpotong atau rusak ketahuan di sini, bukan saat dibutuhkan.
 LIST="$(pg_list_cmd < "$TMP")"
+# Catatan: grep TANPA -q (keluaran dibuang). Dengan -q grep keluar begitu menemukan kecocokan, printf yang masih menulis kena SIGPIPE, dan karena
+# `pipefail` seluruh pipa dianggap gagal: pemeriksaan acak gagal padahal arsipnya utuh (terjadi di VPS dengan CPU sedikit).
 for t in event tenant outlet schema_migration; do
-  printf '%s\n' "$LIST" | grep -Eq "TABLE DATA public $t " || { echo "arsip tidak memuat data tabel $t" >&2; exit 1; }
+  printf '%s\n' "$LIST" | grep -E "TABLE DATA public $t " >/dev/null || { echo "arsip tidak memuat data tabel $t" >&2; exit 1; }
 done
 
 OUT="$BASE"

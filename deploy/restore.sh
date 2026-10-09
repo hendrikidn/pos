@@ -29,7 +29,7 @@ dump_stream "$FILE" | pg_restore_cmd "$PG_DB_NAME"
 EXPECTED="$(ls -1 ../apps/api/src/db/migrations/*.sql | wc -l | tr -d ' ')"
 RESULT="$(psql_cmd "$PG_DB_NAME" -v "expected_migrations=$EXPECTED" -f - < verify.sql | tr '|' ' ')"
 printf '%s\n' "$RESULT"
-if printf '%s\n' "$RESULT" | grep -q 'GAGAL$'; then echo "PERIKSA: ada pemeriksaan yang tidak lolos. Layanan TIDAK dinyalakan." >&2; exit 1; fi
+if printf '%s\n' "$RESULT" | grep 'GAGAL$' >/dev/null; then echo "PERIKSA: ada pemeriksaan yang tidak lolos. Layanan TIDAK dinyalakan." >&2; exit 1; fi
 echo "==> menyalakan layanan"
 docker compose up -d api dashboard admin
 notify "Database dipulihkan dari $(basename "$FILE") di $(hostname)."

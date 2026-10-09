@@ -39,7 +39,7 @@ say "Pemeriksaan awal"
 command -v docker >/dev/null 2>&1 || die "docker belum terpasang"
 docker info >/dev/null 2>&1 || die "tidak bisa mengakses Docker (pengguna ini harus ada di grup 'docker')"
 [ -f .env ] || die "deploy/.env belum ada"
-docker compose ps --status running --services 2>/dev/null | grep -qx db || die "container database tidak berjalan (docker compose up -d db)"
+docker compose ps --status running --services 2>/dev/null | grep -x db >/dev/null || die "container database tidak berjalan (docker compose up -d db)"
 ok "Docker dan database siap"
 
 if [ "$ASSUME_YES" -ne 1 ]; then

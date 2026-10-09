@@ -7,7 +7,7 @@ Internet ──HTTPS──► web server yang SUDAH ada (80/443)
                       ├─ dolanyu.com                 → proyek lama (tidak diubah)
                       ├─ goldenlamian.dolanyu.com    → proyek lama (tidak diubah)
                       ├─ anatta-pos.dolanyu.com              (untuk owner tenant, sensor, terminal POS)
-                      │    ├─ /v1/*, /healthz ─► 127.0.0.1:18081 ─► API ──┐
+                      │    ├─ /v1/*, /healthz, /readyz ─► 127.0.0.1:18081 ─► API ──┐
                       │    └─ lainnya ─────────► 127.0.0.1:18082 ─► Dashboard owner
                       └─ pos-admin.dolanyu.com        (untuk Anda sebagai admin platform)
                            └─ semua ───────────► 127.0.0.1:18083 ─► Konsol admin ─► API
@@ -136,7 +136,7 @@ server {
     client_max_body_size 12m;     # laporan bank diunggah sampai 10 MB
 
     # API untuk sensor, terminal POS, dan dashboard
-    location ~ ^/(v1/|healthz$) {
+    location ~ ^/(v1/|healthz$|readyz$) {
         proxy_pass http://127.0.0.1:18081;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -203,7 +203,7 @@ anatta-pos.dolanyu.com {
 		# fallback ke penerbit lain bisa menghasilkan rantai yang ditolak sensor.
 		ca https://acme-v02.api.letsencrypt.org/directory
 	}
-	@api path /v1/* /healthz
+	@api path /v1/* /healthz /readyz
 	handle @api {
 		reverse_proxy 127.0.0.1:18081
 	}
@@ -218,6 +218,7 @@ anatta-pos.dolanyu.com {
 Dari komputer Anda:
 ```
 curl https://anatta-pos.dolanyu.com/healthz        # {"ok":true}
+curl https://anatta-pos.dolanyu.com/readyz         # {"ok":true} (database terjangkau); 404 = nginx belum meneruskan /readyz ke API
 ```
 Buka `https://anatta-pos.dolanyu.com/login` di browser; harus tanpa peringatan sertifikat. Situs lama harus tetap normal.
 

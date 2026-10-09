@@ -46,6 +46,6 @@ EXPECTED="$(ls -1 ../apps/api/src/db/migrations/*.sql 2>/dev/null | wc -l | tr -
 [ "${EXPECTED:-0}" -gt 0 ] || { echo "folder migrasi tidak ditemukan (jalankan dari salinan repo)" >&2; exit 1; }
 RESULT="$(psql_cmd "$SCRATCH" -v "expected_migrations=$EXPECTED" -f - < verify.sql | tr '|' ' ')"
 printf '%s\n' "$RESULT" | awk '{printf "  %-34s %-12s %s\n", $1, $2, $3}'
-if printf '%s\n' "$RESULT" | grep -q 'GAGAL$'; then echo "UJI PULIH GAGAL: ada pemeriksaan yang tidak lolos" >&2; exit 1; fi
+if printf '%s\n' "$RESULT" | grep 'GAGAL$' >/dev/null; then echo "UJI PULIH GAGAL: ada pemeriksaan yang tidak lolos" >&2; exit 1; fi
 date +%s > "$DIR/.last_restore_ok"
 echo "uji pulih LOLOS: $(basename "$FILE")"

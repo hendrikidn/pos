@@ -121,7 +121,7 @@ http() { curl -fsS --max-time 8 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null 
 [ "$(curl -fsS --max-time 8 "http://127.0.0.1:$API_PORT/healthz" 2>/dev/null | grep -c '"ok":true' || true)" = 1 ] && ok "API  http://127.0.0.1:$API_PORT/healthz" || die "API tidak menjawab /healthz di port $API_PORT"
 [ "$(http "http://127.0.0.1:$DASHBOARD_PORT/login")" = 200 ] && ok "Dashboard owner  :$DASHBOARD_PORT" || die "dashboard tidak menjawab di port $DASHBOARD_PORT"
 [ "$(http "http://127.0.0.1:$ADMIN_PORT/login")" = 200 ] && ok "Konsol admin  :$ADMIN_PORT" || die "konsol admin tidak menjawab di port $ADMIN_PORT"
-if curl -fsS --max-time 10 "https://$DOMAIN/healthz" 2>/dev/null | grep -q '"ok":true'; then
+if curl -fsS --max-time 10 "https://$DOMAIN/healthz" 2>/dev/null | grep '"ok":true' >/dev/null; then
   ok "Publik  https://$DOMAIN/healthz"
 else
   warn "https://$DOMAIN/healthz belum terjangkau dari server ini (DNS, nginx, atau sertifikat belum siap? lihat deploy/README.md langkah 6)"

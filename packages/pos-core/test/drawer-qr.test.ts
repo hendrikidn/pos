@@ -71,3 +71,21 @@ describe('engine: QR statis', () => {
     expect((await s.recorder.pending()).some((x) => x.type === 'drawer.opened')).toBe(false);
   });
 });
+
+describe('engine: foto absen', () => {
+  it('absen memuat sidik jari foto, atau alasan tidak ada foto; tanpa argumen tidak menambah apa pun', async () => {
+    const s = await setup();
+    const hash = 'a'.repeat(64);
+    must(await s.engine.clockIn({ hash, bytes: 12_345 }));
+    must(await s.engine.clockOut({ missing: 'TIMEOUT' }));
+    must(await s.engine.clockIn());
+    must(await s.engine.clockOut());
+    const ev = (await s.recorder.pending()).filter((e) => e.type === 'attendance.clocked').map((e) => e.payload);
+    expect(ev).toEqual([
+      { kind: 'IN', photo: { hash, bytes: 12_345 } },
+      { kind: 'OUT', photoMissing: 'TIMEOUT' },
+      { kind: 'IN' },
+      { kind: 'OUT' },
+    ]);
+  });
+});

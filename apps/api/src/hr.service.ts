@@ -92,8 +92,8 @@ export class HrService {
       const toMs = startOfLocalDay(r.to, off) + DAY_MS;
       const iv = await this.intervals(q, outletId, fromMs, toMs, now);
       const names = new Map((await q.query<{ id: string; name: string }>('select id, name from staff')).rows.map((s) => [s.id, s.name]));
-      const rows = iv.done.map((i) => ({ staffId: i.staffId, name: names.get(i.staffId) ?? i.staffId, start: i.start, end: i.end, minutes: Math.round((i.end - i.start) / 60_000), terminalId: i.terminalId, manual: i.manual }));
-      const open = iv.open.map((o) => ({ staffId: o.staffId, name: names.get(o.staffId) ?? o.staffId, start: o.start, terminalId: o.terminalId, stale: o.stale }));
+      const rows = iv.done.map((i) => ({ staffId: i.staffId, name: names.get(i.staffId) ?? i.staffId, start: i.start, end: i.end, minutes: Math.round((i.end - i.start) / 60_000), terminalId: i.terminalId, manual: i.manual, inPhoto: i.inPhoto ?? null, outPhoto: i.outPhoto ?? null, inMissing: i.inMissing ?? null, outMissing: i.outMissing ?? null }));
+      const open = iv.open.map((o) => ({ staffId: o.staffId, name: names.get(o.staffId) ?? o.staffId, start: o.start, terminalId: o.terminalId, stale: o.stale, inPhoto: o.inPhoto ?? null, inMissing: o.inMissing ?? null }));
       const byStaff = new Map<string, { staffId: string; name: string; days: Set<string>; minutes: number }>();
       for (const row of rows) {
         const s = byStaff.get(row.staffId) ?? { staffId: row.staffId, name: row.name, days: new Set<string>(), minutes: 0 };

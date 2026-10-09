@@ -29,6 +29,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
   const [rounding, setRounding] = useState(String(s.rounding_unit ?? 0));
   const [edcs, setEdcs] = useState(s.edcs);
   const [staticQr, setStaticQr] = useState(s.static_qr_enabled ?? false);
+  const [attPhoto, setAttPhoto] = useState(s.attendance_photo ?? false);
   const [channels, setChannels] = useState<Record<string, string | null>>(() => Object.fromEntries((s.online_channels ?? []).map((c) => [c.channel, String(c.commissionPercent)])));
   const [perPoint, setPerPoint] = useState(String(s.loyalty_rupiah_per_point ?? 0));
   const [pointValue, setPointValue] = useState(String(s.loyalty_point_value ?? 0));
@@ -59,7 +60,7 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
       for (const no of nos) tables.push({ no, area: g.area.trim(), seats: Number(g.seats || 0) });
     }
     const r = await manage('PUT', `/v1/outlets/${s.id}/settings`, {
-      merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs, staticQrEnabled: staticQr, tables,
+      merchantName: merchant, taxPercent: Number(tax), serviceChargePercent: Number(service || 0), taxOnService, roundingUnit: Number(rounding), edcs, staticQrEnabled: staticQr, attendancePhoto: attPhoto, tables,
       onlineChannels: Object.entries(channels).filter(([, v]) => v !== null).map(([channel, v]) => ({ channel, commissionPercent: Number(v || 0) })),
       loyalty: { rupiahPerPoint: Number(perPoint || 0), pointValue: Number(pointValue || 0), maxRedeemPercent: Number(maxRedeem || 50) },
       policy: { secondApprovalAbove: Number(threshold), manualDiscountMaxPercent: Number(discount), employeeMealQuota: Number(mealQuota), holdBillMinutes: Number(hold) },
@@ -109,6 +110,10 @@ export function OutletSettingsForm({ s }: { s: OutletSettings }) {
         </div>
       ))}
       <p><button type="button" className="secondary" onClick={() => setEdcs([...edcs, { tid: '', bank: '', label: '' }])}>+ Tambah EDC</button></p>
+
+      <h3>Foto saat absen</h3>
+      <label className="check-label"><input type="checkbox" checked={attPhoto} onChange={(e) => setAttPhoto(e.target.checked)} /> Foto otomatis saat staf menekan Absen masuk atau pulang</label>
+      <p className="muted small">Kamera terminal memotret seketika saat tombol Absen ditekan, tanpa langkah konfirmasi, dan absen langsung tercatat tanpa menunggu unggahan. Foto hanya bukti untuk ditinjau di halaman SDM; tidak ada pencocokan wajah otomatis. Absen tanpa foto atau foto yang dipakai ulang menjadi temuan (R56, R57).</p>
 
       <h3>QR statis</h3>
       <label className="check-label"><input type="checkbox" checked={staticQr} onChange={(e) => setStaticQr(e.target.checked)} /> Izinkan QR statis cetak sebagai metode bayar</label>

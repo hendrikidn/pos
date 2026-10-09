@@ -35,6 +35,8 @@ export interface Edc {
 export interface WebOrderItem { itemId: string; name: string; qty: number; options: string[]; note?: string }
 
 /** Pesanan toko web yang sudah diklaim di server dan siap dibuat sebagai order kasir. */
+/** Pesanan dari gerbang GoFood/GrabFood/ShopeeFood yang sudah diklaim di server; `itemId` = menu outlet hasil pemetaan. */
+export interface ChannelOrderInput { channel: OnlineChannel; ref: string; items: { itemId: string; name: string; qty: number; note?: string }[] }
 export interface WebOrderInput { id: number; code: string; name: string; type: 'TAKE_AWAY' | 'DINE_IN'; tableNo?: string; items: WebOrderItem[] }
 
 export interface PosConfig {
@@ -54,6 +56,8 @@ export interface PosConfig {
   channels?: { channel: OnlineChannel; commissionPercent: number }[];
   /** QR statis cetak boleh dipakai sebagai metode bayar (diaktifkan owner; setiap pemakaian ditandai R19 bila ada EDC). */
   staticQr?: boolean;
+  /** Outlet mewajibkan foto saat absen (terminal memotret otomatis; absen tetap jalan bila foto gagal, dan hal itu ditandai R56). */
+  attendancePhoto?: boolean;
   /** Loyalty outlet (dari server); tidak ada = loyalty mati. */
   loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
   /** Promo aktif outlet (dari server). Kasir hanya memilih dari sini; kosong = tidak ada promo. */

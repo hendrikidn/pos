@@ -195,3 +195,44 @@ describe('batas jendela dan stabilitas', () => {
     expect(a).toEqual(b);
   });
 });
+
+describe('R56 dan R57: foto absen', () => {
+  const clock = (s: Sim, kind: 'IN' | 'OUT', at: number, actor: string, extra: Record<string, unknown> = {}) => s.pos({ type: 'attendance.clocked', payload: { kind, ...extra } } as never, at, actor);
+  const h1 = 'a'.repeat(64);
+  const h2 = 'b'.repeat(64);
+  it('R56: tanpa foto hanya ditandai bila outlet mewajibkan; alasan ikut di catatan', () => {
+    const s = new Sim();
+    const t = base(s);
+    clock(s, 'IN', t, 'budi');
+    clock(s, 'OUT', t + 8 * H, 'budi', { photoMissing: 'DENIED' });
+    clock(s, 'IN', t + DAY, 'sari', { photo: { hash: h1, bytes: 12_000 } });
+    expect(rules(run(s, t + 2 * DAY))).toEqual([]);
+    const h = run(s, t + 2 * DAY, { attendancePhotoRequired: true }).filter((x) => x.rule === 'R56');
+    expect(h).toHaveLength(2);
+    expect(h.find((x) => x.note.includes('pulang'))!.note).toContain('kamera ditolak');
+    expect(h.every((x) => x.weight === 15)).toBe(true);
+  });
+  it('R56: foto yang dirujuk tetapi tidak pernah terunggah, baru setelah 24 jam', () => {
+    const s = new Sim();
+    const t = base(s);
+    clock(s, 'IN', t, 'budi', { photo: { hash: h1, bytes: 12_000 } });
+    expect(rules(run(s, t + 23 * H, { storedPhotos: new Set() }))).toEqual([]);
+    expect(rules(run(s, t + 25 * H, { storedPhotos: new Set() }))).toEqual(['R56']);
+    expect(rules(run(s, t + 25 * H, { storedPhotos: new Set([h1]) }))).toEqual([]);
+  });
+  it('R57: foto yang sama dipakai dua kali (staf berbeda atau sama); yang berbeda aman', () => {
+    const s = new Sim();
+    const t = base(s);
+    clock(s, 'IN', t, 'budi', { photo: { hash: h1, bytes: 12_000 } });
+    clock(s, 'IN', t + 10 * MIN, 'sari', { photo: { hash: h1, bytes: 12_000 } });
+    clock(s, 'IN', t + 20 * MIN, 'dewi', { photo: { hash: h2, bytes: 12_000 } });
+    const h = run(s, t + DAY).filter((x) => x.rule === 'R57');
+    expect(h).toHaveLength(1);
+    expect(h[0]!.actorIds.sort()).toEqual(['budi', 'sari']);
+    expect(h[0]!.note).toContain('2 kali');
+    const s2 = new Sim();
+    clock(s2, 'IN', t, 'budi', { photo: { hash: h1, bytes: 12_000 } });
+    clock(s2, 'OUT', t + 8 * H, 'budi', { photo: { hash: h1, bytes: 12_000 } }); // staf sama memakai foto yang sama persis lagi
+    expect(rules(run(s2, t + DAY))).toEqual(['R57']);
+  });
+});

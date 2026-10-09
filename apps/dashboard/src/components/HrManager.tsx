@@ -20,6 +20,17 @@ interface Props {
   details: PayrollDetail[];
 }
 
+const MISSING: Record<string, string> = { NO_CAMERA: 'kamera tidak ada', DENIED: 'kamera ditolak', TIMEOUT: 'kamera lambat', ERROR: 'kamera gagal' };
+
+/** Foto absen kecil; kosong dengan alasannya bila tidak ada. Dimuat lewat proxy dashboard (tidak pernah publik). */
+function Shot({ outletId, hash, missing, label }: { outletId: string; hash: string | null; missing: string | null; label: string }) {
+  if (hash) {
+    const src = `/api/attendance-photo/${encodeURIComponent(outletId)}/${hash}`;
+    return <a href={src} target="_blank" rel="noreferrer" title={`${label}: buka foto penuh`}><img src={src} alt={`Foto ${label}`} loading="lazy" width={56} height={42} style={{ objectFit: 'cover', borderRadius: 6, border: '1px solid var(--line)', verticalAlign: 'middle' }} /></a>;
+  }
+  return <span className="muted small" title={label}>{missing ? MISSING[missing] ?? missing : '–'}</span>;
+}
+
 export function HrManager({ view, outletId, isOwner, attendance, pay, runs, details }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -145,7 +156,7 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
           <h2>Sedang absen masuk</h2>
           <ul className="plain">
             {attendance.open.map((o) => (
-              <li key={o.staffId}><b>{o.name}</b> sejak {clockText(o.start)}{o.stale && <span className="delta neg"> · lebih dari 16 jam: kemungkinan lupa absen pulang, koreksi di bawah</span>}</li>
+              <li key={o.staffId}><b>{o.name}</b> sejak {clockText(o.start)} <Shot outletId={outletId} hash={o.inPhoto} missing={o.inMissing} label="masuk" />{o.stale && <span className="delta neg"> · lebih dari 16 jam: kemungkinan lupa absen pulang, koreksi di bawah</span>}</li>
             ))}
           </ul>
         </section>
@@ -162,12 +173,14 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
         <details>
           <summary>Rincian per hari ({attendance.rows.length})</summary>
           <table className="table">
-            <thead><tr><th>Staf</th><th>Masuk</th><th>Pulang</th><th className="num">Lama</th><th>Sumber</th></tr></thead>
+            <thead><tr><th>Staf</th><th>Masuk</th><th>Pulang</th><th className="num">Lama</th><th>Sumber</th><th>Foto masuk</th><th>Foto pulang</th></tr></thead>
             <tbody>
               {attendance.rows.map((r, i) => (
                 <tr key={i}>
                   <td data-label="Staf">{r.name}</td><td data-label="Masuk">{clockText(r.start)}</td><td data-label="Pulang">{clockText(r.end)}</td>
                   <td data-label="Lama" className="num">{hm(r.minutes)}</td><td data-label="Sumber">{r.manual ? 'Koreksi manual' : r.terminalId}</td>
+                  <td data-label="Foto masuk">{r.manual ? <span className="muted small">–</span> : <Shot outletId={outletId} hash={r.inPhoto} missing={r.inMissing} label="masuk" />}</td>
+                  <td data-label="Foto pulang">{r.manual ? <span className="muted small">–</span> : <Shot outletId={outletId} hash={r.outPhoto} missing={r.outMissing} label="pulang" />}</td>
                 </tr>
               ))}
             </tbody>

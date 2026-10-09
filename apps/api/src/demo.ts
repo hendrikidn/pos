@@ -10,6 +10,7 @@ import { HrService } from './hr.service';
 import { PurchaseService } from './purchase.service';
 import { QueueService } from './queue.service';
 import { ReservationService } from './reservation.service';
+import { ChannelInboundService } from './channel-inbound.service';
 import { WebShopService } from './web-shop.service';
 import { TransferService } from './transfer.service';
 import { MemberService } from './member.service';
@@ -376,6 +377,14 @@ async function main() {
   await shop.setSettings(seeder, 'senopati', { enabled: true, slug: 'kopi-senopati' });
   await shop.publicOrder('kopi-senopati', { name: 'Maya', phone: '0812 9000 1234', type: 'TAKE_AWAY', items: [{ itemId: 'kopi-susu', qty: 2 }, { itemId: 'croissant', qty: 1 }], note: 'Diambil jam 8' }, 'demo-seed');
 
+  // Pesanan GoFood masuk langsung: kunci integrasi, dua menu terpetakan, satu pesanan siap diterima dan satu memuat menu yang belum dipetakan.
+  const inbound = app.get(ChannelInboundService);
+  const gofoodKey = (await inbound.createKey(seeder, 'senopati', 'GOFOOD')).key;
+  await inbound.setMap(seeder, { channel: 'GOFOOD', key: 'id:gf-kopi', menuId: 'kopi-susu' });
+  await inbound.setMap(seeder, { channel: 'GOFOOD', key: 'nama:croissant', menuId: 'croissant' });
+  await inbound.receive(`Bearer ${gofoodKey}`, { ref: 'GF-240901', total: 68_000, customerName: 'Rizky', items: [{ externalId: 'gf-kopi', name: 'Kopi Susu', qty: 2, unitPrice: 22_000 }, { name: 'Croissant', qty: 1, unitPrice: 24_000, note: 'hangatkan' }] }, 'demo-seed');
+  await inbound.receive(`Bearer ${gofoodKey}`, { ref: 'GF-240902', total: 52_000, customerName: 'Tania', items: [{ externalId: 'gf-matcha', name: 'Es Matcha', qty: 2, unitPrice: 26_000 }] }, 'demo-seed');
+
   // Antrian meja: aktif di Senopati dengan tiga tamu menunggu (satu rombongan besar di depan).
   const queue = app.get(QueueService);
   await queue.setSettings(seeder, 'senopati', { enabled: true });
@@ -417,6 +426,7 @@ Sensor ESP32 (isi di firmware/sensor-node/app/secrets.h):
   TERMINAL_ID  pos-1
 Antrian: http://localhost:3001/antri/kopi-senopati (layar TV: /antri/kopi-senopati/layar)
 Toko web pelanggan: http://localhost:3001/shop/kopi-senopati (pesanan masuk ke tombol "Pesanan web" di POS)
+GoFood langsung: POST http://localhost:${port}/v1/public/channel/orders dengan header "Authorization: Bearer ${gofoodKey}" (pesanan muncul di tombol "Pesanan online" di POS)
 Staf demo (PIN): ${Object.entries(demoPins).map(([k, v]) => `${k} ${v}`).join(' · ')}
 `);
 }

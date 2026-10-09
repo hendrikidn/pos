@@ -9,6 +9,7 @@ import { DrawerDialog } from './Drawer';
 import { QueueDialog } from './Queue';
 import { ReservationDialog } from './Reservations';
 import { WebOrdersDialog } from './WebOrders';
+import { ChannelOrdersDialog } from './ChannelOrders';
 import { TableMap } from './TableMap';
 import { hardware, isNative, kioskWanted, loadPrinterSetting, savePrinterSetting, setKioskWanted, type PrinterKind } from './native';
 import { createRuntime, saveSettings, setDemo, type Boot, type Runtime } from './runtime';
@@ -188,10 +189,10 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
           title={engine.clockedInSince() === null ? 'Catat jam masuk kerja Anda' : `Masuk sejak ${new Date(engine.clockedInSince()!).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`}
           onClick={async () => {
             if (engine.clockedInSince() === null) {
-              const r = await run(ctx, () => engine.clockIn());
+              const r = await run(ctx, () => ctx.rt.clockIn());
               if (r.ok) ctx.toast(`Absen masuk ${new Date(r.value).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}`, 'info');
             } else {
-              const r = await run(ctx, () => engine.clockOut());
+              const r = await run(ctx, () => ctx.rt.clockOut());
               if (r.ok) ctx.toast(`Absen pulang. Lama kerja ${Math.floor(r.value.minutes / 60)} jam ${r.value.minutes % 60} menit`, 'info');
             }
           }}
@@ -208,7 +209,7 @@ function Header({ ctx, user, tab, setTab }: { ctx: Ctx; user: StaffPublic; tab: 
 
 function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   const { engine } = ctx.rt;
-  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | 'online' | 'reservations' | 'web' | 'queue' | null>(null);
+  const [asking, setAsking] = useState<'table' | 'tables' | 'employee' | 'incoming' | 'online' | 'reservations' | 'web' | 'channel' | 'queue' | null>(null);
   const [table, setTable] = useState('');
   const incoming = ctx.rt.handoffs().incoming;
   const shift = engine.currentShift();
@@ -234,6 +235,8 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
   if (!shift) return <OpenShift ctx={ctx} />;
   const queueCount = ctx.rt.queue()?.tickets.length ?? 0;
   const webCount = ctx.rt.webOrders()?.orders.length ?? 0;
+  const channelBoard = ctx.rt.channelOrders();
+  const channelCount = (channelBoard?.orders.length ?? 0) + (channelBoard?.canceled.length ?? 0);
   const reservationsToday = ctx.rt.reservations()?.items.filter((r) => r.status === 'BOOKED').length ?? 0;
   return (
     <div className="pos-orders">
@@ -245,6 +248,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
           {(engine.config.channels?.length ?? 0) > 0 && <button className="secondary" onClick={() => setAsking('online')}>+ Online</button>}
           {ctx.rt.queue()?.enabled && <button className="secondary" onClick={() => setAsking('queue')}>Antrian · {queueCount}</button>}
           {webCount > 0 && <button className="incoming" onClick={() => setAsking('web')}>Pesanan web · {webCount}</button>}
+          {channelCount > 0 && <button className="incoming" onClick={() => setAsking('channel')}>Pesanan online · {channelCount}</button>}
           {reservationsToday > 0 && <button className="secondary" onClick={() => setAsking('reservations')}>Reservasi · {reservationsToday}</button>}
           {incoming.length > 0 && <button className="incoming" onClick={() => setAsking('incoming')}>Order masuk · {incoming.length}</button>}
         </div>
@@ -292,6 +296,7 @@ function Orders({ ctx, selected }: { ctx: Ctx; selected: string | null }) {
       )}
       {asking === 'queue' && <QueueDialog ctx={ctx} onClose={() => setAsking(null)} onSeated={(id) => { ctx.selectOrder(id); setAsking(null); }} />}
       {asking === 'web' && <WebOrdersDialog ctx={ctx} onClose={() => setAsking(null)} />}
+      {asking === 'channel' && <ChannelOrdersDialog ctx={ctx} onClose={() => setAsking(null)} />}
       {asking === 'reservations' && (
         <ReservationDialog ctx={ctx} onClose={() => setAsking(null)} onSeated={(no) => (no ? void create('DINE_IN', { tableNo: no }) : setAsking('tables'))} />
       )}

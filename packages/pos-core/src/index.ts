@@ -9,8 +9,9 @@ export { ConfigClient, STALE_AFTER_MS, toPosConfig, type DeviceConfig, type Refr
 export { computeTotals, lineLabel, pricingOf, type PricingRules, paidTotal, renderBill, renderReceipt, type Totals } from './totals';
 export { DEMO_MENU, demoConfig, type DemoPins } from './demo-config';
 export { fail, ok, lineKey } from './types';
+export type { AttendancePhoto } from './engine';
 export type {
-  CartLine, Edc, Handoff, MenuItem, OrderRecord, PaymentRecord, PosConfig, ReceiptStatus, Result, ShiftRecord, Staff, StaffPublic, WebOrderInput, WebOrderItem,
+  CartLine, Edc, Handoff, MenuItem, OrderRecord, PaymentRecord, PosConfig, ReceiptStatus, Result, ShiftRecord, Staff, StaffPublic, WebOrderInput, WebOrderItem, ChannelOrderInput,
 } from './types';
 export { WebCryptoSigner, toBase64, fromBase64, toBase64Url, type Signer, type KeyPairHolder } from './signer';
 export {

@@ -1,8 +1,9 @@
 import {
   ConfigClient, demoConfig, EscPosPrinter, PosEngine, Recorder, STALE_AFTER_MS, SyncClient, toPosConfig, WebCryptoSigner,
-  type Handoff, type KeyPairHolder, type OrderRecord, type Printer, type PosConfig, type Result, type Signer, type SyncResult,
+  type AttendancePhoto, type Handoff, type KeyPairHolder, type OrderRecord, type Printer, type PosConfig, type Result, type Signer, type SyncResult,
 } from '@pos/pos-core';
-import type { KitchenStatus, PrinterState } from '@pos/events';
+import type { KitchenStatus, OnlineChannel, PrinterState } from '@pos/events';
+import { capturePhoto } from './camera';
 import type { KdsBoard, TableBoard } from '@pos/order';
 import { IdbStore } from './idb-store';
 import { createKdsRuntime, type KdsRuntime } from './kds-runtime';
@@ -103,6 +104,20 @@ export interface WebPending {
   items: { itemId: string; name: string; qty: number; unitPrice: number; options: string[]; optionNames: string[]; note: string | null }[];
 }
 
+/** Satu pesanan GoFood/GrabFood/ShopeeFood yang masuk lewat gerbang dan menunggu kasir. `menuId` null = menu platform belum dipetakan ke menu outlet. */
+export interface ChannelPending {
+  id: number;
+  channel: OnlineChannel;
+  ref: string;
+  name: string | null;
+  note: string | null;
+  total: number;
+  receivedAt: number;
+  autoAccept: boolean;
+  items: { name: string; qty: number; unitPrice: number; note: string | null; menuId: string | null }[];
+}
+export interface ChannelBoard { orders: ChannelPending[]; canceled: { channel: OnlineChannel; ref: string; at: number }[]; at: number }
+
 /** Satu reservasi di papan kasir (tanpa nomor telepon). `depositRemaining` = uang muka yang masih bisa dipakai sebagai pembayaran. */
 export interface ReservationItem {
   id: number;
@@ -136,6 +151,12 @@ export interface Runtime {
   tableBoard(): { board: TableBoard; at: number } | null;
   /** Reservasi hari ini dan sebentar lagi dari server (tanpa nomor telepon); null bila belum pernah berhasil diunduh atau mode demo. */
   reservations(): { items: ReservationItem[]; at: number } | null;
+  /**
+   * Absen masuk atau pulang. Bila outlet mewajibkan foto, kamera memotret seketika (tanpa pratinjau dan konfirmasi) dan absen langsung tercatat; foto
+   * diunggah di latar belakang dan diulang saat online. Foto yang gagal tidak menahan absen (tercatat sebagai tidak ada foto).
+   */
+  clockIn(): Promise<Result<number>>;
+  clockOut(): Promise<Result<{ since: number; minutes: number }>>;
   /** Antrian meja hari ini; null bila belum pernah berhasil diunduh atau mode demo. */
   queue(): { enabled: boolean; tickets: QueueItem[]; at: number } | null;
   /** Aksi antrian (butuh koneksi): hasilnya dari server; `seat` juga membuat order dine-in tertaut di meja itu. */
@@ -147,6 +168,11 @@ export interface Runtime {
   /** Menerima pesanan web: periksa menu terminal, klaim di server (hanya satu terminal berhasil), lalu buat order kasir yang tertaut. */
   acceptWebOrder(id: number): Promise<Result<OrderRecord>>;
   rejectWebOrder(id: number, reason: string): Promise<Result<true>>;
+  /** Pesanan online (GoFood/GrabFood/ShopeeFood) yang masuk langsung dan menunggu kasir; null bila belum pernah berhasil diunduh atau mode demo. */
+  channelOrders(): ChannelBoard | null;
+  /** Menerima pesanan online: periksa menu terminal, klaim di server, buat order online tertaut, dan kirim ke dapur. */
+  acceptChannelOrder(id: number): Promise<Result<OrderRecord>>;
+  rejectChannelOrder(id: number, reason: string): Promise<Result<true>>;
   /** Mendudukkan tamu yang datang (butuh koneksi); mengembalikan meja yang dipesan bila ada. */
   seatReservation(id: number): Promise<Result<{ tableNo: string | null; guestName: string }>>;
   /** Foto menu sebagai data URL (sudah diunduh dan tersimpan di terminal); null bila menu tanpa foto atau belum terunduh. */
@@ -341,6 +367,47 @@ export async function createRuntime(): Promise<Boot> {
     }
   };
 
+  // Foto absen: simpan lokal dulu, unggah di latar belakang (dan ulang saat online). Absen tidak menunggu unggahan.
+  const PHOTO_PREFIX = 'photo:';
+  let uploadingPhotos = false;
+  const flushPhotos = async () => {
+    if (demo || !settings.token || uploadingPhotos) return;
+    uploadingPhotos = true;
+    try {
+      for (const key of await store.keys(PHOTO_PREFIX)) {
+        const v = await store.get<{ hash: string; data: string }>(key);
+        if (!v) { await store.write({}, [key]); continue; }
+        const res = await fetch(`${baseUrl}/v1/attendance/photos`, { method: 'POST', headers: { authorization: `Bearer ${settings.token}`, 'content-type': 'application/json' }, body: JSON.stringify({ hash: v.hash, data: v.data }) });
+        // Diterima, atau ditolak permanen (rusak/terlarang): buang. Gagal sementara (jaringan, 5xx): simpan untuk percobaan berikutnya.
+        if (res.ok || res.status === 400 || res.status === 403) await store.write({}, [key]);
+        else break;
+      }
+    } catch {
+      /* offline: dicoba lagi pada putaran sinkronisasi berikutnya */
+    } finally {
+      uploadingPhotos = false;
+    }
+  };
+  /** Memotret (bila diwajibkan), mencatat absen seketika, lalu mengunggah foto di latar belakang. */
+  const withPhoto = async <T>(act: (photo?: AttendancePhoto) => Promise<Result<T>>): Promise<Result<T>> => {
+    let photo: AttendancePhoto | undefined;
+    let key: string | null = null;
+    if (engine.config.attendancePhoto) {
+      const shot = await capturePhoto();
+      if ('missing' in shot) photo = { missing: shot.missing };
+      else {
+        photo = { hash: shot.hash, bytes: shot.bytes };
+        key = PHOTO_PREFIX + shot.hash;
+        if (!demo) await store.write({ [key]: { hash: shot.hash, data: shot.base64 } });
+      }
+    }
+    const r = await act(photo);
+    if (!r.ok && key) await store.write({}, [key]);
+    if (r.ok && key) void flushPhotos();
+    notify();
+    return r;
+  };
+
   // Antrian meja: papan dari server dan aksi kasir.
   let queueBoard: { enabled: boolean; tickets: QueueItem[]; at: number } | null = null;
   const pollQueue = async () => {
@@ -424,6 +491,78 @@ export async function createRuntime(): Promise<Boot> {
       const c = await webCall(`/v1/web-orders/${id}/reject`, { reason });
       if (!c.ok) return { ok: false, code: `WEB_${c.status}`, message: c.message };
       webBoard = webBoard ? { ...webBoard, orders: webBoard.orders.filter((o) => o.id !== id) } : null;
+      notify();
+      return { ok: true, value: true };
+    } catch {
+      return { ok: false, code: 'OFFLINE', message: 'Tidak terhubung ke server.' };
+    }
+  };
+
+  // Pesanan GoFood/GrabFood/ShopeeFood yang masuk langsung: daftar yang menunggu, menerima (klaim lalu buat order), menolak, dan terima otomatis.
+  let channelBoard: ChannelBoard | null = null;
+  const autoTried = new Set<number>();
+  let acceptingChannel = false;
+  const acceptChannelOrder = async (id: number): Promise<Result<OrderRecord>> => {
+    if (demo || !settings.token) return { ok: false, code: 'NO_SERVER', message: 'Pesanan online memerlukan koneksi ke server.' };
+    const pending = channelBoard?.orders.find((o) => o.id === id);
+    if (!pending) return { ok: false, code: 'CHANNEL_UNKNOWN', message: 'Pesanan tidak ada di daftar; muat ulang.' };
+    if (!engine.currentShift()) return { ok: false, code: 'NO_SHIFT', message: 'Buka shift terlebih dahulu.' };
+    const unmapped = pending.items.filter((i) => !i.menuId);
+    if (unmapped.length > 0) return { ok: false, code: 'CHANNEL_UNMAPPED', message: `Menu belum dipetakan: ${unmapped.map((i) => i.name).join(', ')}. Minta manager memetakannya di dashboard, atau tolak pesanan.` };
+    const input = { channel: pending.channel, ref: pending.ref, items: pending.items.map((i) => ({ itemId: i.menuId!, name: i.name, qty: i.qty, ...(i.note ? { note: i.note } : {}) })) };
+    // Periksa dulu terhadap menu terminal ini: klaim di server tidak bisa dibatalkan.
+    const bad = engine.checkChannelOrder(input);
+    if (bad) return { ok: false, code: 'CHANNEL_ITEM_UNAVAILABLE', message: bad };
+    try {
+      const c = await webCall(`/v1/channel-orders/${id}/accept`, {});
+      if (!c.ok) {
+        void pollChannel();
+        return { ok: false, code: `CHANNEL_${c.status}`, message: c.message };
+      }
+      const r = await engine.createChannelOrder(input);
+      if (r.ok) {
+        channelBoard = channelBoard ? { ...channelBoard, orders: channelBoard.orders.filter((o) => o.id !== id) } : null;
+        void syncNow();
+      }
+      notify();
+      return r;
+    } catch {
+      return { ok: false, code: 'OFFLINE', message: 'Tidak terhubung ke server.' };
+    }
+  };
+  /** Pesanan yang menunya semua terpetakan diterima otomatis bila outlet menyalakannya dan ada kasir masuk di shift yang buka; sisanya menunggu kasir. */
+  const autoAcceptChannel = async () => {
+    if (acceptingChannel || !channelBoard || !engine.currentUser() || !engine.currentShift()) return;
+    acceptingChannel = true;
+    try {
+      for (const o of channelBoard.orders) {
+        if (!o.autoAccept || autoTried.has(o.id) || o.items.some((i) => !i.menuId)) continue;
+        autoTried.add(o.id);
+        await acceptChannelOrder(o.id);
+      }
+    } finally {
+      acceptingChannel = false;
+    }
+  };
+  const pollChannel = async () => {
+    if (demo || !settings.token) return;
+    try {
+      const res = await fetch(`${baseUrl}/v1/channel-orders/pending`, { headers: { authorization: `Bearer ${settings.token}` } });
+      if (!res.ok) return;
+      const j = (await res.json()) as { orders: ChannelPending[]; canceled: ChannelBoard['canceled'] };
+      channelBoard = { orders: j.orders, canceled: j.canceled, at: Date.now() };
+      notify();
+      void autoAcceptChannel();
+    } catch {
+      /* offline: daftar terakhir tetap dipakai */
+    }
+  };
+  const rejectChannelOrder = async (id: number, reason: string): Promise<Result<true>> => {
+    if (demo || !settings.token) return { ok: false, code: 'NO_SERVER', message: 'Pesanan online memerlukan koneksi ke server.' };
+    try {
+      const c = await webCall(`/v1/channel-orders/${id}/reject`, { reason });
+      if (!c.ok) return { ok: false, code: `CHANNEL_${c.status}`, message: c.message };
+      channelBoard = channelBoard ? { ...channelBoard, orders: channelBoard.orders.filter((o) => o.id !== id) } : null;
       notify();
       return { ok: true, value: true };
     } catch {
@@ -542,11 +681,15 @@ export async function createRuntime(): Promise<Boot> {
   void pollQueue();
   setInterval(() => void pollWeb(), 10_000);
   void pollWeb();
+  setInterval(() => void pollChannel(), 6_000);
+  void pollChannel();
   setInterval(() => void pollReservations(), 30_000);
   void pollReservations();
   setInterval(() => void reportPosture(), 10 * 60_000);
   void poll();
   setInterval(() => void syncNow(), 5_000);
+  setInterval(() => void flushPhotos(), 15_000);
+  void flushPhotos();
   setInterval(() => void refreshConfig(), 60_000);
   void refreshConfig();
   window.addEventListener('online', () => void (syncNow(), refreshConfig()));
@@ -558,12 +701,17 @@ export async function createRuntime(): Promise<Boot> {
     keyInfo: () => ({ native: !!nativeSigner, hardwareBacked: nativeSigner?.hardwareBacked ?? null }),
     posture: () => posture,
     tableBoard: () => tableBoard,
+    clockIn: () => withPhoto((p) => engine.clockIn(p)),
+    clockOut: () => withPhoto((p) => engine.clockOut(p)),
     queue: () => queueBoard,
     queueAct,
     seatQueueOrder,
     webOrders: () => webBoard,
     acceptWebOrder,
     rejectWebOrder,
+    channelOrders: () => channelBoard,
+    acceptChannelOrder,
+    rejectChannelOrder,
     reservations: () => reservationBoard,
     seatReservation,
     memberLookup: (phone) => memberCall(`/v1/members/lookup?phone=${encodeURIComponent(phone)}`),

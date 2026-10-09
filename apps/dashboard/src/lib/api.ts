@@ -204,6 +204,7 @@ export interface OutletSettings {
   loyalty_max_redeem_percent: number;
   online_channels: { channel: 'GOFOOD' | 'GRABFOOD' | 'SHOPEEFOOD'; commissionPercent: number }[];
   static_qr_enabled?: boolean;
+  attendance_photo?: boolean;
   edcs: { tid: string; bank: string; label: string }[];
   tables: { no: string; area: string; seats: number }[];
   policy: { secondApprovalAbove?: number; manualDiscountMaxPercent?: number; manualDiscountMaxAmount?: number; employeeMealQuota?: number; holdBillMinutes?: number } | null;
@@ -436,12 +437,22 @@ export interface TransferRow {
   receivedAt: number | null; cancelReason: string | null; short: boolean; stale: boolean;
   lines: { ingredientId: string; name: string; unit: string; qtySent: number; qtyReceived: number | null; unitCost: number }[];
 }
+export interface ChannelIntegrationView { channel: OnlineChannelId; active: boolean; keyPrefix: string | null; autoAccept: boolean; createdAt: string | null }
+export interface ChannelItemMap {
+  map: { channel: OnlineChannelId; key: string; menuId: string; menuName: string | null }[];
+  unmapped: { channel: OnlineChannelId; key: string; name: string; seen: number }[];
+}
+export interface ChannelInboundRow {
+  id: number; channel: OnlineChannelId; ref: string; customerName: string | null; total: number; status: 'NEW' | 'ACCEPTED' | 'REJECTED' | 'CANCELED' | 'EXPIRED';
+  receivedAt: number; decidedBy: string | null; decidedAt: number | null; reason: string | null; canceledByPlatform: boolean; items: { name: string; qty: number; unitPrice: number }[];
+}
+
 export interface MenuCostRow { id: string; name: string; category: string; active: boolean; price: number; cost: number | null; margin: number | null; marginPct: number | null; missing: string[] }
 
 export interface AttendanceView {
   range: { from: string; to: string };
-  rows: { staffId: string; name: string; start: number; end: number; minutes: number; terminalId: string | null; manual: boolean }[];
-  open: { staffId: string; name: string; start: number; terminalId: string; stale: boolean }[];
+  rows: { staffId: string; name: string; start: number; end: number; minutes: number; terminalId: string | null; manual: boolean; inPhoto: string | null; outPhoto: string | null; inMissing: string | null; outMissing: string | null }[];
+  open: { staffId: string; name: string; start: number; terminalId: string; stale: boolean; inPhoto: string | null; inMissing: string | null }[];
   manual: { id: number; staffId: string; start: number; end: number; reason: string; createdBy: string }[];
   summary: { staffId: string; name: string; days: number; minutes: number }[];
 }

@@ -6,8 +6,12 @@ import type { Recorder } from './recorder';
 import type { KeyValueStore } from './store';
 import { computeTotals, lineLabel, pricingOf, paidTotal, renderBill, renderKitchenTicket, renderReceipt, type Totals } from './totals';
 import {
-  fail, lineKey, ok, type CartLine, type Handoff, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic, type WebOrderInput, type WebOrderItem,
+  fail, lineKey, ok, type CartLine, type Handoff, type OrderRecord, type PosConfig, type Result, type ShiftRecord, type StaffPublic, type WebOrderInput, type WebOrderItem, type ChannelOrderInput,
 } from './types';
+
+/** Hasil memotret saat absen: foto (sidik jari dan ukuran) atau alasan tidak ada foto. Absen tidak pernah ditahan menunggu foto. */
+export type AttendancePhoto = { hash: string; bytes: number } | { missing: 'NO_CAMERA' | 'DENIED' | 'TIMEOUT' | 'ERROR' };
+const photoPart = (p?: AttendancePhoto) => (!p ? {} : 'hash' in p ? { photo: { hash: p.hash, bytes: p.bytes } } : { photoMissing: p.missing });
 
 export interface EngineDeps {
   config: PosConfig;
@@ -154,23 +158,23 @@ export class PosEngine {
   }
 
   /** Absen masuk untuk staf yang sedang login (PIN sudah diverifikasi saat login). Tercatat sebagai event dan dipakai penggajian dan pemeriksaan transaksi di luar jam kerja. */
-  async clockIn(): Promise<Result<number>> {
+  async clockIn(photo?: AttendancePhoto): Promise<Result<number>> {
     const w = this.who();
     if (!w.ok) return w;
     if (this.clockedIn.has(w.value)) return fail('ALREADY_CLOCKED_IN', 'Anda sudah absen masuk. Absen pulang dulu sebelum masuk lagi.');
-    await this.emit({ type: 'attendance.clocked', payload: { kind: 'IN' } });
+    await this.emit({ type: 'attendance.clocked', payload: { kind: 'IN', ...photoPart(photo) } });
     const at = this.d.now();
     this.clockedIn.set(w.value, at);
     await this.d.store.write({ [`att:${w.value}`]: { since: at } });
     return ok(at);
   }
 
-  async clockOut(): Promise<Result<{ since: number; minutes: number }>> {
+  async clockOut(photo?: AttendancePhoto): Promise<Result<{ since: number; minutes: number }>> {
     const w = this.who();
     if (!w.ok) return w;
     const since = this.clockedIn.get(w.value);
     if (since === undefined) return fail('NOT_CLOCKED_IN', 'Anda belum absen masuk di terminal ini.');
-    await this.emit({ type: 'attendance.clocked', payload: { kind: 'OUT' } });
+    await this.emit({ type: 'attendance.clocked', payload: { kind: 'OUT', ...photoPart(photo) } });
     this.clockedIn.delete(w.value);
     await this.d.store.write({}, [`att:${w.value}`]);
     return ok({ since, minutes: Math.max(0, Math.round((this.d.now() - since) / 60_000)) });
@@ -459,6 +463,32 @@ export class PosEngine {
     }
     const fresh = this.order(o.id);
     return ok(fresh.ok ? fresh.value : o);
+  }
+
+  /** Memeriksa isi pesanan platform terhadap menu terminal ini sebelum diklaim di server (klaim tidak bisa dibatalkan). Pesan untuk kasir, atau null. */
+  checkChannelOrder(input: ChannelOrderInput): string | null {
+    if (!(this.cfg.channels ?? []).some((c) => c.channel === input.channel)) return 'Kanal ini belum diaktifkan untuk outlet ini.';
+    return this.checkWebOrderItems(input.items.map((i) => ({ itemId: i.itemId, name: i.name, qty: i.qty, options: [], ...(i.note ? { note: i.note } : {}) })));
+  }
+
+  /**
+   * Membuat order dari pesanan platform yang diterima lewat gerbang: order online tertaut ke kanal dan nomor pesanan (`createOnlineOrder`), semua
+   * item ditambahkan, lalu langsung dikirim ke dapur. Dibayar platform (metode PLATFORM) seperti order online lainnya.
+   */
+  async createChannelOrder(input: ChannelOrderInput): Promise<Result<OrderRecord>> {
+    const bad = this.checkChannelOrder(input);
+    if (bad) return fail('CHANNEL_ITEM_UNAVAILABLE', bad);
+    const created = await this.createOnlineOrder(input.channel, input.ref);
+    if (!created.ok) return created;
+    const id = created.value.id;
+    for (const it of input.items) {
+      const r = await this.addItem(id, it.itemId, it.qty, { options: [], ...(it.note ? { note: it.note } : {}) });
+      if (!r.ok) return r;
+    }
+    const sent = await this.sendToKitchen(id);
+    if (!sent.ok) return sent;
+    const fresh = this.order(id);
+    return fresh.ok ? fresh : ok(sent.value);
   }
 
   /**

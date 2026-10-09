@@ -72,7 +72,13 @@ export type EventBody =
   | {
       type: 'attendance.clocked';
       /** Absen masuk/pulang staf yang sedang login di terminal (pelakunya = `actorId`, diverifikasi PIN). */
-      payload: { kind: 'IN' | 'OUT' };
+      payload: {
+        kind: 'IN' | 'OUT';
+        /** Foto saat absen (jika outlet mewajibkan): sidik jari sha256 dan ukuran foto JPEG yang diunggah terpisah. */
+        photo?: { hash: string; bytes: number };
+        /** Foto tidak bisa diambil (kamera tidak ada, ditolak, terlalu lama, atau gagal); absen tetap tercatat. */
+        photoMissing?: 'NO_CAMERA' | 'DENIED' | 'TIMEOUT' | 'ERROR';
+      };
     }
   | {
       type: 'order.channel_linked';

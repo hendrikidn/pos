@@ -96,7 +96,17 @@ const PAYLOAD_CHECKS: Record<EventType, (p: Payload) => string | null> = {
     if (p['items'] === undefined) return 'items wajib';
     return badItems(p);
   },
-  'attendance.clocked': (p) => (oneOf(p, 'kind', ['IN', 'OUT']) ? null : 'kind harus IN atau OUT'),
+  'attendance.clocked': (p) => {
+    if (!oneOf(p, 'kind', ['IN', 'OUT'])) return 'kind harus IN atau OUT';
+    const photo = p['photo'];
+    if (photo !== undefined) {
+      const ph = photo as { hash?: unknown; bytes?: unknown } | null;
+      if (typeof ph !== 'object' || ph === null || typeof ph.hash !== 'string' || !/^[0-9a-f]{64}$/.test(ph.hash) || !Number.isInteger(ph.bytes) || (ph.bytes as number) < 1 || (ph.bytes as number) > 200_000) return 'photo tidak valid';
+      if (p['photoMissing'] !== undefined) return 'photo dan photoMissing tidak boleh bersamaan';
+    }
+    if (p['photoMissing'] !== undefined && !oneOf(p, 'photoMissing', ['NO_CAMERA', 'DENIED', 'TIMEOUT', 'ERROR'])) return 'photoMissing tidak valid';
+    return null;
+  },
   'order.queue_linked': (p) => (str(p, 'orderId') && Number.isInteger(p['ticketId']) && (p['ticketId'] as number) > 0 ? null : 'orderId/ticketId tidak valid'),
   'order.web_linked': (p) => (str(p, 'orderId') && Number.isInteger(p['webOrderId']) && (p['webOrderId'] as number) > 0 ? null : 'orderId/webOrderId tidak valid'),
   'order.channel_linked': (p) => (str(p, 'orderId') && oneOf(p, 'channel', ['GOFOOD', 'GRABFOOD', 'SHOPEEFOOD']) && typeof p['ref'] === 'string' && /^[A-Za-z0-9._-]{3,30}$/.test(p['ref']) ? null : 'orderId/channel/ref tidak valid'),

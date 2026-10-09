@@ -25,6 +25,7 @@ export interface DeviceConfig {
     loyalty?: { rupiahPerPoint: number; pointValue: number; maxRedeemPercent: number };
     channels?: { channel: OnlineChannel; commissionPercent: number }[];
     staticQr?: boolean;
+    attendancePhoto?: boolean;
     edcs: { tid: string; bank: string; label: string }[];
     policy: Partial<Policy> | null;
   };
@@ -48,6 +49,7 @@ export function toPosConfig(c: DeviceConfig): PosConfig {
     ...(c.outlet.loyalty ? { loyalty: c.outlet.loyalty } : {}),
     ...(c.outlet.channels?.length ? { channels: c.outlet.channels } : {}),
     ...(c.outlet.staticQr ? { staticQr: true } : {}),
+    ...(c.outlet.attendancePhoto ? { attendancePhoto: true } : {}),
     ...(c.promos?.length ? { promos: c.promos, ...(c.outlet.utcOffsetMinutes !== undefined ? { utcOffsetMinutes: c.outlet.utcOffsetMinutes } : {}) } : {}),
     staff: c.staff,
     menu: c.menu,

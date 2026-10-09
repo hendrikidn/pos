@@ -9,6 +9,8 @@ import { DEFAULT_CONFIG, type RuleConfig, type RuleHit } from './types';
  *  - R17: laci kas terbuka tanpa pembayaran atau refund tunai di sekitarnya.
  *  - R19: pembayaran QR statis padahal EDC atau QR dinamis tersedia di outlet.
  *  - R20: cetak ulang tagihan dan pindah meja menumpuk di jam terakhir sebelum tutup shift.
+ *  - R56: absen tanpa foto padahal outlet mewajibkannya, atau foto yang dirujuk event tidak pernah terunggah.
+ *  - R57: foto absen yang sama persis dipakai lebih dari sekali (foto statis, foto dari layar, atau titip absen).
  * Hit hanya dikeluarkan untuk kejadian sejak `emitFrom`; kunci stabil, jadi evaluasi ulang tidak membuat duplikat.
  */
 export interface BehaviorInput {
@@ -18,6 +20,10 @@ export interface BehaviorInput {
   emitFrom: number;
   /** Outlet punya EDC atau QR dinamis (R19). */
   dynamicQrAvailable?: boolean;
+  /** Outlet mewajibkan foto saat absen (R56). */
+  attendancePhotoRequired?: boolean;
+  /** Sidik jari foto absen yang sudah ada di server; foto yang dirujuk event tetapi tidak ada di sini lebih dari 24 jam ditandai (R56). */
+  storedPhotos?: Set<string>;
   utcOffsetMinutes?: number;
   config?: Partial<RuleConfig>;
 }
@@ -189,6 +195,34 @@ export function evaluateBehaviorRules(input: BehaviorInput): RuleHit[] {
         note: `${late.length} cetak ulang tagihan dan pindah meja dalam ${Math.round(cfg.r20WindowMs / 60_000)} menit sebelum tutup shift (${mine.length} sepanjang shift)`,
       });
     }
+  }
+
+  // ---- R56 dan R57: foto saat absen ----
+  const clocks = events.filter((e): e is EventOf<'attendance.clocked'> => e.type === 'attendance.clocked');
+  for (const e of clocks) {
+    const at = t(e);
+    const who = e.actorId ?? 'tidak dikenal';
+    if (input.attendancePhotoRequired && !e.payload.photo) {
+      push({
+        rule: 'R56', key: `R56:${e.deviceId}:${e.seq}`, weight: cfg.weights.R56 ?? 0, terminalId: e.deviceId, actorIds: e.actorId ? [e.actorId] : [], at,
+        note: `absen ${e.payload.kind === 'IN' ? 'masuk' : 'pulang'} oleh ${who} tanpa foto${e.payload.photoMissing ? ` (${{ NO_CAMERA: 'kamera tidak ada', DENIED: 'kamera ditolak', TIMEOUT: 'kamera terlalu lama', ERROR: 'kamera gagal' }[e.payload.photoMissing]})` : ''}`,
+      });
+    } else if (e.payload.photo && input.storedPhotos && !input.storedPhotos.has(e.payload.photo.hash) && input.now - at > 24 * 3_600_000) {
+      push({
+        rule: 'R56', key: `R56:upload:${e.deviceId}:${e.seq}`, weight: cfg.weights.R56 ?? 0, terminalId: e.deviceId, actorIds: e.actorId ? [e.actorId] : [], at,
+        note: `foto absen ${e.payload.kind === 'IN' ? 'masuk' : 'pulang'} oleh ${who} tercatat di event tetapi tidak pernah terunggah ke server`,
+      });
+    }
+  }
+  const byHash = new Map<string, EventOf<'attendance.clocked'>[]>();
+  for (const e of clocks) if (e.payload.photo) (byHash.get(e.payload.photo.hash) ?? byHash.set(e.payload.photo.hash, []).get(e.payload.photo.hash)!).push(e);
+  for (const [hash, list] of byHash) {
+    if (list.length < 2) continue;
+    const staff = [...new Set(list.map((e) => e.actorId ?? '?'))];
+    list.slice(1).forEach((e) => push({
+      rule: 'R57', key: `R57:${hash.slice(0, 16)}:${e.deviceId}:${e.seq}`, weight: cfg.weights.R57 ?? 0, terminalId: e.deviceId, actorIds: [...new Set(list.map((x) => x.actorId).filter((a): a is string => !!a))], at: t(e),
+      note: `foto absen yang sama persis dipakai ${list.length} kali (${staff.join(', ')}): foto statis, foto dari layar, atau titip absen`,
+    }));
   }
   return hits.sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
 }

@@ -243,6 +243,8 @@ export interface DeviceRow {
   /** Jam server saat event terakhir diterima. */
   last_seen_ms: number | null;
   revoked_at: string | null;
+  /** Hanya sensor: versi firmware yang dilaporkan perangkat. */
+  firmware_version?: string | null;
 }
 
 export interface PendingPairing {
@@ -407,6 +409,20 @@ export interface JournalEntryRow { ref: string; date: string; memo: string; sour
 export interface ManualEntryRow { id: number; ref: string; date: string; memo: string; createdBy: string; voided: boolean; voidReason: string | null }
 export interface JournalView { range: { from: string; to: string }; accounts: AccountRow[]; entries: JournalEntryRow[]; manual: ManualEntryRow[] }
 export interface TrialRow { account: string; name: string; type: string; debit: number; credit: number; balance: number }
+export interface StmtRow { account: string; name: string; amount: number }
+export interface StmtSection { label: string; rows: StmtRow[]; total: number }
+export interface FinancialStatements {
+  asOf: string; period: { from: string; to: string }; fiscalYearStart: string; booksStart: string | null;
+  balanceSheet: {
+    assets: { current: StmtSection; nonCurrent: StmtSection; total: number };
+    liabilities: { current: StmtSection; longTerm: StmtSection; total: number };
+    equity: { rows: StmtRow[]; total: number }; totalLiabilitiesAndEquity: number; difference: number;
+  };
+  incomeStatement: { revenue: { account: string; name: string; balance: number }[]; expenses: { account: string; name: string; balance: number }[]; totalRevenue: number; totalExpenses: number; netIncome: number };
+  cashFlow: { openingCash: number; operating: { rows: StmtRow[]; total: number }; investing: { rows: StmtRow[]; total: number }; financing: { rows: StmtRow[]; total: number }; netChange: number; closingCash: number; reconciles: boolean };
+  equity: { opening: number; contributions: number; netIncome: number; closing: number; reconciles: boolean };
+  trialBalanceBalanced: boolean; warnings: string[];
+}
 export interface AccountingReports {
   range: { from: string; to: string };
   trialBalance: { rows: TrialRow[]; totalDebit: number; totalCredit: number };

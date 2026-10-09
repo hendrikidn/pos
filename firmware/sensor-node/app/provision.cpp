@@ -9,6 +9,8 @@
 #include <WiFi.h>
 
 #include "config.h"
+#include "ota.h"
+#include "signer.h"
 #include "transport.h"
 
 static const char *NS = "posguard";
@@ -427,6 +429,28 @@ static void runPortal(const DeviceConfig *keep, ShowLines show, Background bg, u
         }
         // Identitas baru: buang antrean/rantai lama (bila ada) agar mulai dari seq 0.
         if (LittleFS.begin(true)) LittleFS.format();
+
+        // Konfigurasi awal selesai dengan dua hal yang butuh jaringan, selagi WiFi dan jam siap dan belum ada event sama sekali:
+        // (1) kunci tanda tangan perangkat dibuat dan didaftarkan, sehingga SETIAP event sensor ini bertanda tangan sejak yang pertama;
+        // (2) memeriksa dan memasang firmware yang lebih baru (hanya yang bertanda tangan kunci rilis). Kegagalan salah satunya tidak membatalkan
+        // pairing: keduanya diulang sendiri saat berjalan.
+        if (show) show("Menyiapkan kunci...", "", "", "");
+        signerReset();
+        if (signerGenerate()) {
+            int keyStatus = 0;
+            if (!signerEnroll(fresh.token, keyStatus)) Serial.printf("pendaftaran kunci ditunda (HTTP %d)\n", keyStatus);
+        }
+        message = "Memeriksa pembaruan firmware...";
+        if (show) show("Cek firmware...", "", "", "");
+        OtaResult ota = otaCheckAndUpdate(show, nullptr);
+        Serial.printf("OTA saat konfigurasi awal: %s\n", otaResultName(ota));
+        if (ota == OTA_UPDATED) {
+            message = "Berhasil. Perangkat " + fresh.deviceId + " terpasang dan firmware diperbarui; sensor akan restart.";
+            state = JobState::Done;
+            if (show) show("FIRMWARE BARU", "TERPASANG", "Memulai ulang...", "");
+            serve(4000);
+            ESP.restart();
+        }
 
         message = "Berhasil. Perangkat " + fresh.deviceId + " terpasang dan akan restart.";
         state = JobState::Done;

@@ -12,6 +12,7 @@ export function Shell({ me, children }: { me: AdminMe; children: ReactNode }) {
           <Link href="/">Tenant</Link>
           <Link href="/billing">Penagihan</Link>
           <Link href="/tenants/new">Tenant baru</Link>
+          <Link href="/firmware">Firmware</Link>
           <Link href="/security">Keamanan</Link>
         </nav>
         <div className="who">

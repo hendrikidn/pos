@@ -152,7 +152,7 @@ export function DeviceManager({
                 <td data-label="Jenis">{KIND_LABEL[d.kind]}</td>
                 <td data-label="Outlet">{outlets.find((o) => o.id === d.outlet_id)?.name ?? d.outlet_id}</td>
                 <td data-label="Terminal" className="mono">{d.terminal_id ?? '–'}</td>
-                <td data-label="Status">{status(d)}</td>
+                <td data-label="Status">{status(d)}{d.kind === 'sensor' && <div className="muted small">{d.firmware_version ? `firmware ${d.firmware_version}` : 'firmware belum melapor'}{d.key_enrolled ? ' · event bertanda tangan' : ' · kunci belum terdaftar'}</div>}</td>
                 <td className="row-actions">
                   {role === 'OWNER' && !d.revoked_at && (
                     <button

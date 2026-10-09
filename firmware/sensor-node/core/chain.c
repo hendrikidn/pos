@@ -36,6 +36,11 @@ int chain_init(chain_t *c, const char *device_id, const char *outlet_id, uint32_
     return 0;
 }
 
+void chain_set_signer(chain_t *c, chain_sign_fn fn, void *ctx) {
+    c->sign_fn = fn;
+    c->sign_ctx = ctx;
+}
+
 static int emit(chain_t *c, int64_t device_time_ms, const char *type, const char *payload, char *out, size_t cap) {
     uint32_t seq = c->seq + 1;
     char canon[CHAIN_EVENT_MAX];
@@ -56,8 +61,15 @@ static int emit(chain_t *c, int64_t device_time_ms, const char *type, const char
     sha256_final(&ctx, digest);
     sha256_hex(digest, hex);
 
-    /* Hash disisipkan sebelum '}' penutup. Urutan kunci pada hasil akhir tidak memengaruhi verifikasi server. */
-    int m = snprintf(out, cap, "%.*s,\"hash\":\"%s\"}", n - 1, canon, hex);
+    /* Hash (dan tanda tangan, bila ada penanda tangan) disisipkan sebelum '}' penutup. Tanda tangan tidak ikut dihash. */
+    int m;
+    if (c->sign_fn) {
+        char sig[CHAIN_SIG_MAX];
+        if (c->sign_fn(c->sign_ctx, hex, sig, sizeof sig) != 0) return -1;
+        m = snprintf(out, cap, "%.*s,\"hash\":\"%s\",\"sig\":\"%s\"}", n - 1, canon, hex, sig);
+    } else {
+        m = snprintf(out, cap, "%.*s,\"hash\":\"%s\"}", n - 1, canon, hex);
+    }
     if (m < 0 || (size_t)m >= cap) return -1;
 
     c->seq = seq;

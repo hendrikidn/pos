@@ -14,7 +14,9 @@ extern "C" {
 #include "ld2410.h"
 }
 #include "config.h"
+#include "ota.h"
 #include "provision.h"
+#include "signer.h"
 #include "transport.h"
 
 static const char *OUTBOX = "/outbox.ndjson";
@@ -40,7 +42,12 @@ static uint32_t rejectSince = 0;
 static uint32_t wifiDownSince = 0;   // 0 = tersambung; selain itu waktu mulai putus
 static bool portalOpen = false;      // portal ganti WiFi aktif: layar status tidak boleh menimpa OLED
 static bool bootPending = true;      // hitungan boot beruntun belum dikosongkan
+static uint32_t unsignedPending = 0; // event di antrean yang tidak bertanda tangan (dibuat sebelum kunci ada); kunci baru didaftarkan setelah habis
+static uint32_t enrollRetryAt = 0;
+static uint32_t lastSigningCheck = 0, lastOtaCheck = 0;
 [[noreturn]] static void factoryReset(const char *reason);
+static void showLines(const char *l1, const char *l2, const char *l3, const char *l4);
+static void tick();
 
 // ---------- waktu ----------
 
@@ -76,7 +83,7 @@ static void loadChain() {
         File f = LittleFS.open(OUTBOX, "r");
         while (f && f.available()) {
             String l = f.readStringUntil('\n');
-            if (l.length() > 10) { lastLine = l; pending++; }
+            if (l.length() > 10) { lastLine = l; pending++; if (l.indexOf("\"sig\":") < 0) unsignedPending++; }
         }
         outboxBytes = f ? f.size() : 0;
         if (f) f.close();
@@ -105,6 +112,7 @@ static void appendEvent(const char *json) {
     outboxBytes = f.size();
     f.close();
     pending++;
+    if (!strstr(json, "\"sig\":")) unsignedPending++;
 }
 
 static void saveChainPosition() {
@@ -137,13 +145,55 @@ static void ackUpTo(uint64_t acked) {
         LittleFS.rename("/outbox.tmp", OUTBOX);
     }
     pending = keep.size();
+    unsignedPending = 0;
+    for (auto &l : keep) if (l.indexOf("\"sig\":") < 0) unsignedPending++;
+}
+
+// ---------- tanda tangan dan pembaruan ----------
+
+static void applySigner() {
+    if (chainReady && signerHasKey()) chain_set_signer(&chain, signerSignCb, nullptr);
+}
+
+/**
+ * Kunci perangkat dibuat setelah WiFi menyala (pembangkit acak berkualitas penuh), lalu didaftarkan ke server SETELAH semua event lama
+ * (yang belum bertanda tangan) terkirim: server menolak event tak bertanda tangan begitu kunci terdaftar. Event baru selalu bertanda tangan
+ * sejak kunci ada, jadi yang menunggu di antrean saat pendaftaran sudah sah.
+ */
+static void maintainSigning(uint32_t now) {
+    if (now - lastSigningCheck < 10000) return;
+    lastSigningCheck = now;
+    if (WiFi.status() != WL_CONNECTED || !timeSynced()) return;
+    if (!signerHasKey() && signerGenerate()) applySigner();
+    if (signerHasKey() && !signerEnrolled() && unsignedPending == 0 && now >= enrollRetryAt) {
+        int st = 0;
+        if (signerEnroll(cfg.token, st)) {
+            Serial.println("kunci perangkat terdaftar di server");
+        } else {
+            // 409: server sudah memegang kunci lain untuk perangkat ini; owner harus mengatur ulang kunci di dashboard.
+            enrollRetryAt = now + (st == 409 ? 600000UL : 60000UL);
+            lastPost = st == 409 ? String("KUNCI 409") : String("kunci ") + st;
+            Serial.printf("pendaftaran kunci gagal (HTTP %d)\n", st);
+        }
+    }
+}
+
+static void maintainOta(uint32_t now) {
+    if (OTA_CHECK_MS == 0 || strlen(OTA_RELEASE_PUBKEY) == 0) return;
+    // Pemeriksaan pertama 2 menit setelah menyala (setelah WiFi dan jam siap), lalu tiap OTA_CHECK_MS.
+    if (lastOtaCheck == 0) { if (now < 120000UL) return; lastOtaCheck = now; } else if (now - lastOtaCheck < OTA_CHECK_MS) return;
+    lastOtaCheck = now;
+    if (WiFi.status() != WL_CONNECTED || !timeSynced() || pending > OTA_MAX_PENDING) return;
+    OtaResult r = otaCheckAndUpdate(showLines, tick);
+    Serial.printf("OTA: %s\n", otaResultName(r));
+    if (r == OTA_UPDATED) { delay(500); ESP.restart(); }
 }
 
 // ---------- pembuatan event ----------
 
 static void emitHeartbeat() {
     if (!chainReady || !timeSynced() || outboxBytes > OUTBOX_MAX_BYTES) return;
-    char line[CHAIN_EVENT_MAX];
+    char line[CHAIN_LINE_MAX];
     int n = chain_heartbeat(&chain, wallMs(), det_health_name(det_health(&detector, millis())), line, sizeof line);
     if (n > 0) appendEvent(line);
 }
@@ -156,7 +206,7 @@ static void emitSession(const presence_session_t &s) {
     presence_session_t wall = s;
     wall.start_ms += skew;
     wall.end_ms += skew;
-    char line[CHAIN_EVENT_MAX];
+    char line[CHAIN_LINE_MAX];
     int n = chain_presence(&chain, wallMs(), &wall, cfg.terminalId.c_str(), line, sizeof line);
     if (n > 0) {
         appendEvent(line);
@@ -187,6 +237,9 @@ static void flushOutbox() {
     if (!httpBegin(http, String(SERVER_URL) + "/v1/events")) { lastPost = "URL salah"; return; }
     http.addHeader("Authorization", String("Bearer ") + cfg.token);
     http.addHeader("Content-Type", "application/json");
+    // Versi yang berjalan, supaya dashboard bisa menunjukkan sensor mana yang belum diperbarui.
+    http.addHeader("X-Firmware-Build", String(FW_BUILD));
+    http.addHeader("X-Firmware-Version", FW_VERSION);
     int code = http.POST(body);
     String resp = code > 0 ? http.getString() : String();
     http.end();
@@ -228,6 +281,7 @@ static void showLines(const char *l1, const char *l2, const char *l3, const char
 [[noreturn]] static void factoryReset(const char *reason) {
     showLines("RESET PABRIK", reason, "Menghapus data...", "");
     provisionClear();
+    signerReset();
     provisionBootOk();
     delay(1500);
     ESP.restart();
@@ -297,6 +351,8 @@ void setup() {
     if (!serverIsSecure()) Serial.println("PERINGATAN: SERVER_URL memakai HTTP tanpa enkripsi; hanya untuk uji di jaringan lokal.");
     Serial.printf("perangkat %s, outlet %s, terminal %s\n", cfg.deviceId.c_str(), cfg.outletId.c_str(), cfg.terminalId.length() ? cfg.terminalId.c_str() : "-");
     loadChain();
+    applySigner();
+    Serial.printf("firmware %s (build %d, kanal %s), kunci perangkat: %s\n", FW_VERSION, FW_BUILD, FW_CHANNEL, signerHasKey() ? (signerEnrolled() ? "terdaftar" : "ada, belum terdaftar") : "belum dibuat");
 
     Serial1.begin(256000, SERIAL_8N1, PIN_RADAR_RX, PIN_RADAR_TX);
     ld2410_init(&parser);
@@ -358,5 +414,7 @@ void loop() {
             wifiDownSince = millis() ? millis() : 1;  // coba lagi setelah WIFI_FALLBACK_MS berikutnya
         }
     }
+    maintainSigning(now);
+    maintainOta(now);
     if (now - lastScreen >= 500) { lastScreen = now; if (!portalOpen) drawScreen(); }
 }

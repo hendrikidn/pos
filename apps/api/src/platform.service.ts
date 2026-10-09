@@ -102,7 +102,7 @@ export class PlatformService {
     const [outlets, devices, tokens, kpis, daily, users] = await Promise.all([
       this.db.admin.query('select id, name, terminals from outlet where tenant_id = $1 order by id', [tenantId]),
       this.db.admin.query(
-        'select id, kind, outlet_id, terminal_id, last_seen_ms, revoked_at from device where tenant_id = $1 order by outlet_id, id',
+        'select id, kind, outlet_id, terminal_id, last_seen_ms, revoked_at, firmware_version from device where tenant_id = $1 order by outlet_id, id',
         [tenantId],
       ),
       // Hanya metadata: hash dan token polos tidak pernah dikembalikan.

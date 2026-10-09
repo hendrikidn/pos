@@ -15,6 +15,7 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['PUT'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/users\/[0-9]+$/ },
   { methods: ['POST'], path: /^\/v1\/admin\/auth\/(2fa\/(setup|enable|disable)|sessions\/revoke-others)$/ },
   { methods: ['DELETE'], path: /^\/v1\/admin\/auth\/sessions\/[0-9]+$/ },
+  { methods: ['POST'], path: /^\/v1\/admin\/firmware\/[0-9]+\/revoke$/ },
 ];
 
 export async function POST(req: Request) {

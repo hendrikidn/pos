@@ -17,7 +17,7 @@ int main(int argc, char **argv) {
     int64_t t = strtoll(argv[6], NULL, 10);
     c.clock_offset_ms = strtoll(argv[7], NULL, 10);
     const char *terminal = argc > 8 ? argv[8] : NULL;
-    char line[CHAIN_EVENT_MAX + 80];
+    char line[CHAIN_LINE_MAX];
     for (int i = 0; i < n; i++) {
         int len;
         if (i % 3 == 2) {

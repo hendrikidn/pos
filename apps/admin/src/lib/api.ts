@@ -87,6 +87,7 @@ export interface DeviceRow {
   terminal_id: string | null;
   last_seen_ms: number | null;
   revoked_at: string | null;
+  firmware_version?: string | null;
 }
 
 export interface TokenRow {
@@ -120,6 +121,8 @@ export interface TenantDetail {
   outletKpis: OutletKpi[];
   daily: DailyPoint[];
 }
+
+export interface FirmwareRelease { id: number; board: string; channel: string; version: string; build: number; size: number; sha256: string; notes: string | null; createdBy: string; createdAt: string; revokedAt: string | null; revokedReason: string | null }
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {

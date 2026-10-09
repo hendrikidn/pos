@@ -5,6 +5,7 @@ import {
   type Account, type AccountType, type JournalEntry,
 } from './accounting';
 import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
+import { buildStatements, statementCsv, STATEMENT_KINDS, type FinancialStatements, type StatementKind } from './financial-statements';
 import { Database } from './db/database';
 import { ReservationService } from './reservation.service';
 import type { Queryable } from './db/driver';
@@ -235,5 +236,72 @@ export class AccountingService {
       await this.audit(q, auth, 'export.journal', { outletId, from: r.from, to: r.to, rows: table.rows.length });
       return { filename: `${outletId}-jurnal-${r.from}_${r.to}.csv`, csv: toCsv(table) };
     });
+  }
+
+  /** Awal pembukuan satu outlet: tanggal lokal tertua di antara event penjualan, jurnal manual, pesanan platform, pembelian, dan penggajian. */
+  private async booksStart(q: Queryable, outletId: string, off: number): Promise<string | null> {
+    const dates: string[] = [];
+    const ev = (await q.query<{ t: number | null }>('select min(device_time_ms) as t from event where outlet_id = $1 and type = any($2::text[])', [outletId, JOURNAL_EVENT_TYPES])).rows[0]?.t;
+    if (ev !== null && ev !== undefined) dates.push(localDate(Number(ev), off));
+    const one = async (sql: string) => { const v = (await q.query<{ d: string | null }>(sql, [outletId])).rows[0]?.d; if (v) dates.push(v); };
+    await one('select min(date) as d from journal_entry where outlet_id = $1 and voided_at is null');
+    await one('select min(date) as d from channel_order where outlet_id = $1');
+    await one('select min(paid_date) as d from supplier_payment where outlet_id = $1');
+    await one("select min(paid_date) as d from payroll_run where outlet_id = $1 and status = 'PAID'");
+    const rc = (await q.query<{ t: number | null }>('select min(received_at_ms) as t from purchase_receipt where outlet_id = $1', [outletId])).rows[0]?.t;
+    if (rc !== null && rc !== undefined) dates.push(localDate(Number(rc), off));
+    return dates.length ? dates.sort()[0]! : null;
+  }
+
+  /**
+   * Laporan keuangan lengkap (neraca, laba rugi, arus kas, perubahan ekuitas) untuk satu outlet, atau `all` = konsolidasi semua outlet (hanya OWNER).
+   * Periode `from`..`to` (maks. 366 hari; bawaan awal bulan sampai hari ini); neraca per tanggal `to`. Jurnal dihitung sejak awal pembukuan dalam
+   * potongan 31 hari, jadi saldo kumulatif (kas, persediaan, utang) benar. Pembukuan lebih lama dari 48 bulan sebelum `to` tidak dibaca (diberi peringatan).
+   */
+  async statements(auth: ApiAuth, outletId: string, params: { from?: string; to?: string }, now: number): Promise<FinancialStatements> {
+    const MAX_BOOK_DAYS = 1460;
+    return this.db.tenantTx(auth.tenantId, async (q) => {
+      const outlets = outletId === 'all'
+        ? (await q.query<{ id: string; utc_offset_minutes: number }>('select id, utc_offset_minutes from outlet order by id')).rows
+        : (await q.query<{ id: string; utc_offset_minutes: number }>('select id, utc_offset_minutes from outlet where id = $1', [outletId])).rows;
+      if (outlets.length === 0) throw new NotFoundException('outlet tidak ditemukan');
+      const off = outlets[0]!.utc_offset_minutes;
+      const today = localDate(now, off);
+      const to = params.to ?? today;
+      const dateOk = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) === d;
+      if (!dateOk(to) || (params.from !== undefined && !dateOk(params.from))) throw new BadRequestException('tanggal harus berformat YYYY-MM-DD');
+      if (to > today) throw new BadRequestException('tanggal akhir tidak boleh di masa depan');
+      const from = params.from ?? `${to.slice(0, 8)}01`;
+      if (from > to) throw new BadRequestException('tanggal awal tidak boleh setelah tanggal akhir');
+      if ((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS > 365) throw new BadRequestException('periode maksimal 366 hari');
+      const accounts = await this.accounts(q, auth.tenantId);
+      const all: JournalEntry[] = [];
+      let start: string | null = null;
+      const warnings: string[] = [];
+      const earliestAllowed = addDays(to, -MAX_BOOK_DAYS);
+      for (const o of outlets) {
+        let bs = await this.booksStart(q, o.id, o.utc_offset_minutes);
+        if (bs === null) continue;
+        if (bs > to) continue;
+        if (bs < earliestAllowed) { warnings.push(`Pembukuan ${o.id} lebih lama dari 48 bulan; hanya dibaca sejak ${earliestAllowed}, jadi saldo awal bisa tidak lengkap. Catat saldo awal sebagai jurnal manual.`); bs = earliestAllowed; }
+        if (start === null || bs < start) start = bs;
+        for (let a = bs; a <= to; a = addDays(a, 31)) {
+          const b = addDays(a, 30) > to ? to : addDays(a, 30);
+          all.push(...(await this.entries(q, auth, o.id, { off: o.utc_offset_minutes, from: a, to: b }, now)));
+        }
+      }
+      const st = buildStatements(all, accounts, { from, to }, start);
+      st.warnings.unshift(...warnings);
+      if (outletId === 'all') st.warnings.push(`Konsolidasi ${outlets.length} outlet: transaksi antar-outlet tidak dieliminasi.`);
+      await this.audit(q, auth, 'report.statements', { outletId, from, to });
+      return st;
+    });
+  }
+
+  async statementsCsv(auth: ApiAuth, outletId: string, kind: unknown, params: { from?: string; to?: string }, now: number): Promise<{ filename: string; csv: string }> {
+    if (typeof kind !== 'string' || !(STATEMENT_KINDS as readonly string[]).includes(kind)) throw new BadRequestException(`statement harus salah satu dari ${STATEMENT_KINDS.join(', ')}`);
+    const st = await this.statements(auth, outletId, params, now);
+    const out = statementCsv(st, kind as StatementKind);
+    return { filename: `${outletId}-${out.slug}-${st.period.from}_${st.period.to}.csv`, csv: out.csv };
   }
 }

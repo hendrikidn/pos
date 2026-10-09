@@ -105,7 +105,7 @@ export function TenantManager({ d, now }: { d: TenantDetail; now: number }) {
                 <td>{KIND[v.kind]}</td>
                 <td className="mono">{v.outlet_id}</td>
                 <td className="mono">{v.terminal_id ?? '–'}</td>
-                <td>{v.revoked_at ? 'Dicabut' : v.last_seen_ms === null ? 'Belum pernah' : ago(v.last_seen_ms, now)}</td>
+                <td>{v.revoked_at ? 'Dicabut' : v.last_seen_ms === null ? 'Belum pernah' : ago(v.last_seen_ms, now)}{v.firmware_version && <div className="muted small">firmware {v.firmware_version}</div>}</td>
               </tr>
             ))}
             {d.devices.length === 0 && <tr><td colSpan={5} className="muted">Belum ada perangkat. Owner memasangnya sendiri di Pengaturan → Perangkat.</td></tr>}

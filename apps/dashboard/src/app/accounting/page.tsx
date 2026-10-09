@@ -1,28 +1,48 @@
 import Link from 'next/link';
 import { AccountingManager } from '@/components/AccountingManager';
 import { Shell } from '@/components/Shell';
-import { api, authed, type AccountingReports, type JournalView, type Me, type Outlet } from '@/lib/api';
+import { FinancialStatementsView } from '@/components/FinancialStatementsView';
+import { api, authed, type AccountingReports, type FinancialStatements, type JournalView, type Me, type Outlet } from '@/lib/api';
 import { RANGE_OPTIONS, rangeText, rp, type RangeValue } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-const VIEWS = [['journal', 'Jurnal'], ['trial', 'Neraca saldo'], ['income', 'Laba rugi'], ['accounts', 'Bagan akun']] as const;
+const VIEWS = [['journal', 'Jurnal'], ['trial', 'Neraca saldo'], ['income', 'Laba rugi'], ['statements', 'Laporan keuangan'], ['accounts', 'Bagan akun']] as const;
+const PERIODS = [['this-month', 'Bulan ini'], ['last-month', 'Bulan lalu'], ['ytd', 'Tahun berjalan'], ['last-year', '12 bulan terakhir']] as const;
+
+/** Periode laporan keuangan dari pilihan cepat (tanggal lokal WIB; tanggal sebenarnya diperiksa API sesuai zona outlet). */
+function periodRange(p: string): { from: string; to: string } {
+  const now = new Date(Date.now() + 7 * 3_600_000);
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  if (p === 'last-month') return { from: iso(new Date(Date.UTC(y, m - 1, 1))), to: iso(new Date(Date.UTC(y, m, 0))) };
+  if (p === 'ytd') return { from: `${y}-01-01`, to: iso(now) };
+  if (p === 'last-year') return { from: iso(new Date(Date.UTC(y, m - 11, 1))), to: iso(now) };
+  return { from: iso(new Date(Date.UTC(y, m, 1))), to: iso(now) };
+}
 type View = (typeof VIEWS)[number][0];
 const TYPE_LABEL: Record<string, string> = { ASSET: 'Aset', LIABILITY: 'Kewajiban', EQUITY: 'Ekuitas', REVENUE: 'Pendapatan', EXPENSE: 'Beban' };
 
-export default async function AccountingPage({ searchParams }: { searchParams: Promise<{ outlet?: string; range?: string; view?: string }> }) {
+export default async function AccountingPage({ searchParams }: { searchParams: Promise<{ outlet?: string; range?: string; view?: string; period?: string }> }) {
   const sp = await searchParams;
   const range: RangeValue = RANGE_OPTIONS.some((o) => o.value === sp.range) ? (sp.range as RangeValue) : 'month';
   const view: View = VIEWS.some(([v]) => v === sp.view) ? (sp.view as View) : 'journal';
   const { me, outlets } = await authed(async () => ({ me: await api<Me>('/v1/me'), outlets: await api<Outlet[]>('/v1/outlets') }));
   if (me.role !== 'OWNER' && me.role !== 'MANAGER') return <Shell me={me}><div className="empty">Akuntansi hanya untuk owner dan manager.</div></Shell>;
-  const outlet = outlets.find((o) => o.id === sp.outlet) ?? outlets[0];
+  const consolidated = sp.outlet === 'all' && me.role === 'OWNER' && outlets.length > 1;
+  const outlet = consolidated ? { ...outlets[0]!, id: 'all', name: 'Semua outlet (konsolidasi)' } : (outlets.find((o) => o.id === sp.outlet) ?? outlets[0]);
   if (!outlet) return <Shell me={me}><div className="empty">Belum ada outlet.</div></Shell>;
+  const period = PERIODS.some(([v]) => v === sp.period) ? sp.period! : 'this-month';
 
   const base = `/v1/outlets/${encodeURIComponent(outlet.id)}/accounting`;
-  const journal = await authed(() => api<JournalView>(`${base}/journal?range=${range}`));
-  const reports = view === 'trial' || view === 'income' ? await authed(() => api<AccountingReports>(`${base}/reports?range=${range}`)) : null;
-  const href = (o: string, rg: string, v: string) => `/accounting?outlet=${encodeURIComponent(o)}&range=${rg}&view=${v}`;
+  // Jurnal dan neraca saldo memakai satu outlet; konsolidasi hanya untuk laporan keuangan.
+  const journalOutlet = consolidated ? outlets[0]!.id : outlet.id;
+  const journal = await authed(() => api<JournalView>(`/v1/outlets/${encodeURIComponent(journalOutlet)}/accounting/journal?range=${range}`));
+  const pr = periodRange(period);
+  const stmts = view === 'statements' ? await authed(() => api<FinancialStatements>(`${base}/statements?from=${pr.from}&to=${pr.to}`)) : null;
+  const reports = view === 'trial' || view === 'income' ? await authed(() => api<AccountingReports>(`/v1/outlets/${encodeURIComponent(journalOutlet)}/accounting/reports?range=${range}`)) : null;
+  const href = (o: string, rg: string, v: string, pe = period) => `/accounting?outlet=${encodeURIComponent(o)}&range=${rg}&view=${v}${v === 'statements' ? `&period=${pe}` : ''}`;
   const canWrite = me.role === 'OWNER';
 
   return (
@@ -35,13 +55,26 @@ export default async function AccountingPage({ searchParams }: { searchParams: P
             {outlets.map((o) => <Link key={o.id} className="tab" href={href(o.id, range, view)} aria-current={o.id === outlet.id ? 'page' : undefined}>{o.name}</Link>)}
           </nav>
         )}
+        {me.role === 'OWNER' && outlets.length > 1 && view === 'statements' && (
+          <nav className="tabs" aria-label="Konsolidasi">
+            <Link className="tab" href={href('all', range, view)} aria-current={consolidated ? 'page' : undefined}>Semua outlet</Link>
+          </nav>
+        )}
+        {view === 'statements' ? (
+          <nav className="tabs" aria-label="Periode">
+            {PERIODS.map(([v, l]) => <Link key={v} className="tab" href={href(outlet.id, range, view, v)} aria-current={v === period ? 'page' : undefined}>{l}</Link>)}
+          </nav>
+        ) : (
         <nav className="tabs" aria-label="Rentang waktu">
           {RANGE_OPTIONS.map((o) => <Link key={o.value} className="tab" href={href(outlet.id, o.value, view)} aria-current={o.value === range ? 'page' : undefined}>{o.label}</Link>)}
         </nav>
+        )}
         <nav className="tabs" aria-label="Tampilan">
           {VIEWS.map(([v, l]) => <Link key={v} className="tab" href={href(outlet.id, range, v)} aria-current={v === view ? 'page' : undefined}>{l}</Link>)}
         </nav>
       </div>
+
+      {view === 'statements' && stmts && <FinancialStatementsView data={stmts} outletId={outlet.id} outletName={outlet.name} />}
 
       {view === 'trial' && reports && (
         <section className="panel">
@@ -87,7 +120,7 @@ export default async function AccountingPage({ searchParams }: { searchParams: P
       )}
 
       {(view === 'journal' || view === 'accounts') && (
-        <AccountingManager view={view} outletId={outlet.id} range={range} canWrite={canWrite} data={journal} />
+        <AccountingManager view={view} outletId={journalOutlet} range={range} canWrite={canWrite} data={journal} />
       )}
     </Shell>
   );

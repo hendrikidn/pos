@@ -8,11 +8,11 @@ export const ROOT = resolve(__dirname, '..');
 export const hasCompiler = spawnSync('cc', ['--version']).status === 0;
 
 /** Membangun alat uji C ke direktori sementara. Dilewati bila tidak ada kompilator C. */
-export function build(): { genEvents: string; replay: string } | null {
+export function build(): { genEvents: string; replay: string; sigtool: string } | null {
   if (spawnSync('cc', ['--version']).status !== 0) return null;
   const dir = mkdtempSync(join(tmpdir(), 'sensor-node-'));
   execFileSync('make', ['-C', ROOT, `BUILD=${dir}`], { stdio: 'pipe' });
-  return { genEvents: join(dir, 'gen_events'), replay: join(dir, 'replay') };
+  return { genEvents: join(dir, 'gen_events'), replay: join(dir, 'replay'), sigtool: join(dir, 'sigtool') };
 }
 
 export interface FrameSpec {

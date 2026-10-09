@@ -67,6 +67,8 @@ services:
       FORCE_HSTS: "1"
       # Kunci enkripsi rahasia 2FA admin di basis data (AES-256-GCM). WAJIB diisi sebelum admin mengaktifkan 2FA di produksi.
       SECRETS_KEY: ${SECRETS_KEY:-}
+      # Kunci publik rilis firmware (SPKI base64; beberapa dipisah koma untuk rotasi). Tanpa ini server menolak semua unggahan firmware.
+      FIRMWARE_RELEASE_PUBKEY: ${FIRMWARE_RELEASE_PUBKEY:-}
     logging: *logging
     # Waktu untuk menyelesaikan permintaan dan evaluasi yang berjalan sebelum dimatikan paksa (API menutup rapi dalam 25 dtk).
     stop_grace_period: 30s

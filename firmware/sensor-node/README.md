@@ -8,7 +8,8 @@ Mengubah radar mmWave HLK-LD2410 menjadi **sesi kehadiran customer** di depan ka
 |---|---|
 | Pembaca frame LD2410, detektor sesi, pembuat event (`core/`, C99) | Diuji di komputer: 27 tes, termasuk **verifikasi silang** bahwa hash dan rantai event dari C diterima `verifyChain` TypeScript dan ingest API sungguhan |
 | Alat kalibrasi (`tools/calibrate.ts`) | Diuji dengan data sintetis |
-| Aplikasi ESP32 (`app/`: portal pairing, HTTPS, Wi-Fi, NTP, antrean di flash, OLED) | **Berhasil dikompilasi** untuk ESP32-C3 (kedua env; flash 84% dari 1,3 MB, RAM 13%), tanpa peringatan. **Belum dijalankan di perangkat** |
+| Aplikasi ESP32 (`app/`: portal pairing, HTTPS, Wi-Fi, NTP, antrean di flash, OLED, tanda tangan event, OTA, pin sertifikat) | **Berhasil dikompilasi** untuk ESP32-C3 (kedua env; flash 71% dari 1,5 MB, RAM 13%), tanpa peringatan. **Belum dijalankan di perangkat** |
+| Tanda tangan event, manifest dan verifikasi firmware (`core/b64.c`, `spki.c`, `fw.c`, `chain.c`) | Diuji di komputer terhadap verifikasi Node.js dan API sungguhan (micro-ecc hanya di alat uji); **jalur mbedtls di `app/signer.cpp` dan `app/ota.cpp` hanya dikompilasi, belum dijalankan** |
 | Protokol frame LD2410 | Ditulis dari pengetahuan protokol serial pabrikan, **belum dicocokkan dengan modul asli**. Ini hal pertama yang diuji saat modul tiba |
 
 ## Perangkat keras
@@ -100,15 +101,54 @@ Serial1 (256000 baud) → ld2410_feed → det_update → sesi → chain_presence
 
 ```
 make -C firmware/sensor-node          # membangun alat uji C (cc)
-npx vitest run firmware               # 27+ tes: parser, detektor, rantai, ingest API, kalibrasi
+npx vitest run firmware               # 70+ tes: parser, detektor, rantai, tanda tangan, manifest firmware, ingest API, kalibrasi
 ```
 
 ## Kompilasi untuk ESP32
 
 `pio run -e esp32c3` (PlatformIO). Kompilasi pertama mengunduh toolchain dan framework Arduino (±2 GB) dan memakan belasan menit; berikutnya sekitar 20 detik.
 
+## Tanda tangan event, pembaruan firmware, dan pin sertifikat
+
+### Event bertanda tangan
+
+Setiap event sensor membawa `sig` (ECDSA P-256 atas string hash, r||s base64url), sama dengan terminal POS. Kunci dibuat **di perangkat** (mbedtls, pembangkit acak perangkat keras) tepat setelah pairing berhasil, disimpan di NVS, dan hanya kunci publiknya yang dikirim (`POST /v1/device/key`). Sejak itu server menandai event sensor ini yang tidak bertanda tangan (`MISSING_SIGNATURE`) atau bertanda tangan kunci lain (`BAD_SIGNATURE`), sehingga pemegang token saja tidak bisa lagi memalsukan event atas nama sensor. Bila penanda tangan gagal, event tidak dibuat dan rantai tidak maju.
+
+- **Sensor lama yang sudah terpasang** (event lama belum bertanda tangan): setelah firmware baru terpasang, kunci dibuat saat WiFi dan jam siap; event baru langsung bertanda tangan, dan kunci baru **didaftarkan ke server setelah antrean event lama habis terkirim** (server menolak event tak bertanda tangan begitu kunci terdaftar).
+- **Kunci hilang atau sensor di-flash ulang:** server menjawab 409 (sudah memegang kunci lain); owner mengatur ulang kunci di dashboard (Pengaturan > Perangkat), lalu sensor mendaftarkan ulang sendiri (dicoba tiap 10 menit; OLED menampilkan `Kirim: KUNCI 409`).
+- **Batas:** tanpa enkripsi flash (eFuse, **tidak dapat dibatalkan**, tidak diaktifkan) siapa pun yang memegang chip bisa membaca kunci dari flash. Yang ditutup: penyerang jarak jauh yang hanya memegang token.
+
+### Pembaruan firmware (OTA)
+
+Sensor memeriksa pembaruan **saat konfigurasi awal** (sesaat setelah pairing berhasil, sebelum restart pertama) dan lalu tiap 6 jam (`OTA_CHECK_MS`; hanya bila antrean hampir kosong). Pengamanannya berlapis:
+
+1. Rilis **ditandatangani di luar server** dengan kunci rilis ECDSA P-256 milik Anda; kunci publiknya tertanam di firmware (`OTA_RELEASE_PUBKEY` di `secrets.h`) dan di server (`FIRMWARE_RELEASE_PUBKEY`). Server menolak unggahan yang tanda tangannya tidak sah, dan sensor memeriksa ulang sendiri: **server yang dibobol tidak bisa mendorong firmware ke sensor**.
+2. Yang ditandatangani: `papan | kanal | versi | build | ukuran | sha256`. Sensor hanya memasang bila build **lebih besar** dari yang berjalan (anti-downgrade), papan dan kanal sama, dan ukuran muat di slot.
+3. Berkas diunduh ke slot OTA yang tidak aktif sambil dihitung SHA-256-nya; hanya dijadikan bootable bila hash dan ukuran cocok dengan manifest bertanda tangan. Slot yang berjalan tidak disentuh sampai itu.
+4. Jalur unduhan dari manifest dibatasi ke `/v1/public/firmware/<angka>/download` di server yang sama.
+
+**Siapkan sekali:**
+```
+npx tsx firmware/sensor-node/tools/release.mts keygen ~/kunci-rilis      # simpan release-private.pem OFFLINE (pengelola sandi / brankas)
+# kunci publik yang dicetak -> OTA_RELEASE_PUBKEY di app/secrets.h dan FIRMWARE_RELEASE_PUBKEY di deploy/.env (mulai ulang API)
+```
+**Tiap rilis:** naikkan `FW_BUILD` (dan label `FW_VERSION`) di `app/config.h`, `pio run -e esp32c3`, lalu:
+```
+npx tsx firmware/sensor-node/tools/release.mts sign .pio/build/esp32c3/firmware.bin --key ~/kunci-rilis/release-private.pem --board esp32c3 --channel stable --version 1.2.0 --build 3
+npx tsx firmware/sensor-node/tools/release.mts publish .pio/build/esp32c3/firmware.bin --server https://anatta-pos.dolanyu.com --token adm_... [--code 123456]
+```
+Rilis dikelola di konsol admin > Firmware (daftar, tarik). Sensor melaporkan versi yang berjalan (header `X-Firmware-Version`); dashboard menampilkannya di daftar perangkat. Terbitkan ke kanal `beta` dulu (sensor uji dengan `-DFW_CHANNEL=\"beta\"`), baru `stable`.
+
+**Tabel partisi:** `partitions.csv` memberi dua slot aplikasi 1,5 MB + LittleFS ~1 MB (flash 4 MB). Mengganti tabel partisi **butuh unggah lewat USB sekali** (OTA tidak bisa mengubahnya); sensor yang sudah terpasang dengan firmware lama harus di-flash USB satu kali untuk mendapat OTA. Setelahnya semua pembaruan lewat udara.
+
+**Batas jujur:** Arduino-ESP32 tidak mengaktifkan *app rollback* di bootloader bawaannya, jadi firmware yang lolos semua pemeriksaan tetapi macet saat boot **tidak otomatis dikembalikan**; pulihkan lewat USB. Karena itu uji dulu di kanal `beta`. Jalur menulis ke flash (`Update.*`) belum pernah dijalankan di perangkat; logika keamanannya (tanda tangan, hash, anti-downgrade) diuji di komputer dan terhadap API.
+
+### Pin sertifikat server
+
+Isi `SERVER_PIN_SPKI_SHA256` di `secrets.h` dengan hasil `npx tsx firmware/sensor-node/tools/spki_pin.mts <host>` (SHA-256 kunci publik sertifikat daun; boleh sampai 3, dipisah koma: sekarang + cadangan). Bila terisi, sensor menyambung, memeriksa pin **sebelum mengirim apa pun** (termasuk token), dan membatalkan koneksi bila tidak cocok: CA mana pun yang salah menerbitkan sertifikat untuk domain Anda tidak bisa menyadap sensor. Pin menempel pada kunci, bukan sertifikat, jadi tetap sama saat diperpanjang selama kuncinya dipakai ulang (`certbot renew --reuse-key`). **Siapkan pin cadangan** (kunci baru yang sudah dibuat) sebelum merotasi kunci, atau semua sensor akan terkunci keluar sampai di-flash ulang lewat USB. Kosong = hanya validasi rantai terhadap bundel root CA (perilaku lama).
+
 ## Keamanan dan batas
 
-- Perangkat memakai **token perangkat** dan rantai hash. Tanda tangan dengan kunci perangkat (eFuse/HMAC) **belum ada**: siapa pun yang memegang token dan tahu format rantai bisa memalsukan event atas nama sensor. Ini pending yang sama dengan POS.
-- **HTTPS:** `SERVER_URL` berawalan `https://` divalidasi terhadap bundel root CA Mozilla yang dibenamkan di firmware (`certs/x509_crt_bundle.bin`, 121 sertifikat, 55 KB): rantai sertifikat, nama domain, dan masa berlaku. Karena itu jam harus sinkron lebih dulu (portal pairing menyinkronkan NTP sebelum menukar kode). Rantai Let's Encrypt (ISRG Root X1) terbukti cocok dengan logika pencarian di perangkat; server yang rantainya berujung pada root lama yang sudah dikeluarkan dari daftar Mozilla (mis. google.com, example.com) akan ditolak. Pakai sertifikat Let's Encrypt di web server (certbot, atau Caddy yang dikunci ke Let's Encrypt; lihat `deploy/README.md`). Perbarui bundel sesekali: `pip install certifi cryptography && python3 firmware/sensor-node/tools/gen_cert_bundle.py`, lalu unggah ulang. HTTP polos (`http://`) hanya untuk uji di jaringan lokal dan memunculkan peringatan di Serial Monitor. Penyematan sertifikat tertentu (pinning) belum ada.
+- Perangkat memakai **token perangkat**, rantai hash, **dan tanda tangan event** dengan kunci perangkat (lihat di atas). Kunci disimpan di NVS tanpa enkripsi flash: pemegang chip fisik bisa mengambilnya (eFuse/HMAC belum dipakai).
+- **HTTPS:** `SERVER_URL` berawalan `https://` divalidasi terhadap bundel root CA Mozilla yang dibenamkan di firmware (`certs/x509_crt_bundle.bin`, 121 sertifikat, 55 KB): rantai sertifikat, nama domain, dan masa berlaku. Karena itu jam harus sinkron lebih dulu (portal pairing menyinkronkan NTP sebelum menukar kode). Rantai Let's Encrypt (ISRG Root X1) terbukti cocok dengan logika pencarian di perangkat; server yang rantainya berujung pada root lama yang sudah dikeluarkan dari daftar Mozilla (mis. google.com, example.com) akan ditolak. Pakai sertifikat Let's Encrypt di web server (certbot, atau Caddy yang dikunci ke Let's Encrypt; lihat `deploy/README.md`). Perbarui bundel sesekali: `pip install certifi cryptography && python3 firmware/sensor-node/tools/gen_cert_bundle.py`, lalu unggah ulang. HTTP polos (`http://`) hanya untuk uji di jaringan lokal dan memunculkan peringatan di Serial Monitor. Penyematan (pinning) kunci publik sertifikat daun tersedia lewat `SERVER_PIN_SPKI_SHA256` (lihat di atas).
 - Radar mendeteksi keberadaan, bukan identitas. Alert dari sensor adalah indikasi untuk dicek dengan CCTV.

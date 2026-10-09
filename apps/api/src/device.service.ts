@@ -45,7 +45,7 @@ export class DeviceService {
     return this.db.tenantTx(auth.tenantId, async (q) =>
       (
         await q.query(
-          `select id, kind, outlet_id, terminal_id, (public_key is not null) as key_enrolled, last_seq, last_seen_ms, revoked_at from device order by outlet_id, id`,
+          `select id, kind, outlet_id, terminal_id, (public_key is not null) as key_enrolled, last_seq, last_seen_ms, revoked_at, firmware_version, firmware_build from device order by outlet_id, id`,
         )
       ).rows,
     );

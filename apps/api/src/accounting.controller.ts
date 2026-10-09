@@ -65,6 +65,32 @@ export class AccountingController {
     return this.acc.reports(auth, outletId, { from, to, range }, this.clock());
   }
 
+  /**
+   * Laporan keuangan lengkap: neraca, laba rugi, arus kas, perubahan ekuitas. `outletId` = `all` untuk konsolidasi (hanya OWNER).
+   * `format=csv&statement=balance|income|cashflow|equity` mengunduh satu laporan.
+   */
+  @Get('outlets/:outletId/accounting/statements')
+  async statements(
+    @Req() req: AuthedRequest,
+    @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void },
+    @Param('outletId') outletId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('format') format?: string,
+    @Query('statement') statement?: string,
+  ) {
+    const auth = requireApi(req, outletId === 'all' ? ['OWNER'] : ['OWNER', 'MANAGER']);
+    if (outletId !== 'all') await this.outlet(auth.tenantId, outletId);
+    if (format === 'csv') {
+      const out = await this.acc.statementsCsv(auth, outletId, statement, { from, to }, this.clock());
+      res.setHeader('content-type', 'text/csv; charset=utf-8');
+      res.setHeader('content-disposition', `attachment; filename="${out.filename}"`);
+      res.setHeader('cache-control', 'no-store');
+      return out.csv;
+    }
+    return this.acc.statements(auth, outletId, { from, to }, this.clock());
+  }
+
   @Get('outlets/:outletId/accounting/ledger/:code')
   async ledger(@Req() req: AuthedRequest, @Param('outletId') outletId: string, @Param('code') code: string, @Query('from') from?: string, @Query('to') to?: string, @Query('range') range?: string) {
     const auth = requireApi(req, ['OWNER', 'MANAGER']);

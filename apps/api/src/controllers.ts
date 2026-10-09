@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Inject, NotFoundExc
 import { Public, requireApi, requireDevice, type AuthedRequest } from './auth';
 import { BankService } from './bank.service';
 import { Database } from './db/database';
+import { FirmwareService } from './firmware.service';
 import { IncidentService } from './incident.service';
 import { IngestService } from './ingest.service';
 import { NotificationService } from './notification.service';
@@ -25,6 +26,7 @@ export class ApiController {
     @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
     @Inject(Telemetry) private readonly telemetry: Telemetry,
+    @Inject(FirmwareService) private readonly firmware: FirmwareService,
   ) {}
 
   @Public()
@@ -37,6 +39,8 @@ export class ApiController {
   @Post('v1/events')
   async postEvents(@Req() req: AuthedRequest, @Body() body: { events?: unknown }) {
     const device = requireDevice(req);
+    // Sensor melaporkan versi firmware yang berjalan lewat header (untuk melihat sensor mana yang belum diperbarui); kegagalan mencatat tidak boleh menggagalkan setoran.
+    if (device.deviceKind === 'sensor') await this.firmware.noteRunning(device.deviceId, req.headers['x-firmware-build'], req.headers['x-firmware-version']).catch(() => undefined);
     const result = await this.ingest.ingest(device, body?.events, this.clock());
     this.telemetry.inc('pos_events_received_total', 'Event dari perangkat menurut hasil.', { result: 'accepted' }, result.accepted);
     if (result.accepted > 0) await this.pipeline.schedule(device.tenantId, device.outletId);

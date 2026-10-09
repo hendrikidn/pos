@@ -7,6 +7,12 @@
 // (portal setup "ANATTA-xxxx" dengan kode dari dashboard, Pengaturan -> Perangkat).
 #define SERVER_URL "https://anatta-pos.dolanyu.com"
 
+// Kunci publik rilis firmware (SPKI base64) dari `npx tsx firmware/sensor-node/tools/release.mts keygen <folder>`. Tanpa ini pembaruan OTA nonaktif.
+#define OTA_RELEASE_PUBKEY ""
+
+// Pin sertifikat server (opsional, disarankan): `npx tsx firmware/sensor-node/tools/spki_pin.mts anatta-pos.dolanyu.com`. Beberapa pin dipisah koma.
+// #define SERVER_PIN_SPKI_SHA256 "<hex sha256 SPKI>,<hex pin cadangan>"
+
 // ---- Mode uji tanpa pairing (opsional) ----
 // Hapus tanda komentar untuk melewati portal dan memakai token yang dicetak `npm run demo`. Jangan dipakai di produksi.
 // #define WIFI_SSID "nama-wifi-outlet"

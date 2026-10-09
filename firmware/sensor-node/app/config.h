@@ -49,3 +49,31 @@
 #define FLUSH_BATCH 20
 // Bila antrean melebihi ini (offline lama), detak tidak dibuat lagi agar tidak ada nomor urut yang hilang saat penuh.
 #define OUTBOX_MAX_BYTES (256UL * 1024UL)
+
+// ---- Identitas firmware dan pembaruan (OTA) ----
+// FW_BUILD naik setiap rilis (bilangan bulat); perangkat hanya memasang build yang LEBIH BARU dari ini (anti-downgrade). Harus sama dengan --build
+// saat menandatangani rilis (tools/release.mts). FW_VERSION hanya label untuk manusia.
+#define FW_BOARD "esp32c3"
+#define FW_VERSION "1.1.0"
+#define FW_BUILD 2
+#ifndef FW_CHANNEL
+#define FW_CHANNEL "stable"
+#endif
+// Pemeriksaan pembaruan berkala saat berjalan (selain saat konfigurasi awal). 0 = hanya saat konfigurasi awal.
+#define OTA_CHECK_MS (6UL * 60UL * 60UL * 1000UL)
+// Pembaruan hanya dipasang saat antrean event hampir kosong, supaya tidak ada yang menggantung lama saat restart.
+#define OTA_MAX_PENDING 10
+
+// Kunci publik rilis ECDSA P-256 (SPKI base64) yang dipercaya firmware; dibuat dengan `tools/release.mts keygen`. Kosong = OTA nonaktif.
+// Diisi di secrets.h. Kunci privatnya TIDAK ada di firmware maupun server.
+#ifndef OTA_RELEASE_PUBKEY
+#define OTA_RELEASE_PUBKEY ""
+#endif
+
+// Pin sertifikat server (opsional, sangat disarankan): daftar SHA-256 kunci publik (SPKI) sertifikat server dalam heksadesimal, dipisah koma, maksimal 3
+// (yang sekarang + cadangan). Dihitung dengan `tools/spki_pin.mts <host>`. Bila terisi, koneksi HTTPS HANYA diterima jika kunci publik sertifikat daun
+// salah satu pin: CA mana pun yang salah menerbitkan sertifikat untuk domain Anda tidak bisa menyadap sensor, dan token tidak pernah terkirim ke
+// server yang salah. Kosong = hanya validasi rantai terhadap bundel root CA.
+#ifndef SERVER_PIN_SPKI_SHA256
+#define SERVER_PIN_SPKI_SHA256 ""
+#endif

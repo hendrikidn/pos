@@ -22,6 +22,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # Skrip operasional (cadangan, uji pulih, healthcheck, deploy) harus sintaks bash yang sah.
+      - run: for f in deploy/*.sh; do bash -n "$f"; done
       # Termasuk tes firmware C yang dikompilasi dengan gcc runner dan dijalankan terhadap API sungguhan (PGlite).
       - run: npx vitest run
 

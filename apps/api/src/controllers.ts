@@ -7,6 +7,7 @@ import { IngestService } from './ingest.service';
 import { NotificationService } from './notification.service';
 import { CLOCK, PipelineService, type Clock } from './pipeline.service';
 import { ReportService } from './report.service';
+import { Telemetry } from './telemetry';
 import { SettlementService, type SlipInput } from './settlement.service';
 import { ShadowService } from './shadow.service';
 
@@ -23,6 +24,7 @@ export class ApiController {
     @Inject(ShadowService) private readonly shadow: ShadowService,
     @Inject(Database) private readonly db: Database,
     @Inject(CLOCK) private readonly clock: Clock,
+    @Inject(Telemetry) private readonly telemetry: Telemetry,
   ) {}
 
   @Public()
@@ -36,7 +38,8 @@ export class ApiController {
   async postEvents(@Req() req: AuthedRequest, @Body() body: { events?: unknown }) {
     const device = requireDevice(req);
     const result = await this.ingest.ingest(device, body?.events, this.clock());
-    if (result.accepted > 0) await this.pipeline.run(device.tenantId, device.outletId, this.clock());
+    this.telemetry.inc('pos_events_received_total', 'Event dari perangkat menurut hasil.', { result: 'accepted' }, result.accepted);
+    if (result.accepted > 0) await this.pipeline.schedule(device.tenantId, device.outletId);
     return result;
   }
 
@@ -110,6 +113,26 @@ export class ApiController {
     res.setHeader('content-disposition', `attachment; filename="${out.filename}"`);
     res.setHeader('cache-control', 'no-store');
     return out.csv;
+  }
+
+  /** Laporan pajak bulanan (PBJT, service, omzet). `format=csv` mengunduh CSV; selain itu JSON. */
+  @Get('v1/outlets/:outletId/reports/tax')
+  async taxReport(
+    @Req() req: AuthedRequest,
+    @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void },
+    @Param('outletId') outletId: string,
+    @Query('month') month?: string,
+    @Query('format') format?: string,
+  ) {
+    const auth = requireApi(req, ['OWNER', 'OPS', 'MANAGER']);
+    await this.assertOutlet(auth.tenantId, outletId);
+    const out = await this.reports.taxReport(auth, outletId, month, this.clock());
+    if (format === 'csv') {
+      res.setHeader('content-type', 'text/csv; charset=utf-8');
+      res.setHeader('content-disposition', `attachment; filename="${out.filename}"`);
+      return out.csv;
+    }
+    return out.report;
   }
 
   @Post('v1/outlets/:outletId/evaluate')

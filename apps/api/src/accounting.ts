@@ -21,6 +21,9 @@ export const SYSTEM = {
   payable: '2-1100',
   cogs: '5-1000',
   payroll: '6-1000',
+  bpjsEmployer: '6-1100',
+  pph21Payable: '2-1400',
+  bpjsPayable: '2-1500',
   commission: '6-5100',
   sales: '4-1000',
   service: '4-1100',
@@ -42,6 +45,8 @@ export const DEFAULT_ACCOUNTS: Account[] = [
   { code: '2-1100', name: 'Utang Usaha', type: 'LIABILITY', normal: 'CREDIT' },
   { code: '2-1200', name: 'Utang Pajak Restoran (PBJT)', type: 'LIABILITY', normal: 'CREDIT' },
   { code: '2-1300', name: 'Uang Muka Reservasi', type: 'LIABILITY', normal: 'CREDIT' },
+  { code: '2-1400', name: 'Utang PPh Pasal 21', type: 'LIABILITY', normal: 'CREDIT' },
+  { code: '2-1500', name: 'Utang BPJS', type: 'LIABILITY', normal: 'CREDIT' },
   { code: '3-1000', name: 'Modal Pemilik', type: 'EQUITY', normal: 'CREDIT' },
   { code: '3-2000', name: 'Laba Ditahan', type: 'EQUITY', normal: 'CREDIT' },
   { code: '4-1000', name: 'Penjualan', type: 'REVENUE', normal: 'CREDIT' },
@@ -52,6 +57,7 @@ export const DEFAULT_ACCOUNTS: Account[] = [
   { code: '4-9100', name: 'Pendapatan Uang Muka Hangus', type: 'REVENUE', normal: 'CREDIT' },
   { code: '5-1000', name: 'Beban Bahan Baku (HPP)', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-1000', name: 'Beban Gaji dan Upah', type: 'EXPENSE', normal: 'DEBIT' },
+  { code: '6-1100', name: 'Beban BPJS Pemberi Kerja', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-2000', name: 'Beban Sewa', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-3000', name: 'Beban Listrik, Air, dan Gas', type: 'EXPENSE', normal: 'DEBIT' },
   { code: '6-4000', name: 'Beban Operasional Lain', type: 'EXPENSE', normal: 'DEBIT' },
@@ -253,12 +259,23 @@ export function buildCogsJournal(days: { date: string; amount: number }[], outle
   }));
 }
 
-/** Jurnal gaji: pembayaran penggajian = Dr Beban Gaji, Cr Kas (tunai) atau Bank (transfer), pada tanggal bayar. */
-export function buildPayrollJournal(runs: { id: number; paidDate: string; total: number; method: 'TUNAI' | 'TRANSFER'; from: string; to: string }[]): JournalEntry[] {
-  return runs.filter((r) => r.total > 0).map((r): JournalEntry => ({
-    ref: `JU-GAJI-${r.id}`, date: r.paidDate, memo: `Gaji periode ${r.from} s/d ${r.to}`, source: 'POS',
-    lines: [{ account: SYSTEM.payroll, debit: r.total, credit: 0 }, { account: r.method === 'TUNAI' ? SYSTEM.cash : SYSTEM.bank, debit: 0, credit: r.total }],
-  }));
+/**
+ * Jurnal gaji pada tanggal bayar. Beban gaji = gaji bersih + PPh 21 + iuran BPJS yang dipotong dari karyawan (gaji kotor); iuran BPJS pemberi kerja
+ * menjadi beban tersendiri. Kas atau Bank keluar sebesar gaji bersih; PPh 21 dan BPJS (bagian karyawan + pemberi kerja) menjadi utang yang disetor kemudian.
+ * Tanpa potongan (penggajian lama) bentuknya tetap Dr Beban Gaji, Cr Kas/Bank.
+ */
+export function buildPayrollJournal(runs: { id: number; paidDate: string; total: number; method: 'TUNAI' | 'TRANSFER'; from: string; to: string; pph21?: number; bpjsEmployee?: number; bpjsEmployer?: number }[]): JournalEntry[] {
+  return runs.filter((r) => r.total > 0).map((r): JournalEntry => {
+    const pph = r.pph21 ?? 0;
+    const emp = r.bpjsEmployee ?? 0;
+    const er = r.bpjsEmployer ?? 0;
+    const lines: JournalLine[] = [{ account: SYSTEM.payroll, debit: r.total + pph + emp, credit: 0 }];
+    if (er > 0) lines.push({ account: SYSTEM.bpjsEmployer, debit: er, credit: 0 });
+    lines.push({ account: r.method === 'TUNAI' ? SYSTEM.cash : SYSTEM.bank, debit: 0, credit: r.total });
+    if (pph > 0) lines.push({ account: SYSTEM.pph21Payable, debit: 0, credit: pph });
+    if (emp + er > 0) lines.push({ account: SYSTEM.bpjsPayable, debit: 0, credit: emp + er });
+    return { ref: `JU-GAJI-${r.id}`, date: r.paidDate, memo: `Gaji periode ${r.from} s/d ${r.to}`, source: 'POS', lines };
+  });
 }
 
 /**

@@ -15,7 +15,8 @@
     "pos": "npm run dev -w @pos/pos-app",
     "api:setup": "npm run setup -w @pos/api --",
     "api:admin": "npm run admin -w @pos/api --",
-    "admin": "npm run dev -w @pos/admin"
+    "admin": "npm run dev -w @pos/admin",
+    "bench": "vitest run --config vitest.bench.config.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

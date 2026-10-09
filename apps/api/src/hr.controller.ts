@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, Res } from '@nestjs/common';
 import { IdPipe } from './id-pipe';
 import { requireApi, type AuthedRequest } from './auth';
-import { HrService, type LineInput, type ManualInput, type PayInput, type RunInput } from './hr.service';
+import { HrService, type LineInput, type ManualInput, type PayInput, type RunInput, type StaffTaxInput } from './hr.service';
 import { CLOCK, type Clock } from './pipeline.service';
 
 /** Absensi (owner dan manager) dan penggajian (hanya owner: data gaji sensitif). */
@@ -20,6 +20,28 @@ export class HrController {
   @Put('hr/pay/:staffId')
   async setPay(@Req() req: AuthedRequest, @Param('staffId') staffId: string, @Body() body: PayInput) {
     await this.hr.setPay(requireApi(req, ['OWNER']), staffId, body ?? {});
+    return { ok: true };
+  }
+
+  @Get('hr/tax-settings')
+  taxSettings(@Req() req: AuthedRequest) {
+    return this.hr.getTaxSettings(requireApi(req, ['OWNER']));
+  }
+
+  @Put('hr/tax-settings')
+  async setTaxSettings(@Req() req: AuthedRequest, @Body() body: unknown) {
+    await this.hr.setTaxSettings(requireApi(req, ['OWNER']), body);
+    return { ok: true };
+  }
+
+  @Get('hr/staff-tax')
+  listStaffTax(@Req() req: AuthedRequest) {
+    return this.hr.listStaffTax(requireApi(req, ['OWNER']));
+  }
+
+  @Put('hr/staff-tax/:staffId')
+  async setStaffTax(@Req() req: AuthedRequest, @Param('staffId') staffId: string, @Body() body: StaffTaxInput) {
+    await this.hr.setStaffTax(requireApi(req, ['OWNER']), staffId, body ?? {});
     return { ok: true };
   }
 
@@ -80,6 +102,15 @@ export class HrController {
   @Get('payroll-runs/:id/export')
   async exportCsv(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void }, @Param('id', IdPipe) id: number) {
     const out = await this.hr.exportCsv(requireApi(req, ['OWNER']), id);
+    res.setHeader('content-type', 'text/csv; charset=utf-8');
+    res.setHeader('content-disposition', `attachment; filename="${out.filename}"`);
+    res.setHeader('cache-control', 'no-store');
+    return out.csv;
+  }
+
+  @Get('payroll-runs/:id/export-statutory')
+  async exportStatutory(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: { setHeader(name: string, value: string): void }, @Param('id', IdPipe) id: number) {
+    const out = await this.hr.exportStatutoryCsv(requireApi(req, ['OWNER']), id);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${out.filename}"`);
     res.setHeader('cache-control', 'no-store');

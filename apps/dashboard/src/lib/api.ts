@@ -437,6 +437,16 @@ export interface TransferRow {
   receivedAt: number | null; cancelReason: string | null; short: boolean; stale: boolean;
   lines: { ingredientId: string; name: string; unit: string; qtySent: number; qtyReceived: number | null; unitCost: number }[];
 }
+export interface TaxDay { date: string; orders: number; subtotal: number; discount: number; service: number; taxBase: number; tax: number; rounding: number; total: number }
+export interface TaxReport {
+  period: { month: string; from: string; to: string };
+  outlet: { name: string; taxPercent: number; servicePercent: number; taxOnService: boolean };
+  totals: Omit<TaxDay, 'date'> & { omzet: number; platform: { orders: number; total: number }; refunds: { count: number; amount: number; taxEstimate: number }; netTax: number };
+  byDay: TaxDay[];
+  withoutBreakdown: number;
+  notes: string[];
+}
+export interface SessionRow { id: number; createdAt: string; lastUsedAt: string | null; expiresAt: string; ip: string | null; userAgent: string | null; current: boolean }
 export interface ChannelIntegrationView { channel: OnlineChannelId; active: boolean; keyPrefix: string | null; autoAccept: boolean; createdAt: string | null }
 export interface ChannelItemMap {
   map: { channel: OnlineChannelId; key: string; menuId: string; menuName: string | null }[];
@@ -461,8 +471,18 @@ export type RunStatus = 'DRAFT' | 'FINAL' | 'PAID' | 'CANCELED';
 export interface PayrollRunRow { id: number; outletId: string; from: string; to: string; status: RunStatus; paidDate: string | null; createdBy: string; total: number; staff: number }
 export interface PayrollDetail {
   id: number; outletId: string; from: string; to: string; status: RunStatus; dailyRegularMinutes: number; createdBy: string; finalizedBy: string | null; paidDate: string | null; payMethod: string | null; cancelReason: string | null;
-  lines: { staffId: string; name: string; payType: string; rate: number; regularMinutes: number; overtimeMinutes: number; base: number; overtimePay: number; allowance: number; deduction: number; net: number; note: string | null }[];
+  lines: {
+    staffId: string; name: string; payType: string; rate: number; regularMinutes: number; overtimeMinutes: number; base: number; overtimePay: number; allowance: number; deduction: number; net: number; note: string | null;
+    bpjsEmployee: { jht: number; jp: number; kes: number }; bpjsEmployer: { jht: number; jp: number; jkk: number; jkm: number; kes: number };
+    taxableGross: number; pph21: number; terCategory: string | null; terRate: number | null; finalPeriod: boolean; taxNote: string | null;
+  }[];
   total: number;
+  statutory: { pph21: number; bpjsEmployee: number; bpjsEmployer: number };
+}
+export interface StaffTaxRow { id: string; name: string; active: boolean; taxEnabled: boolean; ptkp: 'TK/0' | 'TK/1' | 'TK/2' | 'TK/3' | 'K/0' | 'K/1' | 'K/2' | 'K/3'; npwp: boolean; bpjsTk: boolean; bpjsKes: boolean }
+export interface TaxSettings {
+  jhtEmployee: number; jhtEmployer: number; jpEmployee: number; jpEmployer: number; jkk: number; jkm: number; kesEmployee: number; kesEmployer: number;
+  jpWageCap: number; kesWageCap: number; biayaJabatanPercent: number; biayaJabatanCapMonthly: number; employerPremiumsTaxable: boolean; noNpwpMultiplier: number;
 }
 
 export type ReservationStatus = 'BOOKED' | 'SEATED' | 'NO_SHOW' | 'CANCELED';

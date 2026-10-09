@@ -60,7 +60,12 @@ import { ShadowService } from './shadow.service';
 import { StockController } from './stock.controller';
 import { StockService } from './stock.service';
 import { SettlementService } from './settlement.service';
-import { CLOCK, NOTIFIER, PipelineService, type Clock, type Notifier } from './pipeline.service';
+import { CLOCK, EVALUATE_MIN_GAP_MS, EVALUATE_MODE, NOTIFIER, PipelineService, type Clock, type EvaluateMode, type Notifier } from './pipeline.service';
+import { Alerter, type AlertSink } from './alerter';
+import { OpsController } from './ops.controller';
+import { AdminAuthController } from './admin-auth.controller';
+import { AdminAuthService } from './admin-auth.service';
+import { Telemetry } from './telemetry';
 
 export interface AppOptions {
   /** Mengganti seluruh pengiriman notifikasi (untuk tes). Bila kosong dipakai NotificationService. */
@@ -75,6 +80,12 @@ export interface AppOptions {
   mailer?: Mailer;
   /** Petunjuk pembayaran yang tampil di tagihan (rekening, QRIS). Bila kosong dipakai BILLING_PAYMENT_INFO atau teks bawaan. */
   billingPaymentInfo?: string;
+  /** `background` (produksi): evaluasi aturan digabung dan dijalankan di latar belakang setelah setoran event. Bawaan `sync` (tes). */
+  evaluateMode?: EvaluateMode;
+  /** Jeda minimum antar-evaluasi satu outlet pada mode background (ms). */
+  evaluateMinGapMs?: number;
+  /** Pengganti pengiriman peringatan operasional (untuk tes). */
+  alertSink?: AlertSink;
 }
 
 @Module({})
@@ -82,7 +93,7 @@ export class AppModule {
   static forRoot(db: Database, opts: AppOptions = {}): DynamicModule {
     return {
       module: AppModule,
-      controllers: [ApiController, ConfigController, DeviceController, StockController, MemberController, BillingController, AccountingController, ChannelController, ChannelInboundController, PurchaseController, TransferController, HrController, ReservationController, WebShopController, QueueController, BomController, PaperController, AttendancePhotoController, PlatformController, LoginController, TenantUsersController],
+      controllers: [ApiController, OpsController, AdminAuthController, ConfigController, DeviceController, StockController, MemberController, BillingController, AccountingController, ChannelController, ChannelInboundController, PurchaseController, TransferController, HrController, ReservationController, WebShopController, QueueController, BomController, PaperController, AttendancePhotoController, PlatformController, LoginController, TenantUsersController],
       providers: [
         // useFactory, bukan useValue: Nest menyerialisasi metadata modul dinamis untuk membuat token modul,
         // dan objek database (memori WASM) membuat serialisasi itu gagal.
@@ -94,8 +105,12 @@ export class AppModule {
         { provide: NOTIFIER, useFactory: (svc: NotificationService) => opts.notifier ?? svc, inject: [NotificationService] },
         { provide: MAILER, useFactory: () => opts.mailer ?? mailerFromEnv() },
         { provide: CLOCK, useFactory: () => opts.clock ?? Date.now },
+        { provide: EVALUATE_MODE, useFactory: () => opts.evaluateMode ?? 'sync' },
+        { provide: EVALUATE_MIN_GAP_MS, useFactory: () => opts.evaluateMinGapMs ?? Number(process.env['EVALUATE_MIN_GAP_MS'] ?? 15_000) },
+        Telemetry,
+        { provide: Alerter, useFactory: () => { const a = new Alerter(); if (opts.alertSink) a.sink = opts.alertSink; return a; } },
         { provide: APP_GUARD, useClass: AuthGuard },
-        AdminService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, AccountingService, ChannelService, ChannelInboundService, PurchaseService, TransferService, HrService, ReservationService, WebShopService, QueueService, BomService, PaperService, AttendancePhotoService, RateLimiter, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
+        AdminService, AdminAuthService, IngestService, GuardService, TablesService, HandoffService, MemberService, BillingService, SignupService, AccountingService, ChannelService, ChannelInboundService, PurchaseService, TransferService, HrService, ReservationService, WebShopService, QueueService, BomService, PaperService, AttendancePhotoService, RateLimiter, BankService, IncidentService, PipelineService, NotificationService, ConfigService, SettlementService, ReportService, ShadowService, KdsService, ReceiptService, StockService, DeviceService, PairingService, PlatformService, LoginService, TenantUsersService,
       ],
       exports: [AdminService, ConfigService],
     };

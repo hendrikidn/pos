@@ -53,8 +53,12 @@ interface OrderInfo {
  * Tabel ekspor dari event POS, memakai aturan hitung yang sama dengan laporan penjualan (order karyawan dan order yang di-void tidak dihitung
  * sebagai penjualan; satu order dihitung pada pembayaran pertamanya di rentang). Murni.
  */
-export function buildExport(kind: ExportKind, input: SalesReportInput): ExportTable {
-  const { fromMs, toMs, utcOffsetMinutes: off, now } = input;
+/**
+ * Himpunan order yang terhitung sebagai penjualan di rentang input (aturan yang sama dengan laporan penjualan) beserta data pendukungnya.
+ * Dipakai ekspor dan laporan pajak supaya keduanya tidak pernah berbeda cara menghitung.
+ */
+export function prepareOrders(input: SalesReportInput) {
+  const { fromMs, toMs, now } = input;
   const t = correctedTime;
   const events = input.events.filter((e) => t(e) <= now + DAY_MS);
   const inRange = (e: PosEvent) => t(e) >= fromMs && t(e) < toMs;
@@ -98,6 +102,13 @@ export function buildExport(kind: ExportKind, input: SalesReportInput): ExportTa
   }
   counted.sort((a, b) => t(a.first) - t(b.first) || a.id.localeCompare(b.id));
   const methodsOf = (id: string) => [...new Set((payments.get(id) ?? []).map((p) => METHOD[p.payload.method]))].join(' + ');
+  return { inRange, sorted, info, voided, bill, payments, discounts, counts, counted, methodsOf, fromMs, toMs };
+}
+
+export function buildExport(kind: ExportKind, input: SalesReportInput): ExportTable {
+  const { fromMs, toMs, utcOffsetMinutes: off, now } = input;
+  const t = correctedTime;
+  const { inRange, sorted, info, voided, bill, payments, discounts, counts, counted, methodsOf } = prepareOrders(input);
 
   switch (kind) {
     case 'transactions': {

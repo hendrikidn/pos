@@ -4,10 +4,21 @@
 # Jalankan dari folder deploy/:  docker compose up -d --build
 name: posguard
 
+# Log container dirotasi (tanpa ini json-file tumbuh tanpa batas sampai disk penuh).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:17
     restart: unless-stopped
+    logging: *logging
+    stop_grace_period: 60s
+    # Kueri lambat (> 1 dtk) dan checkpoint dicatat di log database supaya masalah kinerja bisa dilacak.
+    command: ["postgres", "-c", "log_min_duration_statement=1000", "-c", "log_checkpoints=on", "-c", "log_lock_waits=on"]
     environment:
       POSTGRES_USER: posguard
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?isi POSTGRES_PASSWORD di deploy/.env}
@@ -48,6 +59,17 @@ services:
       WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
       WHATSAPP_TEMPLATE: ${WHATSAPP_TEMPLATE:-}
       WHATSAPP_LANGUAGE: ${WHATSAPP_LANGUAGE:-}
+      # Operasional: log permintaan JSON, evaluasi aturan di latar belakang, metrik Prometheus (aktif bila METRICS_TOKEN diisi), peringatan ke webhook.
+      EVALUATE_MODE: ${EVALUATE_MODE:-background}
+      LOG_REQUESTS: ${LOG_REQUESTS:-1}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      FORCE_HSTS: "1"
+      # Kunci enkripsi rahasia 2FA admin di basis data (AES-256-GCM). WAJIB diisi sebelum admin mengaktifkan 2FA di produksi.
+      SECRETS_KEY: ${SECRETS_KEY:-}
+    logging: *logging
+    # Waktu untuk menyelesaikan permintaan dan evaluasi yang berjalan sebelum dimatikan paksa (API menutup rapi dalam 25 dtk).
+    stop_grace_period: 30s
     ports:
       # Hanya localhost: tidak terjangkau dari internet; web server di host yang meneruskannya.
       - "127.0.0.1:${API_PORT:-18081}:3000"
@@ -62,6 +84,7 @@ services:
       - api
     environment:
       API_URL: http://api:3000
+    logging: *logging
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-18082}:3001"
 
@@ -77,6 +100,9 @@ services:
     environment:
       API_URL: http://api:3000
       DASHBOARD_URL: https://${DOMAIN}
+      # Daftar alamat IP/CIDR yang boleh membuka konsol admin (pisahkan koma). Kosong = tidak dibatasi di aplikasi (batasi juga di web server).
+      ADMIN_ALLOWED_IPS: ${ADMIN_ALLOWED_IPS:-}
+    logging: *logging
     ports:
       - "127.0.0.1:${ADMIN_PORT:-18083}:3003"
 

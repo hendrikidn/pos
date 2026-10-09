@@ -300,30 +300,60 @@ Token admin hilang: `docker compose run --rm api node_modules/.bin/tsx apps/api/
 - Firmware sensor: `SERVER_URL "https://anatta-pos.dolanyu.com"` di `secrets.h`, lalu pairing seperti di panduan sensor. Sensor butuh WiFi yang punya internet (NTP dan HTTPS).
 - Terminal POS: alamat API `https://anatta-pos.dolanyu.com`.
 
-## 9. Cadangan database (sebagai `posguard`)
+## 9. Cadangan, uji pulih, dan pemantauan (sebagai `posguard`)
 
-[backup.sh](backup.sh) membuat `pg_dump` dan menyimpan 14 hari.
+Empat skrip, semuanya membaca pengaturan dari lingkungan atau `deploy/.env` (lihat bagian "Cadangan" dan "Operasional" di `.env.example`):
+
+| Skrip | Fungsi |
+|---|---|
+| [backup.sh](backup.sh) | `pg_dump`, memeriksa arsipnya terbaca dan memuat tabel utama, checksum, enkripsi opsional, **salinan keluar server**, rotasi (14 harian, 8 mingguan, 12 bulanan) |
+| [restore-test.sh](restore-test.sh) | Memulihkan cadangan terbaru ke database SEMENTARA, memeriksa keutuhan ([verify.sql](verify.sql): skema, rantai event tanpa lubang atau putus, kebijakan RLS), lalu menghapusnya |
+| [restore.sh](restore.sh) | Pemulihan SUNGGUHAN ke produksi (hanya darurat; minta ketik `PULIHKAN`, mencadangkan keadaan sekarang dulu) |
+| [healthcheck.sh](healthcheck.sh) | Cron 5 menit: API siap, container hidup, disk, umur cadangan dan uji pulih; peringatan ke webhook hanya saat keadaan berubah |
+
+**Pasang** (sekali):
 ```
-chmod +x ~/pos/deploy/backup.sh
+chmod +x ~/pos/deploy/*.sh
 mkdir -p ~/backups
+# kata sandi enkripsi cadangan (simpan salinannya di pengelola sandi; tanpa ini cadangan terenkripsi tidak bisa dibuka)
+openssl rand -hex 32 > ~/.backup-pass && chmod 600 ~/.backup-pass
 crontab -e
 ```
-Tambahkan (jalan tiap hari 03:00):
+Isi `deploy/.env`: `BACKUP_PASSPHRASE_FILE=/home/posguard/.backup-pass`, `BACKUP_REMOTE=` (lihat di bawah), dan `ALERT_WEBHOOK_URL=`. Lalu cron:
 ```
-0 3 * * * BACKUP_DIR=$HOME/backups $HOME/pos/deploy/backup.sh >> $HOME/backups/backup.log 2>&1
+0 3 * * *   $HOME/pos/deploy/backup.sh       >> $HOME/backups/backup.log 2>&1
+30 4 * * 0  $HOME/pos/deploy/restore-test.sh >> $HOME/backups/restore-test.log 2>&1
+*/5 * * * * $HOME/pos/deploy/healthcheck.sh  >> $HOME/backups/healthcheck.log 2>&1
 ```
-Cadangan di VPS yang sama **tidak cukup**: bila server hilang, cadangannya ikut hilang. Salin juga ke tempat lain, misalnya dari komputer Anda: `rsync -a posguard@IP-VPS:backups/ ~/cadangan-posguard/` (butuh akses SSH untuk `posguard`) atau dari akun admin menyalin `/home/posguard/backups`.
 
-**Pulihkan** ke database kosong (**prosedur ini belum pernah dijalankan**; uji di VPS sebelum Anda membutuhkannya):
-```
-cd ~/pos/deploy
-docker compose stop api dashboard
-docker compose exec -T db psql -U posguard -d postgres -c "drop database if exists posguard with (force)" -c "create database posguard"
-docker compose exec -T db psql -U posguard -d posguard -c "create role app_user nologin" || true
-docker compose exec -T db pg_restore -U posguard -d posguard --no-owner < ~/backups/posguard-TANGGAL.dump
-docker compose start api dashboard
-```
-Role `app_user` harus ada sebelum pemulihan karena hak aksesnya dirujuk oleh dump.
+**Salinan keluar server** (`BACKUP_REMOTE`), pilih satu: `rclone:NAMA_REMOTE:folder` (S3, Backblaze B2, Google Drive, dll; atur dengan `rclone config`) atau `rsync:user@host:/folder` (server lain lewat SSH). Cadangan yang hanya ada di server yang sama bukan cadangan: bila salinan keluar gagal, `backup.sh` dianggap GAGAL dan mengirim peringatan.
+
+**Uji pulih tiap minggu itu wajib.** Cadangan yang tidak pernah dipulihkan hanyalah harapan. `restore-test.sh` yang lolos mencatat waktunya; `healthcheck.sh` memperingatkan bila sudah lebih dari 8 hari. Hasil uji yang gagal (checksum tidak cocok, arsip rusak, rantai event putus) juga masuk ke webhook.
+
+**Pulihkan produksi** (darurat): `~/pos/deploy/restore.sh ~/backups/posguard-TANGGAL.dump[.enc]`. Skrip meminta konfirmasi, mencadangkan keadaan sekarang ke `~/backups/sebelum-pulih`, menghentikan layanan, membuat ulang database, memulihkan, menjalankan pemeriksaan keutuhan, lalu menyalakan layanan. Bila pemeriksaan gagal, layanan TIDAK dinyalakan.
+
+> **Status pengujian skrip:** `backup.sh`, `restore-test.sh`, dan `healthcheck.sh` diuji dengan PostgreSQL 17.2 asli (sama dengan versi produksi): cadangan, enkripsi, salinan rsync, pemulihan dari berkas terenkripsi, berkas rusak, arsip terpotong, rantai event sengaja diputus (terdeteksi), peringatan webhook, dan perubahan keadaan healthcheck. Jalur `docker compose exec` diuji lewat Docker tiruan, BUKAN Docker sungguhan; `restore.sh` belum pernah dijalankan. Jalankan `restore-test.sh` pertama kali di VPS dan periksa hasilnya sebelum mengandalkannya.
+
+### Pemantauan
+
+- **Log:** API menulis satu baris JSON per permintaan ke stdout (`docker compose logs -f api`): id permintaan (juga di header `x-request-id`), metode, POLA rute, status, lama (ms), tenant, alamat. Tidak pernah memuat isi, query string, atau token. Docker memutar log (5 x 20 MB per layanan).
+- **Kesiapan:** `/readyz` (database terjangkau) untuk pemantau uptime eksternal (UptimeRobot, Better Stack: arahkan ke `https://anatta-pos.dolanyu.com/readyz`). `/healthz` hanya menandakan proses hidup. Healthcheck Docker memakai `/readyz`.
+- **Metrik Prometheus:** isi `METRICS_TOKEN` (`openssl rand -hex 24`), lalu scrape `/metrics` dengan `Authorization: Bearer <token>`. Tanpa token endpoint ini mati (404). Metrik penting: `pos_http_requests_total`, `pos_http_request_duration_seconds`, `pos_evaluations_total`, `pos_evaluation_pending`, `pos_db_pool_connections`, `pos_terminal_last_seen_age_seconds` (terminal yang diam), `pos_open_critical_incidents`. Contoh peringatan: `pos_terminal_last_seen_age_seconds > 900` pada jam buka, `pos_db_pool_connections{state="waiting"} > 5`, `rate(pos_http_requests_total{status="5xx"}[5m]) > 0`.
+- **Peringatan:** `ALERT_WEBHOOK_URL` menerima POST JSON `{"text": ...}` (Slack, Discord, Mattermost, n8n) untuk: API tidak bisa menjangkau database (dan pulih), evaluasi aturan gagal, kesalahan server 5xx (diredam 5 menit per rute), cadangan atau uji pulih gagal, disk hampir penuh, API tidak siap.
+- **Penutupan rapi:** `docker compose stop api` (atau deploy) memberi API 30 detik menyelesaikan permintaan dan evaluasi yang berjalan. Koneksi database yang putus saat database restart tidak lagi mematikan API.
+
+### Kapasitas (hasil ukur, bukan perkiraan)
+
+`npm run bench` memuat data sintetis satu outlet sibuk (3 terminal, 600 order/hari, 14 hari = 39 ribu event) ke PostgreSQL asli dan mengukur (`apps/api/bench/`). Hasil pada laptop pengembangan:
+
+| | Sebelum (evaluasi di setiap setoran) | Sesudah (latar belakang, digabung) |
+|---|---|---|
+| Satu setoran 20 event | 330 ms | 8 ms |
+| 3 terminal menyetor serentak | 930 ms | 6 ms |
+| Memuat 39 ribu event | 16 dtk | 5 dtk |
+| Satu evaluasi aturan penuh (39 ribu event) | 320–410 ms | sama, tetapi paling sering sekali per 15 dtk per outlet |
+
+Ukuran data: kira-kira **600 byte per event** (tabel dan indeks). Outlet 600 order/hari menambah ≈ 3.600 event ≈ 2 MB per hari ≈ 0,8 GB per tahun. Evaluasi hanya membaca 14 hari terakhir, jadi biayanya tidak ikut membesar seiring umur data; beban naik lurus dengan jumlah outlet sibuk (jeda antar-evaluasi menyesuaikan diri: tidak pernah lebih dari kira-kira seperempat waktu CPU satu outlet). Belum diukur: puluhan outlet serentak, dan VPS yang sebenarnya (ulangi `npm run bench` di sana).
 
 ### Bersihkan database (mulai dari kosong)
 
@@ -424,6 +454,12 @@ Hanya kode: `cd ~/pos && git checkout <commit-yang-dicatat> && ./deploy/deploy.s
 | **Jangan** | `docker compose down -v`: menghapus volume dan seluruh database |
 
 ## Keamanan
+
+- **Verifikasi 2 langkah admin (TOTP):** isi `SECRETS_KEY` di `deploy/.env` (`openssl rand -hex 32`; tanpanya API menolak mengaktifkan 2FA di produksi), mulai ulang API, lalu di konsol admin buka **Keamanan** > Mulai aktifkan, pindai QR dengan aplikasi autentikator, masukkan kode, dan SIMPAN 8 kode pemulihan. Setelah aktif, token admin mentah TIDAK lagi diterima API: masuk hanya lewat halaman login dengan kode (sesi 12 jam, bisa dicabut dari halaman yang sama). Percobaan kode salah dibatasi (5 per 15 menit per admin), kode yang sama tidak bisa dipakai dua kali. Lupa semuanya? Dari server: `DATABASE_URL=... npm run api:admin -- --id hendrik --reset-2fa`.
+- **Batasi konsol admin ke alamat Anda:** isi `ADMIN_ALLOWED_IPS=203.0.113.10,198.51.100.0/24` di `deploy/.env` (berlaku di konsol DAN di endpoint login API). Entri salah ketik membuat semua alamat ditolak (gagal tertutup). Syarat: nginx harus menimpa `X-Real-IP` (`proxy_set_header X-Real-IP $remote_addr;`, sudah ada di blok contoh di atas). Pembatasan di nginx (`allow`/`deny`) tetap disarankan sebagai lapisan pertama.
+- **Header keamanan** dikirim dashboard, konsol admin, dan API: CSP ketat (hanya asal sendiri, tidak boleh dibingkai, form hanya ke asal sendiri), `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, dan HSTS di produksi. Diperiksa di Chrome pada 10 halaman dashboard: nol pelanggaran CSP.
+- **Sesi pengguna dashboard:** halaman Akun menampilkan peramban dan perangkat yang sedang masuk (alamat, waktu terakhir dipakai) dengan tombol cabut, dan "keluar dari semua perangkat lain".
+
 
 - Database tidak dipublikasikan; API dan dashboard hanya di `127.0.0.1`. Docker melewati aturan `ufw` untuk port yang dipublikasikan ke semua antarmuka, jadi **jangan** mengubah `127.0.0.1:` pada `ports:` menjadi tanpa alamat.
 - HTTPS wajib: token perangkat dan token owner tidak boleh lewat HTTP polos di internet.

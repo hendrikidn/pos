@@ -154,7 +154,7 @@ describe('absensi dan penggajian', () => {
     const csv = await h.raw('/v1/payroll-runs/1/export', owner);
     expect(csv.text.charCodeAt(0)).toBe(0xfeff);
     expect(csv.headers.get('content-disposition')).toBe('attachment; filename="o1-gaji-2026-10-05_2026-10-07.csv"');
-    expect(csv.text).toContain('Budi,Per jam,20000,14:00,2:30,280000,75000,50000,30000,375000');
+    expect(csv.text).toContain('Budi,Per jam,20000,14:00,2:30,280000,75000,50000,30000,0,0,375000');
     expect((await h.raw('/v1/payroll-runs/1/export', manager)).status).toBe(403);
     expect((await h.db.admin.query("select 1 from audit_log where action = 'export.payroll'")).rowCount).toBe(1);
   });

@@ -95,6 +95,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           {([['transactions', 'Transaksi'], ['payments', 'Pembayaran'], ['items', 'Item terjual'], ['exceptions', 'Void, refund, diskon'], ['daily', 'Ringkasan harian']] as const).map(([k, label]) => (
             <a key={k} className="btn-like secondary" href={`/api/export/${k}?outlet=${encodeURIComponent(outlet.id)}&range=${range}`} download>{label}</a>
           ))}
+          <Link className="btn-like secondary" href={`/tax?outlet=${encodeURIComponent(outlet.id)}`}>Laporan pajak bulanan</Link>
           <PrintButton />
         </div>
       </section>

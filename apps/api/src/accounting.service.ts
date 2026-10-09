@@ -176,11 +176,15 @@ export class AccountingService {
     for (let d = r.from; d <= r.to; d = addDays(d, 1)) dayStarts.push({ date: d, fromMs: startOfLocalDay(d, r.off) - 1, toMs: startOfLocalDay(d, r.off) + DAY_MS - 1 });
     const cogs = await this.stock.cogsByDay(q, outletId, dayStarts, now);
     const payroll = (
-      await q.query<{ id: string; paid_date: string; pay_method: 'TUNAI' | 'TRANSFER'; period_start: string; period_end: string; total: string }>(
-        `select r.id, r.paid_date, r.pay_method, r.period_start, r.period_end, coalesce((select sum(net) from payroll_line l where l.run_id = r.id), 0) as total
+      await q.query<{ id: string; paid_date: string; pay_method: 'TUNAI' | 'TRANSFER'; period_start: string; period_end: string; total: string; pph21: string; bpjs_emp: string; bpjs_er: string }>(
+        `select r.id, r.paid_date, r.pay_method, r.period_start, r.period_end,
+                coalesce((select sum(net) from payroll_line l where l.run_id = r.id), 0) as total,
+                coalesce((select sum(pph21) from payroll_line l where l.run_id = r.id), 0) as pph21,
+                coalesce((select sum(bpjs_jht_employee + bpjs_jp_employee + bpjs_kes_employee) from payroll_line l where l.run_id = r.id), 0) as bpjs_emp,
+                coalesce((select sum(bpjs_jht_employer + bpjs_jp_employer + bpjs_jkk_employer + bpjs_jkm_employer + bpjs_kes_employer) from payroll_line l where l.run_id = r.id), 0) as bpjs_er
          from payroll_run r where r.outlet_id = $1 and r.status = 'PAID' and r.paid_date >= $2 and r.paid_date <= $3`, [outletId, r.from, r.to],
       )
-    ).rows.map((x) => ({ id: Number(x.id), paidDate: x.paid_date, total: Number(x.total), method: x.pay_method, from: x.period_start, to: x.period_end }));
+    ).rows.map((x) => ({ id: Number(x.id), paidDate: x.paid_date, total: Number(x.total), method: x.pay_method, from: x.period_start, to: x.period_end, pph21: Number(x.pph21), bpjsEmployee: Number(x.bpjs_emp), bpjsEmployer: Number(x.bpjs_er) }));
     const deposits = buildDepositJournal(
       (await this.reservations.journalRows(q, outletId, fromMs, toMs)).map((d) => ({
         id: d.id, guest: d.guest, deposit: d.deposit, method: d.method,

@@ -1,4 +1,5 @@
-import { Body, Controller, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, Inject, Param, Post, Req } from '@nestjs/common';
+import { IdPipe } from './id-pipe';
 import { Public, requireApi, type AuthedRequest } from './auth';
 import { LoginService } from './login.service';
 import { SignupService } from './signup.service';
@@ -27,15 +28,15 @@ export class LoginController {
 
   @Public()
   @Post('otp/verify')
-  verify(@Req() req: AuthedRequest & { ip?: string }, @Body() body: { email?: unknown; code?: unknown }) {
-    return this.login_.verifyCode(body?.email, body?.code, req.ip ?? 'unknown');
+  verify(@Req() req: AuthedRequest & { ip?: string }, @Headers('user-agent') ua: string | undefined, @Body() body: { email?: unknown; code?: unknown }) {
+    return this.login_.verifyCode(body?.email, body?.code, req.ip ?? 'unknown', ua);
   }
 
   /** Masuk dengan email dan password. */
   @Public()
   @Post('login')
-  login(@Req() req: AuthedRequest & { ip?: string }, @Body() body: { email?: unknown; password?: unknown }) {
-    return this.login_.login(body?.email, body?.password, req.ip ?? 'unknown');
+  login(@Req() req: AuthedRequest & { ip?: string }, @Headers('user-agent') ua: string | undefined, @Body() body: { email?: unknown; password?: unknown }) {
+    return this.login_.login(body?.email, body?.password, req.ip ?? 'unknown', ua);
   }
 
   /** Lupa password, atau pengguna baru yang belum punya password: kirim kode ke email. Respons selalu sama. */
@@ -49,8 +50,8 @@ export class LoginController {
   /** Mengatur password baru dengan kode dari email, lalu langsung masuk. */
   @Public()
   @Post('password/reset')
-  reset(@Req() req: AuthedRequest & { ip?: string }, @Body() body: { email?: unknown; code?: unknown; password?: unknown }) {
-    return this.login_.resetPassword(body?.email, body?.code, body?.password, req.ip ?? 'unknown');
+  reset(@Req() req: AuthedRequest & { ip?: string }, @Headers('user-agent') ua: string | undefined, @Body() body: { email?: unknown; code?: unknown; password?: unknown }) {
+    return this.login_.resetPassword(body?.email, body?.code, body?.password, req.ip ?? 'unknown', ua);
   }
 
   /** Mengganti password dari dalam sesi. */
@@ -70,6 +71,23 @@ export class LoginController {
     const raw = Array.isArray(header) ? header[0] : header;
     const token = raw?.startsWith('Bearer ') ? raw.slice(7).trim() : '';
     if (token) await this.login_.logout(token, auth.tenantId, auth.userId);
+    return { ok: true };
+  }
+
+  /** Daftar sesi login pengguna ini (peramban/perangkat yang sedang masuk). */
+  @Get('sessions')
+  sessions(@Req() req: AuthedRequest) {
+    return this.login_.listSessions(requireApi(req));
+  }
+
+  @Post('sessions/revoke-others')
+  revokeOthers(@Req() req: AuthedRequest) {
+    return this.login_.revokeOtherSessions(requireApi(req));
+  }
+
+  @Delete('sessions/:id')
+  async revoke(@Req() req: AuthedRequest, @Param('id', IdPipe) id: number) {
+    await this.login_.revokeSession(requireApi(req), id);
     return { ok: true };
   }
 }

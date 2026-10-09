@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { HrManager } from '@/components/HrManager';
 import { Shell } from '@/components/Shell';
-import { api, authed, type AttendanceView, type Me, type Outlet, type PayrollDetail, type PayrollRunRow, type StaffPayRow } from '@/lib/api';
+import { api, authed, type AttendanceView, type Me, type Outlet, type PayrollDetail, type PayrollRunRow, type StaffPayRow, type StaffTaxRow, type TaxSettings } from '@/lib/api';
 import { RANGE_OPTIONS, rangeText, type RangeValue } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
-const VIEWS = [['attendance', 'Absensi'], ['pay', 'Tarif gaji'], ['payroll', 'Penggajian']] as const;
+const VIEWS = [['attendance', 'Absensi'], ['pay', 'Tarif gaji'], ['tax', 'Pajak & BPJS'], ['payroll', 'Penggajian']] as const;
 type View = (typeof VIEWS)[number][0];
 
 export default async function HrPage({ searchParams }: { searchParams: Promise<{ outlet?: string; range?: string; view?: string }> }) {
@@ -25,7 +25,9 @@ export default async function HrPage({ searchParams }: { searchParams: Promise<{
     const pay = isOwner && view !== 'attendance' ? await api<StaffPayRow[]>('/v1/hr/pay') : [];
     const runs = isOwner && view === 'payroll' ? await api<PayrollRunRow[]>(`/v1/payroll-runs?outletId=${oid}`) : [];
     const details = await Promise.all(runs.filter((r) => r.status === 'DRAFT' || r.status === 'FINAL').map((r) => api<PayrollDetail>(`/v1/payroll-runs/${r.id}`)));
-    return { attendance, pay, runs, details };
+    const staffTax = isOwner && view === 'tax' ? await api<StaffTaxRow[]>('/v1/hr/staff-tax') : [];
+    const taxSettings = isOwner && view === 'tax' ? (await api<{ settings: TaxSettings }>('/v1/hr/tax-settings')).settings : null;
+    return { attendance, pay, runs, details, staffTax, taxSettings };
   });
   const href = (o: string, rg: string, v: string) => `/hr?outlet=${encodeURIComponent(o)}&range=${rg}&view=${v}`;
   return (

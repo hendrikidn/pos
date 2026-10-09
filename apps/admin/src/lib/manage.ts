@@ -1,5 +1,5 @@
 /** Memanggil API admin lewat server konsol. Mengembalikan data respons atau pesan kesalahan. */
-export async function manage<T = unknown>(path: string, body?: unknown, method: 'POST' | 'PUT' = 'POST'): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
+export async function manage<T = unknown>(path: string, body?: unknown, method: 'POST' | 'PUT' | 'DELETE' = 'POST'): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
   const res = await fetch('/api/manage', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },

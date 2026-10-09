@@ -62,3 +62,14 @@ export async function createPlatformAdmin(db: Database, opts: { id: string; name
   await db.admin.query('insert into platform_admin (id, name, token_hash) values ($1, $2, $3)', [opts.id, opts.name, sha256(token)]);
   return { created: true, token };
 }
+
+/**
+ * Pemulihan darurat dari server: mematikan verifikasi 2 langkah admin (ponsel hilang dan kode pemulihan habis), menghapus kode pemulihan, dan mencabut
+ * SEMUA sesi admin itu. Setelah ini admin masuk dengan token saja lalu mengaktifkan 2FA lagi. Butuh akses ke basis data, jadi hanya pemilik server.
+ */
+export async function resetAdmin2fa(db: Database, id: string): Promise<void> {
+  const r = await db.admin.query("update platform_admin set totp_secret = null, totp_pending = null, totp_enabled = false, totp_last_step = 0 where id = $1 and revoked_at is null", [id]);
+  if (r.rowCount === 0) throw new Error(`admin "${id}" tidak ditemukan`);
+  await db.admin.query('delete from admin_recovery_code where admin_id = $1', [id]);
+  await db.admin.query('update admin_session set revoked_at = now() where admin_id = $1 and revoked_at is null', [id]);
+}

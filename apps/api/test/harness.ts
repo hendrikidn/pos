@@ -87,14 +87,14 @@ export class RecordingChannel implements Channel {
 }
 
 /** Dengan `channel`, NotificationService sungguhan dipakai; tanpa itu, notifikasi hanya dicatat oleh RecordingNotifier. */
-export async function createHarness(nowMs: number, opts: { channel?: Channel; pinIterations?: number; trustProxy?: number | string; mailer?: RecordingMailer } = {}): Promise<Harness> {
+export async function createHarness(nowMs: number, opts: { channel?: Channel; pinIterations?: number; trustProxy?: number | string; mailer?: RecordingMailer; evaluateMode?: 'sync' | 'background'; evaluateMinGapMs?: number; alertSink?: (text: string) => Promise<void> } = {}): Promise<Harness> {
   const { driver, cleanup } = await createDriver();
   const db = new Database(driver);
   await db.migrate();
   const notifier = new RecordingNotifier();
   const mailer = opts.mailer ?? new RecordingMailer();
   let now = nowMs;
-  const app = await createApp(db, { notifier: opts.channel ? undefined : notifier, channel: opts.channel, dashboardUrl: 'https://guard.example', pinIterations: opts.pinIterations ?? 1_000, clock: () => now, trustProxy: opts.trustProxy, mailer });
+  const app = await createApp(db, { notifier: opts.channel ? undefined : notifier, channel: opts.channel, dashboardUrl: 'https://guard.example', pinIterations: opts.pinIterations ?? 1_000, clock: () => now, trustProxy: opts.trustProxy, mailer, evaluateMode: opts.evaluateMode, evaluateMinGapMs: opts.evaluateMinGapMs, alertSink: opts.alertSink });
   await app.listen(0);
   const port = (app.getHttpServer().address() as { port: number }).port;
   const admin = app.get(AdminService);

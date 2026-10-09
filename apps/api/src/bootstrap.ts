@@ -2,15 +2,21 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule, type AppOptions } from './app.module';
+import { Alerter } from './alerter';
 import { DataErrorFilter } from './data-error.filter';
+import { requestLogger, securityHeaders } from './http-hardening';
+import { Telemetry } from './telemetry';
 import type { Database } from './db/database';
 
 export async function createApp(
   db: Database,
-  opts: AppOptions & { corsOrigins?: string[]; trustProxy?: number | string } = {},
+  opts: AppOptions & { corsOrigins?: string[]; trustProxy?: number | string; logRequests?: boolean } = {},
 ): Promise<NestExpressApplication> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(db, opts), { logger: ['error', 'warn'], abortOnError: false });
   app.useGlobalFilters(new DataErrorFilter(app.getHttpAdapter()));
+  app.disable('x-powered-by');
+  app.use(securityHeaders);
+  app.use(requestLogger(app.get(Telemetry), app.get(Alerter), { log: opts.logRequests ?? false }));
   // Laporan bank diunggah sebagai teks dalam JSON.
   app.useBodyParser('json', { limit: '10mb' });
   // Di belakang reverse proxy (nginx/Caddy), alamat pemanggil sebenarnya ada di X-Forwarded-For. Tanpa ini semua pemanggil terlihat

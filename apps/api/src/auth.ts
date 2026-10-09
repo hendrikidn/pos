@@ -20,6 +20,8 @@ export interface ApiAuth {
   tenantId: string;
   userId: string;
   role: ApiRole;
+  /** Id baris token (untuk daftar sesi aktif dan "keluar dari perangkat lain"). */
+  tokenId?: number;
 }
 
 /** Admin platform (konsol admin). Bukan pengguna tenant: tidak bisa memakai endpoint tenant, dan sebaliknya. */
@@ -78,21 +80,34 @@ export class AuthGuard implements CanActivate {
       return true;
     }
     if (token.startsWith('api_')) {
-      const r = await this.db.admin.query<{ tenant_id: string; user_id: string; role: ApiRole; suspended: boolean }>(
-        `select a.tenant_id, a.user_id, a.role, t.suspended_at is not null as suspended
+      const r = await this.db.admin.query<{ id: string; tenant_id: string; user_id: string; role: ApiRole; suspended: boolean; session: boolean; stale: boolean }>(
+        `select a.id, a.tenant_id, a.user_id, a.role, a.session, t.suspended_at is not null as suspended,
+                (a.session and (a.last_used_at is null or a.last_used_at < now() - interval '5 minutes')) as stale
          from api_token a join tenant t on t.id = a.tenant_id where a.token_hash = $1 and a.revoked_at is null and (a.expires_at is null or a.expires_at > now())`,
         [hash],
       );
       const a = r.rows[0];
       if (!a) throw new UnauthorizedException('token tidak dikenal');
       if (a.suspended) throw new ForbiddenException(SUSPENDED_MESSAGE);
-      req.auth = { kind: 'api', tenantId: a.tenant_id, userId: a.user_id, role: a.role };
+      // "Terakhir dipakai" untuk daftar sesi: ditulis paling sering sekali per 5 menit supaya tidak menambah tulis di setiap permintaan.
+      if (a.stale) await this.db.admin.query('update api_token set last_used_at = now() where id = $1', [a.id]);
+      req.auth = { kind: 'api', tenantId: a.tenant_id, userId: a.user_id, role: a.role, tokenId: Number(a.id) };
       return true;
     }
     if (token.startsWith('adm_')) {
-      const r = await this.db.admin.query<{ id: string }>('select id from platform_admin where token_hash = $1 and revoked_at is null', [hash]);
+      // Sesi konsol admin (hasil login, bisa dengan 2FA) diterima langsung; token admin mentah hanya bila admin itu BELUM mengaktifkan 2FA.
+      const s = await this.db.admin.query<{ admin_id: string }>(
+        `select s.admin_id from admin_session s join platform_admin p on p.id = s.admin_id and p.revoked_at is null
+         where s.token_hash = $1 and s.revoked_at is null and s.expires_at > now()`, [hash],
+      );
+      if (s.rows[0]) {
+        req.auth = { kind: 'admin', adminId: s.rows[0].admin_id };
+        return true;
+      }
+      const r = await this.db.admin.query<{ id: string; totp_enabled: boolean }>('select id, totp_enabled from platform_admin where token_hash = $1 and revoked_at is null', [hash]);
       const a = r.rows[0];
       if (!a) throw new UnauthorizedException('token tidak dikenal');
+      if (a.totp_enabled) throw new UnauthorizedException('admin ini memakai verifikasi 2 langkah: masuk lewat /v1/admin/auth/login');
       req.auth = { kind: 'admin', adminId: a.id };
       return true;
     }

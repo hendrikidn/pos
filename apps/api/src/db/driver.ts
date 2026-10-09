@@ -15,6 +15,8 @@ export interface Driver extends Queryable {
   /** Menjalankan skrip multi-pernyataan (migrasi). */
   exec(sql: string): Promise<void>;
   close(): Promise<void>;
+  /** Keadaan pool koneksi (hanya PostgreSQL server); untuk metrik. */
+  stats?(): { total: number; idle: number; waiting: number };
 }
 
 /** PGlite melaporkan affectedRows = 0 untuk SELECT, jadi jumlah baris hasil dipakai bila tidak ada baris terdampak. */
@@ -63,7 +65,20 @@ export class PgDriver implements Driver {
 
   /** `max`: jumlah koneksi maksimum di pool (bawaan pg: 10). Tes memakai kecil agar banyak harness paralel tidak menghabiskan koneksi server. */
   constructor(connectionString: string, max?: number) {
-    this.pool = new pg.Pool({ connectionString, ...(max ? { max } : {}) });
+    // Batas waktu supaya kueri macet atau database yang tidak terjangkau tidak menggantung permintaan (dan koneksi pool) selamanya.
+    const statementTimeout = Number(process.env['DB_STATEMENT_TIMEOUT_MS'] ?? 60_000);
+    this.pool = new pg.Pool({
+      connectionString,
+      ...(max ? { max } : process.env['DB_POOL_MAX'] ? { max: Number(process.env['DB_POOL_MAX']) } : {}),
+      connectionTimeoutMillis: 10_000,
+      ...(statementTimeout > 0 ? { statement_timeout: statementTimeout } : {}),
+    });
+    // Koneksi menganggur yang putus (database restart/jaringan) memancarkan 'error' pada pool; tanpa penangan proses API ikut mati.
+    this.pool.on('error', (e) => console.error(JSON.stringify({ level: 'error', msg: 'koneksi database menganggur putus', error: e.message })));
+  }
+
+  stats() {
+    return { total: this.pool.totalCount, idle: this.pool.idleCount, waiting: this.pool.waitingCount };
   }
 
   async query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {

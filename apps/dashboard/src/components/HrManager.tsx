@@ -2,22 +2,25 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import type { AttendanceView, PayrollDetail, PayrollRunRow, StaffPayRow } from '@/lib/api';
+import type { AttendanceView, PayrollDetail, PayrollRunRow, StaffPayRow, StaffTaxRow, TaxSettings } from '@/lib/api';
 import { manage } from '@/lib/manage';
 import { rp, shortDate } from '@/lib/format';
 
+const PTKP_OPTIONS = ['TK/0', 'TK/1', 'TK/2', 'TK/3', 'K/0', 'K/1', 'K/2', 'K/3'] as const;
 const hm = (m: number) => `${Math.floor(m / 60)} j ${String(m % 60).padStart(2, '0')} m`;
 const clockText = (ms: number) => new Date(ms + 7 * 3_600_000).toISOString().slice(0, 16).replace('T', ' ');
 const STATUS = { DRAFT: 'Draf', FINAL: 'Final (belum dibayar)', PAID: 'Dibayar', CANCELED: 'Dibatalkan' } as const;
 
 interface Props {
-  view: 'attendance' | 'pay' | 'payroll';
+  view: 'attendance' | 'pay' | 'tax' | 'payroll';
   outletId: string;
   isOwner: boolean;
   attendance: AttendanceView;
   pay: StaffPayRow[];
   runs: PayrollRunRow[];
   details: PayrollDetail[];
+  staffTax: StaffTaxRow[];
+  taxSettings: TaxSettings | null;
 }
 
 const MISSING: Record<string, string> = { NO_CAMERA: 'kamera tidak ada', DENIED: 'kamera ditolak', TIMEOUT: 'kamera lambat', ERROR: 'kamera gagal' };
@@ -31,7 +34,7 @@ function Shot({ outletId, hash, missing, label }: { outletId: string; hash: stri
   return <span className="muted small" title={label}>{missing ? MISSING[missing] ?? missing : '–'}</span>;
 }
 
-export function HrManager({ view, outletId, isOwner, attendance, pay, runs, details }: Props) {
+export function HrManager({ view, outletId, isOwner, attendance, pay, runs, details, staffTax, taxSettings }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +42,8 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
   const [man, setMan] = useState({ staffId: '', date: new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 10), from: '09:00', to: '17:00', reason: '' });
   const [run, setRun] = useState({ from: '', to: '' });
   const [edit, setEdit] = useState<Record<string, { allowance: string; deduction: string }>>({});
+  const [taxEdit, setTaxEdit] = useState<Record<string, StaffTaxRow>>({});
+  const [cfg, setCfg] = useState<Record<string, string>>({});
 
   async function act(fn: () => Promise<{ ok: true; data?: unknown } | { ok: false; message: string }>, ok?: (d: unknown) => string) {
     setBusy(true);
@@ -87,6 +92,66 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
     );
   }
 
+  if (view === 'tax') {
+    const rows = staffTax.map((s) => taxEdit[s.id] ?? s);
+    const set = (s: StaffTaxRow, patch: Partial<StaffTaxRow>) => setTaxEdit({ ...taxEdit, [s.id]: { ...(taxEdit[s.id] ?? s), ...patch } });
+    const field = (k: keyof TaxSettings, label: string, unit: string) => taxSettings && (
+      <label key={k}>{label} ({unit})<input inputMode="decimal" value={cfg[k] ?? String(taxSettings[k])} onChange={(e) => setCfg({ ...cfg, [k]: e.target.value.replace(/[^0-9.]/g, '') })} /></label>
+    );
+    return (
+      <>
+        {error && <p className="error" role="alert">{error}</p>}
+        {notice && <p className="ok-note" role="status">{notice}</p>}
+        <section className="panel">
+          <h2>Profil pajak dan BPJS per staf</h2>
+          <p className="muted small" style={{ marginTop: 0 }}>Mati bawaan: penggajian tidak memotong apa pun sampai Anda mengaktifkannya per staf. PPh 21 memakai tarif efektif bulanan (TER) PMK 168/2023, dan penghitungan setahun di masa pajak terakhir (Desember atau saat berhenti bekerja).</p>
+          <table className="table">
+            <thead><tr><th>Staf</th><th>Hitung PPh 21</th><th>Status PTKP</th><th>NPWP</th><th>BPJS Ketenagakerjaan</th><th>BPJS Kesehatan</th><th /></tr></thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id}>
+                  <td data-label="Staf">{s.name}{!s.active && <span className="muted small"> (nonaktif)</span>}</td>
+                  <td data-label="Hitung PPh 21"><input type="checkbox" checked={s.taxEnabled} aria-label={`Hitung PPh 21 ${s.name}`} onChange={(e) => set(s, { taxEnabled: e.target.checked })} /></td>
+                  <td data-label="Status PTKP"><select value={s.ptkp} aria-label={`PTKP ${s.name}`} onChange={(e) => set(s, { ptkp: e.target.value as StaffTaxRow['ptkp'] })}>{PTKP_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}</select></td>
+                  <td data-label="NPWP"><input type="checkbox" checked={s.npwp} aria-label={`Punya NPWP ${s.name}`} onChange={(e) => set(s, { npwp: e.target.checked })} /></td>
+                  <td data-label="BPJS Ketenagakerjaan"><input type="checkbox" checked={s.bpjsTk} aria-label={`BPJS Ketenagakerjaan ${s.name}`} onChange={(e) => set(s, { bpjsTk: e.target.checked })} /></td>
+                  <td data-label="BPJS Kesehatan"><input type="checkbox" checked={s.bpjsKes} aria-label={`BPJS Kesehatan ${s.name}`} onChange={(e) => set(s, { bpjsKes: e.target.checked })} /></td>
+                  <td className="row-actions">{taxEdit[s.id] && <button disabled={busy} onClick={() => void act(() => manage('PUT', `/v1/hr/staff-tax/${s.id}`, { taxEnabled: s.taxEnabled, ptkp: s.ptkp, npwp: s.npwp, bpjsTk: s.bpjsTk, bpjsKes: s.bpjsKes }), () => { const n = { ...taxEdit }; delete n[s.id]; setTaxEdit(n); return 'Profil disimpan.'; })}>Simpan</button>}</td>
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={7} className="muted">Belum ada staf.</td></tr>}
+            </tbody>
+          </table>
+        </section>
+        {taxSettings && (
+          <section className="panel">
+            <h2>Tarif dan batas</h2>
+            <p className="notice" style={{ marginTop: 0 }}>Periksa tiap awal tahun dan tiap kali aturan berubah. Batas upah Jaminan Pensiun berubah setiap tahun (sejak Maret 2025: Rp10.547.400); nilai bawaan di sini bisa sudah usang. Ini alat bantu hitung, bukan nasihat pajak: konfirmasi ke konsultan pajak sebelum menyetor.</p>
+            <form className="form-grid" onSubmit={async (e) => {
+              e.preventDefault();
+              const body: Record<string, number> = {};
+              for (const [k, v] of Object.entries(cfg)) body[k] = Number(v);
+              await act(() => manage('PUT', '/v1/hr/tax-settings', body), () => { setCfg({}); return 'Pengaturan disimpan; berlaku untuk penggajian berikutnya.'; });
+            }}>
+              {field('jpWageCap', 'Batas upah JP', 'Rp')}
+              {field('kesWageCap', 'Batas upah Kesehatan', 'Rp')}
+              {field('jhtEmployee', 'JHT karyawan', '%')}
+              {field('jhtEmployer', 'JHT pemberi kerja', '%')}
+              {field('jpEmployee', 'JP karyawan', '%')}
+              {field('jpEmployer', 'JP pemberi kerja', '%')}
+              {field('jkk', 'JKK (kelompok risiko)', '%')}
+              {field('jkm', 'JKM', '%')}
+              {field('kesEmployee', 'Kesehatan karyawan', '%')}
+              {field('kesEmployer', 'Kesehatan pemberi kerja', '%')}
+              {field('biayaJabatanCapMonthly', 'Batas biaya jabatan per bulan', 'Rp')}
+              <div className="form-actions"><button type="submit" disabled={busy || Object.keys(cfg).length === 0}>Simpan tarif</button></div>
+            </form>
+          </section>
+        )}
+      </>
+    );
+  }
+
   if (view === 'payroll') {
     const detailOf = new Map(details.map((d) => [d.id, d]));
     return (
@@ -103,7 +168,7 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
                 <header><b>#{r.id}</b> {shortDate(r.from)} – {shortDate(r.to)} · {STATUS[r.status]} · {rp(r.total)} · {r.staff} staf{r.paidDate ? ` · dibayar ${shortDate(r.paidDate)}` : ''}</header>
                 {d && (
                   <table className="table">
-                    <thead><tr><th>Staf</th><th className="num">Reguler</th><th className="num">Lembur</th><th className="num">Pokok</th><th className="num">Lembur</th><th className="num">Tunjangan</th><th className="num">Potongan</th><th className="num">Bersih</th></tr></thead>
+                    <thead><tr><th>Staf</th><th className="num">Reguler</th><th className="num">Lembur</th><th className="num">Pokok</th><th className="num">Lembur</th><th className="num">Tunjangan</th><th className="num">Potongan</th><th className="num">PPh 21</th><th className="num">BPJS karyawan</th><th className="num">Bersih</th></tr></thead>
                     <tbody>
                       {d.lines.map((l) => {
                         const e = edit[`${r.id}:${l.staffId}`];
@@ -116,6 +181,8 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
                             <td data-label="Upah lembur" className="num">{rp(l.overtimePay)}</td>
                             <td data-label="Tunjangan" className="num">{r.status === 'DRAFT' ? <input aria-label={`Tunjangan ${l.name}`} inputMode="numeric" style={{ width: 100 }} value={e?.allowance ?? String(l.allowance)} onChange={(ev) => setEdit({ ...edit, [`${r.id}:${l.staffId}`]: { allowance: ev.target.value.replace(/\D/g, ''), deduction: e?.deduction ?? String(l.deduction) } })} /> : rp(l.allowance)}</td>
                             <td data-label="Potongan" className="num">{r.status === 'DRAFT' ? <input aria-label={`Potongan ${l.name}`} inputMode="numeric" style={{ width: 100 }} value={e?.deduction ?? String(l.deduction)} onChange={(ev) => setEdit({ ...edit, [`${r.id}:${l.staffId}`]: { allowance: e?.allowance ?? String(l.allowance), deduction: ev.target.value.replace(/\D/g, '') } })} /> : rp(l.deduction)}</td>
+                            <td data-label="PPh 21" className="num">{l.pph21 > 0 ? rp(l.pph21) : '–'}{l.terRate !== null && l.pph21 > 0 && <div className="muted small">TER {l.terCategory} {l.terRate}%</div>}{r.status === 'DRAFT' && l.taxableGross > 0 && <label className="muted small" style={{ display: 'block' }}><input type="checkbox" checked={l.finalPeriod} disabled={busy} onChange={(ev) => void act(() => manage('PUT', `/v1/payroll-runs/${r.id}/lines/${l.staffId}`, { finalPeriod: ev.target.checked }), () => 'Masa pajak diperbarui.')} /> masa pajak terakhir</label>}{l.taxNote && <div className="muted small">{l.taxNote}</div>}</td>
+                            <td data-label="BPJS karyawan" className="num">{(() => { const b = l.bpjsEmployee.jht + l.bpjsEmployee.jp + l.bpjsEmployee.kes; return b > 0 ? rp(b) : '–'; })()}</td>
                             <td data-label="Bersih" className="num"><b>{rp(l.net)}</b>{e && <button className="secondary" style={{ marginLeft: 8 }} disabled={busy} onClick={() => void act(() => manage('PUT', `/v1/payroll-runs/${r.id}/lines/${l.staffId}`, { allowance: Number(e.allowance || 0), deduction: Number(e.deduction || 0) }), () => 'Slip diperbarui.')}>Simpan</button>}</td>
                           </tr>
                         );
@@ -125,6 +192,7 @@ export function HrManager({ view, outletId, isOwner, attendance, pay, runs, deta
                 )}
                 <p className="actions">
                   <a className="btn-like secondary" href={`/api/payroll-export/${r.id}`} download>Unduh CSV slip</a>
+                  <a className="btn-like secondary" href={`/api/payroll-export/${r.id}?kind=statutory`} download>Unduh CSV potongan (PPh 21, BPJS)</a>
                   {r.status === 'DRAFT' && <button disabled={busy} onClick={() => void act(() => manage('POST', `/v1/payroll-runs/${r.id}/finalize`), () => 'Penggajian difinalkan; angka terkunci.')}>Finalkan</button>}
                   {r.status === 'FINAL' && <button disabled={busy} onClick={() => {
                     const method = (window.prompt('Metode pembayaran (TUNAI atau TRANSFER):', 'TRANSFER') ?? '').trim().toUpperCase();

@@ -6,6 +6,7 @@ import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { buildIntervals, computePay, MAX_OPEN_MS, netPay, type Interval, type OpenInterval, type PayRule } from './payroll';
 import { CLOCK, type Clock } from './pipeline.service';
 import { resolveRange } from './report-range';
+import { computeBpjs, DEFAULT_TAX_SETTINGS, mergeSettings, PTKP_STATUSES, pph21Annual, pph21Monthly, taxableGross, type PtkpStatus, type TaxSettings } from './statutory';
 import { toCsv } from './sales-export';
 import { DAY_MS, localDate, startOfLocalDay } from './sales-report';
 
@@ -18,7 +19,8 @@ const MAX_PAY = 1_000_000_000;
 export interface PayInput { payType?: unknown; rate?: unknown; overtimeMultiplier?: unknown }
 export interface ManualInput { staffId?: unknown; start?: unknown; end?: unknown; reason?: unknown }
 export interface RunInput { from?: unknown; to?: unknown; dailyRegularHours?: unknown }
-export interface LineInput { allowance?: unknown; deduction?: unknown; note?: unknown }
+export interface LineInput { allowance?: unknown; deduction?: unknown; note?: unknown; finalPeriod?: unknown }
+export interface StaffTaxInput { taxEnabled?: unknown; ptkp?: unknown; npwp?: unknown; bpjsTk?: unknown; bpjsKes?: unknown }
 
 type RunStatus = 'DRAFT' | 'FINAL' | 'PAID' | 'CANCELED';
 
@@ -143,6 +145,99 @@ export class HrService {
     });
   }
 
+  // ---------- pajak dan BPJS ----------
+
+  /** Tarif dan batas berlaku untuk tenant: nilai baku dari kode ditimpa pengaturan tersimpan. */
+  private async taxSettings(q: Queryable): Promise<TaxSettings> {
+    const r = (await q.query<{ params: Partial<TaxSettings> }>('select params from payroll_tax_setting limit 1')).rows[0];
+    if (!r) return DEFAULT_TAX_SETTINGS;
+    const m = mergeSettings(DEFAULT_TAX_SETTINGS, r.params);
+    return m.ok ? m.value : DEFAULT_TAX_SETTINGS;
+  }
+
+  async getTaxSettings(auth: ApiAuth) {
+    return this.db.tenantTx(auth.tenantId, async (q) => ({ defaults: DEFAULT_TAX_SETTINGS, settings: await this.taxSettings(q) }));
+  }
+
+  async setTaxSettings(auth: ApiAuth, input: unknown): Promise<void> {
+    await this.db.tenantTx(auth.tenantId, async (q) => {
+      const m = mergeSettings(await this.taxSettings(q), input);
+      if (!m.ok) throw new BadRequestException(m.message);
+      await q.query(
+        `insert into payroll_tax_setting (tenant_id, params, updated_by) values ($1, $2::jsonb, $3)
+         on conflict (tenant_id) do update set params = excluded.params, updated_by = excluded.updated_by, updated_at = now()`, [auth.tenantId, JSON.stringify(m.value), auth.userId],
+      );
+      await this.audit(q, auth, 'payroll.tax_settings', m.value);
+    });
+  }
+
+  async listStaffTax(auth: ApiAuth) {
+    return this.db.tenantTx(auth.tenantId, async (q) =>
+      (await q.query<{ id: string; name: string; active: boolean; tax_enabled: boolean | null; ptkp: string | null; npwp: boolean | null; bpjs_tk: boolean | null; bpjs_kes: boolean | null }>(
+        `select s.id, s.name, s.active, t.tax_enabled, t.ptkp, t.npwp, t.bpjs_tk, t.bpjs_kes from staff s left join staff_tax t on t.tenant_id = s.tenant_id and t.staff_id = s.id order by s.active desc, s.name`,
+      )).rows.map((r) => ({ id: r.id, name: r.name, active: r.active, taxEnabled: r.tax_enabled ?? false, ptkp: r.ptkp ?? 'TK/0', npwp: r.npwp ?? true, bpjsTk: r.bpjs_tk ?? false, bpjsKes: r.bpjs_kes ?? false })),
+    );
+  }
+
+  async setStaffTax(auth: ApiAuth, staffId: string, input: StaffTaxInput): Promise<void> {
+    need(typeof input.taxEnabled === 'boolean' && typeof input.npwp === 'boolean' && typeof input.bpjsTk === 'boolean' && typeof input.bpjsKes === 'boolean', 'taxEnabled, npwp, bpjsTk, dan bpjsKes harus true atau false');
+    need(typeof input.ptkp === 'string' && (PTKP_STATUSES as readonly string[]).includes(input.ptkp), `ptkp harus salah satu dari ${PTKP_STATUSES.join(', ')}`);
+    await this.db.tenantTx(auth.tenantId, async (q) => {
+      if ((await q.query('select 1 from staff where id = $1', [staffId])).rowCount === 0) throw new NotFoundException('staf tidak ditemukan');
+      await q.query(
+        `insert into staff_tax (tenant_id, staff_id, tax_enabled, ptkp, npwp, bpjs_tk, bpjs_kes) values ($1, $2, $3, $4, $5, $6, $7)
+         on conflict (tenant_id, staff_id) do update set tax_enabled = excluded.tax_enabled, ptkp = excluded.ptkp, npwp = excluded.npwp, bpjs_tk = excluded.bpjs_tk, bpjs_kes = excluded.bpjs_kes`,
+        [auth.tenantId, staffId, input.taxEnabled, input.ptkp, input.npwp, input.bpjsTk, input.bpjsKes],
+      );
+      await this.audit(q, auth, 'staff.tax', { staffId, taxEnabled: input.taxEnabled, ptkp: input.ptkp, npwp: input.npwp, bpjsTk: input.bpjsTk, bpjsKes: input.bpjsKes });
+    });
+  }
+
+  /**
+   * Potongan wajib satu baris gaji. BPJS dihitung dari upah dasar (pokok + tunjangan, tanpa lembur). PPh 21: tiap masa pajak (bulan dari tanggal akhir
+   * periode) memakai TER atas SELURUH penghasilan bruto staf itu di bulan tersebut (beberapa penggajian dalam sebulan digabung, yang sudah dipotong
+   * dikurangkan); masa pajak terakhir (Desember, atau ditandai berhenti bekerja) menghitung setahun dengan tarif Pasal 17 dan menyelesaikan selisihnya.
+   */
+  private async statutory(q: Queryable, tenantId: string, run: { id: number | string; period_end: string }, staffId: string, c: { base: number; overtime: number; allowance: number }, finalOverride: boolean | null) {
+    const settings = await this.taxSettings(q);
+    const prof = (await q.query<{ tax_enabled: boolean; ptkp: PtkpStatus; npwp: boolean; bpjs_tk: boolean; bpjs_kes: boolean }>('select tax_enabled, ptkp, npwp, bpjs_tk, bpjs_kes from staff_tax where staff_id = $1', [staffId])).rows[0];
+    const bpjs = computeBpjs(settings, c.base + c.allowance, { tk: prof?.bpjs_tk ?? false, kes: prof?.bpjs_kes ?? false });
+    const gross = prof?.tax_enabled ? taxableGross(settings, c, bpjs) : c.base + c.overtime + c.allowance;
+    const out = { bpjs, gross, pph21: 0, category: null as string | null, rate: null as number | null, finalPeriod: false, note: null as string | null };
+    if (!prof?.tax_enabled) return out;
+    const year = run.period_end.slice(0, 4);
+    const month = run.period_end.slice(0, 7);
+    const others = (await q.query<{ period_end: string; taxable_gross: string; pph21: string; pension: string }>(
+      `select r.period_end, l.taxable_gross, l.pph21, (l.bpjs_jht_employee + l.bpjs_jp_employee) as pension from payroll_line l join payroll_run r on r.id = l.run_id
+       where l.staff_id = $1 and r.id <> $2 and r.status <> 'CANCELED' and r.period_end >= $3 and r.period_end <= $4`, [staffId, run.id, `${year}-01-01`, `${year}-12-31`],
+    )).rows.map((o) => ({ month: o.period_end.slice(0, 7), gross: num(o.taxable_gross), pph21: num(o.pph21), pension: num(o.pension) }));
+    const final = finalOverride ?? month.endsWith('-12');
+    out.finalPeriod = final;
+    if (!final) {
+      const same = others.filter((o) => o.month === month);
+      const monthGross = gross + same.reduce((a, o) => a + o.gross, 0);
+      const t = pph21Monthly(settings, monthGross, prof.ptkp, prof.npwp);
+      const before = same.reduce((a, o) => a + o.pph21, 0);
+      out.pph21 = Math.max(0, t.tax - before);
+      out.category = t.category;
+      out.rate = t.rate;
+      if (same.length > 0) out.note = `PPh 21 bulan ${month}: TER ${t.rate}% atas bruto sebulan Rp ${monthGross.toLocaleString('id-ID')}, dikurangi yang sudah dipotong Rp ${before.toLocaleString('id-ID')}`;
+      return out;
+    }
+    const months = new Set([month, ...others.map((o) => o.month)]).size;
+    const a = pph21Annual(settings, { grossYear: gross + others.reduce((s, o) => s + o.gross, 0), months, status: prof.ptkp, npwp: prof.npwp, employeePensionYear: bpjs.jhtEmployee + bpjs.jpEmployee + others.reduce((s, o) => s + o.pension, 0) });
+    const withheld = others.reduce((s, o) => s + o.pph21, 0);
+    out.pph21 = Math.max(0, a.tax - withheld);
+    out.note = `Masa pajak terakhir: PPh 21 setahun Rp ${a.tax.toLocaleString('id-ID')} (PKP Rp ${a.pkp.toLocaleString('id-ID')}, ${months} bulan), sudah dipotong Rp ${withheld.toLocaleString('id-ID')}${a.tax < withheld ? `; LEBIH POTONG Rp ${(withheld - a.tax).toLocaleString('id-ID')} (dikembalikan lewat SPT/restitusi, tidak dikurangi di sini)` : ''}`;
+    return out;
+  }
+
+  private lineValues(c: { base: number; overtime: number; allowance: number; deduction: number }, st: Awaited<ReturnType<HrService['statutory']>>) {
+    const b = st.bpjs;
+    const net = Math.max(0, c.base + c.overtime + c.allowance - c.deduction - st.pph21 - b.jhtEmployee - b.jpEmployee - b.kesEmployee);
+    return { net, pph21: st.pph21, gross: st.gross, b };
+  }
+
   // ---------- penggajian ----------
 
   async createRun(auth: ApiAuth, outletId: string, input: RunInput, now: number): Promise<{ id: number; warnings: string[] }> {
@@ -183,10 +278,16 @@ export class HrService {
           )).rows[0];
           if (dup) { warnings.push(`${st.name} (gaji bulanan) sudah dimuat di penggajian #${dup.id} (${dup.outlet_id}) untuk periode yang tumpang tindih; tidak dimasukkan lagi.`); continue; }
         }
+        const stt = await this.statutory(q, auth.tenantId, { id: runId, period_end: r.to }, st.id, { base: p.base, overtime: p.overtimePay, allowance: 0 }, null);
+        const v = this.lineValues({ base: p.base, overtime: p.overtimePay, allowance: 0, deduction: 0 }, stt);
         await q.query(
-          `insert into payroll_line (tenant_id, run_id, staff_id, staff_name, pay_type, rate, regular_minutes, overtime_minutes, base, overtime_pay, net)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-          [auth.tenantId, runId, st.id, st.name, st.pay_type, st.rate, p.regularMinutes, p.overtimeMinutes, p.base, p.overtimePay, netPay(p.base, p.overtimePay, 0, 0)],
+          `insert into payroll_line (tenant_id, run_id, staff_id, staff_name, pay_type, rate, regular_minutes, overtime_minutes, base, overtime_pay, net,
+             bpjs_jht_employee, bpjs_jp_employee, bpjs_kes_employee, bpjs_jht_employer, bpjs_jp_employer, bpjs_jkk_employer, bpjs_jkm_employer, bpjs_kes_employer,
+             taxable_gross, pph21, ter_category, ter_rate, final_period, tax_note)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
+          [auth.tenantId, runId, st.id, st.name, st.pay_type, st.rate, p.regularMinutes, p.overtimeMinutes, p.base, p.overtimePay, v.net,
+            v.b.jhtEmployee, v.b.jpEmployee, v.b.kesEmployee, v.b.jhtEmployer, v.b.jpEmployer, v.b.jkkEmployer, v.b.jkmEmployer, v.b.kesEmployer,
+            v.gross, v.pph21, stt.category, stt.rate, stt.finalPeriod, stt.note],
         );
       }
       need((await q.query('select 1 from payroll_line where run_id = $1', [runId])).rowCount > 0, 'tidak ada jam kerja atau gaji tetap pada periode ini');
@@ -208,23 +309,44 @@ export class HrService {
       const v = input[k];
       need(v === undefined || (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= MAX_PAY), `${k === 'allowance' ? 'tunjangan' : 'potongan'} harus bilangan bulat rupiah ≥ 0`);
     }
+    need(input.finalPeriod === undefined || typeof input.finalPeriod === 'boolean', 'finalPeriod harus true atau false');
     const note = typeof input.note === 'string' ? input.note.trim().slice(0, 140) : null;
     await this.db.tenantTx(auth.tenantId, async (q) => {
       const run = await this.getRun(q, runId);
       if (run.status !== 'DRAFT') throw new ConflictException('hanya penggajian draf yang bisa diubah');
-      const l = (await q.query<{ base: string; overtime_pay: string; allowance: string; deduction: string }>('select base, overtime_pay, allowance, deduction from payroll_line where run_id = $1 and staff_id = $2', [runId, staffId])).rows[0];
+      const l = (await q.query<{ base: string; overtime_pay: string; allowance: string; deduction: string; final_period: boolean }>('select base, overtime_pay, allowance, deduction, final_period from payroll_line where run_id = $1 and staff_id = $2', [runId, staffId])).rows[0];
       if (!l) throw new NotFoundException('staf tidak ada di penggajian ini');
       const allowance = (input.allowance as number | undefined) ?? num(l.allowance);
       const deduction = (input.deduction as number | undefined) ?? num(l.deduction);
-      await q.query('update payroll_line set allowance = $3, deduction = $4, net = $5, note = coalesce($6, note) where run_id = $1 and staff_id = $2', [runId, staffId, allowance, deduction, netPay(num(l.base), num(l.overtime_pay), allowance, deduction), note]);
-      await this.audit(q, auth, 'payroll.line', { runId, staffId, allowance, deduction });
+      // Bendera "masa pajak terakhir" hanya berubah bila diminta; kalau tidak, bulan Desember tetap otomatis.
+      const stt = await this.statutory(q, auth.tenantId, run, staffId, { base: num(l.base), overtime: num(l.overtime_pay), allowance }, typeof input.finalPeriod === 'boolean' ? input.finalPeriod : null);
+      const v = this.lineValues({ base: num(l.base), overtime: num(l.overtime_pay), allowance, deduction }, stt);
+      await this.writeLine(q, runId, staffId, allowance, deduction, v, stt, note);
+      await this.audit(q, auth, 'payroll.line', { runId, staffId, allowance, deduction, pph21: v.pph21 });
     });
+  }
+
+  private writeLine(q: Queryable, runId: number, staffId: string, allowance: number, deduction: number, v: ReturnType<HrService['lineValues']>, stt: Awaited<ReturnType<HrService['statutory']>>, note: string | null) {
+    return q.query(
+      `update payroll_line set allowance = $3, deduction = $4, net = $5, note = coalesce($6, note),
+         bpjs_jht_employee = $7, bpjs_jp_employee = $8, bpjs_kes_employee = $9, bpjs_jht_employer = $10, bpjs_jp_employer = $11, bpjs_jkk_employer = $12, bpjs_jkm_employer = $13, bpjs_kes_employer = $14,
+         taxable_gross = $15, pph21 = $16, ter_category = $17, ter_rate = $18, final_period = $19, tax_note = $20
+       where run_id = $1 and staff_id = $2`,
+      [runId, staffId, allowance, deduction, v.net, note, v.b.jhtEmployee, v.b.jpEmployee, v.b.kesEmployee, v.b.jhtEmployer, v.b.jpEmployer, v.b.jkkEmployer, v.b.jkmEmployer, v.b.kesEmployer, v.gross, v.pph21, stt.category, stt.rate, stt.finalPeriod, stt.note],
+    );
   }
 
   async finalize(auth: ApiAuth, runId: number): Promise<void> {
     await this.db.tenantTx(auth.tenantId, async (q) => {
       const run = await this.getRun(q, runId);
       if (run.status !== 'DRAFT') throw new ConflictException('hanya penggajian draf yang bisa difinalkan');
+      // Penggajian lain milik staf yang sama (bulan sama atau tahun sama) bisa berubah sejak draf dibuat; hitung ulang potongannya sekarang.
+      const lines = (await q.query<{ staff_id: string; base: string; overtime_pay: string; allowance: string; deduction: string; final_period: boolean }>('select staff_id, base, overtime_pay, allowance, deduction, final_period from payroll_line where run_id = $1', [runId])).rows;
+      for (const l of lines) {
+        const stt = await this.statutory(q, auth.tenantId, run, l.staff_id, { base: num(l.base), overtime: num(l.overtime_pay), allowance: num(l.allowance) }, l.final_period ? true : null);
+        const v = this.lineValues({ base: num(l.base), overtime: num(l.overtime_pay), allowance: num(l.allowance), deduction: num(l.deduction) }, stt);
+        await this.writeLine(q, runId, l.staff_id, num(l.allowance), num(l.deduction), v, stt, null);
+      }
       await q.query("update payroll_run set status = 'FINAL', finalized_by = $2, finalized_at = now() where id = $1", [runId, auth.userId]);
       await this.audit(q, auth, 'payroll.finalize', { runId });
     });
@@ -274,10 +396,25 @@ export class HrService {
         'select id, outlet_id, period_start, period_end, status, daily_regular_minutes, created_by, finalized_by, paid_date, pay_method, cancel_reason from payroll_run where id = $1', [runId],
       )).rows[0];
       if (!r) throw new NotFoundException('penggajian tidak ditemukan');
-      const lines = (await q.query<{ staff_id: string; staff_name: string; pay_type: string; rate: number; regular_minutes: number; overtime_minutes: number; base: string; overtime_pay: string; allowance: string; deduction: string; net: string; note: string | null }>(
-        'select staff_id, staff_name, pay_type, rate, regular_minutes, overtime_minutes, base, overtime_pay, allowance, deduction, net, note from payroll_line where run_id = $1 order by staff_name', [runId],
-      )).rows.map((l) => ({ staffId: l.staff_id, name: l.staff_name, payType: l.pay_type, rate: l.rate, regularMinutes: l.regular_minutes, overtimeMinutes: l.overtime_minutes, base: num(l.base), overtimePay: num(l.overtime_pay), allowance: num(l.allowance), deduction: num(l.deduction), net: num(l.net), note: l.note }));
-      return { id: num(r.id), outletId: r.outlet_id, from: r.period_start, to: r.period_end, status: r.status, dailyRegularMinutes: r.daily_regular_minutes, createdBy: r.created_by, finalizedBy: r.finalized_by, paidDate: r.paid_date, payMethod: r.pay_method, cancelReason: r.cancel_reason, lines, total: lines.reduce((s, l) => s + l.net, 0) };
+      const lines = (await q.query<{ staff_id: string; staff_name: string; pay_type: string; rate: number; regular_minutes: number; overtime_minutes: number; base: string; overtime_pay: string; allowance: string; deduction: string; net: string; note: string | null;
+        bpjs_jht_employee: string; bpjs_jp_employee: string; bpjs_kes_employee: string; bpjs_jht_employer: string; bpjs_jp_employer: string; bpjs_jkk_employer: string; bpjs_jkm_employer: string; bpjs_kes_employer: string;
+        taxable_gross: string; pph21: string; ter_category: string | null; ter_rate: string | null; final_period: boolean; tax_note: string | null }>(
+        `select staff_id, staff_name, pay_type, rate, regular_minutes, overtime_minutes, base, overtime_pay, allowance, deduction, net, note,
+                bpjs_jht_employee, bpjs_jp_employee, bpjs_kes_employee, bpjs_jht_employer, bpjs_jp_employer, bpjs_jkk_employer, bpjs_jkm_employer, bpjs_kes_employer,
+                taxable_gross, pph21, ter_category, ter_rate, final_period, tax_note from payroll_line where run_id = $1 order by staff_name`, [runId],
+      )).rows.map((l) => ({
+        staffId: l.staff_id, name: l.staff_name, payType: l.pay_type, rate: l.rate, regularMinutes: l.regular_minutes, overtimeMinutes: l.overtime_minutes, base: num(l.base), overtimePay: num(l.overtime_pay), allowance: num(l.allowance), deduction: num(l.deduction), net: num(l.net), note: l.note,
+        bpjsEmployee: { jht: num(l.bpjs_jht_employee), jp: num(l.bpjs_jp_employee), kes: num(l.bpjs_kes_employee) },
+        bpjsEmployer: { jht: num(l.bpjs_jht_employer), jp: num(l.bpjs_jp_employer), jkk: num(l.bpjs_jkk_employer), jkm: num(l.bpjs_jkm_employer), kes: num(l.bpjs_kes_employer) },
+        taxableGross: num(l.taxable_gross), pph21: num(l.pph21), terCategory: l.ter_category, terRate: l.ter_rate === null ? null : num(l.ter_rate), finalPeriod: l.final_period, taxNote: l.tax_note,
+      }));
+      const sumOf = (f: (l: (typeof lines)[number]) => number) => lines.reduce((a, l) => a + f(l), 0);
+      const statutory = {
+        pph21: sumOf((l) => l.pph21),
+        bpjsEmployee: sumOf((l) => l.bpjsEmployee.jht + l.bpjsEmployee.jp + l.bpjsEmployee.kes),
+        bpjsEmployer: sumOf((l) => l.bpjsEmployer.jht + l.bpjsEmployer.jp + l.bpjsEmployer.jkk + l.bpjsEmployer.jkm + l.bpjsEmployer.kes),
+      };
+      return { id: num(r.id), outletId: r.outlet_id, from: r.period_start, to: r.period_end, status: r.status, dailyRegularMinutes: r.daily_regular_minutes, createdBy: r.created_by, finalizedBy: r.finalized_by, paidDate: r.paid_date, payMethod: r.pay_method, cancelReason: r.cancel_reason, lines, total: lines.reduce((s, l) => s + l.net, 0), statutory };
     });
   }
 
@@ -286,11 +423,27 @@ export class HrService {
     const d = await this.detail(auth, runId);
     const hm = (m: number) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
     const csv = toCsv({
-      header: ['Staf', 'Jenis', 'Tarif', 'Jam reguler', 'Jam lembur', 'Gaji pokok', 'Lembur', 'Tunjangan', 'Potongan', 'Gaji bersih', 'Catatan'],
-      rows: d.lines.map((l) => [l.name, l.payType === 'HOURLY' ? 'Per jam' : 'Bulanan', l.rate, hm(l.regularMinutes), hm(l.overtimeMinutes), l.base, l.overtimePay, l.allowance, l.deduction, l.net, l.note ?? '']),
+      header: ['Staf', 'Jenis', 'Tarif', 'Jam reguler', 'Jam lembur', 'Gaji pokok', 'Lembur', 'Tunjangan', 'Potongan', 'PPh 21', 'BPJS karyawan', 'Gaji bersih', 'Catatan'],
+      rows: d.lines.map((l) => [l.name, l.payType === 'HOURLY' ? 'Per jam' : 'Bulanan', l.rate, hm(l.regularMinutes), hm(l.overtimeMinutes), l.base, l.overtimePay, l.allowance, l.deduction, l.pph21, l.bpjsEmployee.jht + l.bpjsEmployee.jp + l.bpjsEmployee.kes, l.net, l.note ?? '']),
     });
     await this.db.tenantTx(auth.tenantId, (q) => this.audit(q, auth, 'export.payroll', { runId }));
     return { filename: `${d.outletId}-gaji-${d.from}_${d.to}.csv`, csv };
   }
-}
 
+  /** CSV bahan setoran PPh 21 dan iuran BPJS satu penggajian (per staf dan total). Tercatat di audit. */
+  async exportStatutoryCsv(auth: ApiAuth, runId: number): Promise<{ filename: string; csv: string }> {
+    const d = await this.detail(auth, runId);
+    const rows: (string | number)[][] = d.lines.map((l) => [
+      l.name, l.taxableGross, l.terCategory ?? '', l.terRate ?? '', l.finalPeriod ? 'Ya' : '', l.pph21,
+      l.bpjsEmployee.jht, l.bpjsEmployee.jp, l.bpjsEmployee.kes, l.bpjsEmployer.jht, l.bpjsEmployer.jp, l.bpjsEmployer.jkk, l.bpjsEmployer.jkm, l.bpjsEmployer.kes, l.taxNote ?? '',
+    ]);
+    const col = (i: number) => rows.reduce((a, r) => a + Number(r[i] || 0), 0);
+    rows.push(['TOTAL', col(1), '', '', '', col(5), col(6), col(7), col(8), col(9), col(10), col(11), col(12), col(13), '']);
+    const csv = toCsv({
+      header: ['Staf', 'Bruto PPh 21', 'Kategori TER', 'Tarif %', 'Masa pajak terakhir', 'PPh 21', 'JHT karyawan', 'JP karyawan', 'Kesehatan karyawan', 'JHT pemberi kerja', 'JP pemberi kerja', 'JKK', 'JKM', 'Kesehatan pemberi kerja', 'Catatan'],
+      rows,
+    });
+    await this.db.tenantTx(auth.tenantId, (q) => this.audit(q, auth, 'export.payroll_statutory', { runId }));
+    return { filename: `${d.outletId}-potongan-${d.from}_${d.to}.csv`, csv };
+  }
+}

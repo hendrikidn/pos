@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, HttpStatus, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { newToken, sha256, SUSPENDED_MESSAGE, type ApiAuth, type ApiRole } from './auth';
 import { Database } from './db/database';
 import type { Queryable } from './db/driver';
@@ -166,13 +166,13 @@ export class LoginService {
     return true;
   }
 
-  private async createSession(q: Queryable, u: UserRow, now: number, method: string): Promise<LoginResult> {
+  private async createSession(q: Queryable, u: UserRow, now: number, method: string, meta: { ip?: string; ua?: string } = {}): Promise<LoginResult> {
     const token = newToken('api');
     const expiresAt = now + SESSION_TTL_MS;
     await q.query(
-      `insert into api_token (token_hash, tenant_id, user_id, role, label, expires_at, session)
-       values ($1, $2, $3, $4, 'sesi email', to_timestamp($5::float8 / 1000.0), true)`,
-      [sha256(token), u.tenant_id, u.user_id, u.role, expiresAt],
+      `insert into api_token (token_hash, tenant_id, user_id, role, label, expires_at, session, ip, user_agent, last_used_at)
+       values ($1, $2, $3, $4, 'sesi email', to_timestamp($5::float8 / 1000.0), true, $6, $7, now())`,
+      [sha256(token), u.tenant_id, u.user_id, u.role, expiresAt, (meta.ip ?? '').slice(0, 64) || null, (meta.ua ?? '').slice(0, 200) || null],
     );
     await q.query('update dashboard_user set last_login_at = to_timestamp($2::float8 / 1000.0), failed_logins = 0, locked_until = null where id = $1', [u.id, now]);
     // Sesi yang sudah lama kedaluwarsa dibersihkan sambil lalu.
@@ -182,7 +182,7 @@ export class LoginService {
   }
 
   /** Masuk dengan kode email (jalur alternatif tanpa password). */
-  async verifyCode(emailRaw: unknown, codeRaw: unknown, caller: string): Promise<LoginResult> {
+  async verifyCode(emailRaw: unknown, codeRaw: unknown, caller: string, ua?: string): Promise<LoginResult> {
     const now = this.clock();
     await this.assertNotThrottled(caller, now);
     const email = normalizeEmail(emailRaw);
@@ -198,7 +198,7 @@ export class LoginService {
       if (!user || !user.active) return { ok: false as const };
       if (!(await this.consumeCode(q, user.id, code, 'login', now))) return { ok: false as const };
       if (user.suspended) return { ok: false as const, suspended: true as const };
-      return { ok: true as const, result: await this.createSession(q, user, now, 'email_code') };
+      return { ok: true as const, result: await this.createSession(q, user, now, 'email_code', { ip: caller, ua }) };
     });
     if (!outcome.ok) {
       if ('suspended' in outcome) throw new ForbiddenException(SUSPENDED_MESSAGE);
@@ -210,7 +210,7 @@ export class LoginService {
   // ---------- password ----------
 
   /** Masuk dengan email dan password. Gagal dengan pesan dan waktu yang sama untuk email tak dikenal, nonaktif, atau belum punya password. */
-  async login(emailRaw: unknown, passwordRaw: unknown, caller: string): Promise<LoginResult> {
+  async login(emailRaw: unknown, passwordRaw: unknown, caller: string, ua?: string): Promise<LoginResult> {
     const now = this.clock();
     await this.assertNotThrottled(caller, now);
     const email = normalizeEmail(emailRaw);
@@ -234,7 +234,7 @@ export class LoginService {
       return fail();
     }
     if (user.suspended) throw new ForbiddenException(SUSPENDED_MESSAGE);
-    return this.db.driver.transaction((q) => this.createSession(q, user, now, 'password'));
+    return this.db.driver.transaction((q) => this.createSession(q, user, now, 'password', { ip: caller, ua }));
   }
 
   private async recordFailedPassword(userRef: number, now: number): Promise<void> {
@@ -251,7 +251,7 @@ export class LoginService {
    * Mengatur atau mengatur ulang password dengan kode dari email, lalu langsung masuk. Semua sesi lama pengguna itu diputus, dan
    * penguncian akun dibuka. Kode hanya dipakai bila password lolos pemeriksaan, supaya salah ketik tidak menghanguskannya.
    */
-  async resetPassword(emailRaw: unknown, codeRaw: unknown, passwordRaw: unknown, caller: string): Promise<LoginResult> {
+  async resetPassword(emailRaw: unknown, codeRaw: unknown, passwordRaw: unknown, caller: string, ua?: string): Promise<LoginResult> {
     const now = this.clock();
     await this.assertNotThrottled(caller, now);
     const email = normalizeEmail(emailRaw);
@@ -276,7 +276,7 @@ export class LoginService {
       );
       await q.query('update api_token set revoked_at = now() where tenant_id = $1 and user_id = $2 and session and revoked_at is null', [user.tenant_id, user.user_id]);
       await q.query('insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, $3, $4::jsonb)', [user.tenant_id, user.user_id, 'auth.password.reset', '{}']);
-      return { ok: true as const, result: await this.createSession(q, user, now, 'password_reset') };
+      return { ok: true as const, result: await this.createSession(q, user, now, 'password_reset', { ip: caller, ua }) };
     });
     if (!outcome.ok) {
       if ('suspended' in outcome) throw new ForbiddenException(SUSPENDED_MESSAGE);
@@ -320,5 +320,28 @@ export class LoginService {
     if (r.rowCount) {
       await this.db.admin.query('insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, $3, $4::jsonb)', [tenantId, userId, 'auth.logout', '{}']);
     }
+  }
+
+  /** Sesi login pengguna ini yang masih aktif (peramban/perangkat mana saja yang sedang masuk). */
+  async listSessions(auth: ApiAuth) {
+    const rows = (await this.db.admin.query<{ id: string; created_at: string; last_used_at: string | null; expires_at: string; ip: string | null; user_agent: string | null }>(
+      `select id, created_at, last_used_at, expires_at, ip, user_agent from api_token
+       where tenant_id = $1 and user_id = $2 and session and revoked_at is null and expires_at > now() order by created_at desc`, [auth.tenantId, auth.userId],
+    )).rows;
+    return { sessions: rows.map((r) => ({ id: Number(r.id), createdAt: r.created_at, lastUsedAt: r.last_used_at, expiresAt: r.expires_at, ip: r.ip, userAgent: r.user_agent, current: Number(r.id) === auth.tokenId })) };
+  }
+
+  /** Mencabut satu sesi milik pengguna ini (hanya sesinya sendiri; sesi orang lain dan token tetap tidak tersentuh). */
+  async revokeSession(auth: ApiAuth, id: number): Promise<void> {
+    const r = await this.db.admin.query('update api_token set revoked_at = now() where id = $1 and tenant_id = $2 and user_id = $3 and session and revoked_at is null', [id, auth.tenantId, auth.userId]);
+    if (r.rowCount === 0) throw new NotFoundException('sesi tidak ditemukan');
+    await this.db.admin.query('insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, $3, $4::jsonb)', [auth.tenantId, auth.userId, 'auth.session.revoke', JSON.stringify({ id })]);
+  }
+
+  /** "Keluar dari semua perangkat lain": semua sesi pengguna ini kecuali yang sedang dipakai. */
+  async revokeOtherSessions(auth: ApiAuth): Promise<{ revoked: number }> {
+    const r = await this.db.admin.query('update api_token set revoked_at = now() where tenant_id = $1 and user_id = $2 and session and revoked_at is null and id <> $3', [auth.tenantId, auth.userId, auth.tokenId ?? -1]);
+    await this.db.admin.query('insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, $3, $4::jsonb)', [auth.tenantId, auth.userId, 'auth.session.revoke_others', JSON.stringify({ revoked: r.rowCount })]);
+    return { revoked: r.rowCount };
   }
 }

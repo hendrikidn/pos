@@ -30,7 +30,7 @@ COPY --chown=node:node apps/api ./apps/api
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=5 \
-  CMD node -e "fetch('http://127.0.0.1:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:3000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 # Migrasi database berjalan otomatis saat API start.
 CMD ["node_modules/.bin/tsx", "apps/api/src/main.ts"]
 

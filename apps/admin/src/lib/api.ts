@@ -9,6 +9,13 @@ export interface AdminMe {
   adminId: string;
 }
 
+export interface AdminSecurityStatus {
+  adminId: string;
+  twoFactor: boolean;
+  recoveryCodesLeft: number;
+  sessions: { id: number; createdAt: string; expiresAt: string; ip: string | null; userAgent: string | null; current: boolean }[];
+}
+
 export interface TenantKpi {
   outlets: number;
   staffActive: number;

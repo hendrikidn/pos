@@ -13,6 +13,8 @@ const ALLOWED: { methods: string[]; path: RegExp }[] = [
   { methods: ['POST'], path: /^\/v1\/admin\/billing\/invoices\/INV-[0-9]{6}-[0-9]{4}\/(pay|void)$/ },
   { methods: ['PUT'], path: /^\/v1\/admin\/plans\/[a-z0-9_-]+$/ },
   { methods: ['PUT'], path: /^\/v1\/admin\/tenants\/[a-z0-9_-]+\/users\/[0-9]+$/ },
+  { methods: ['POST'], path: /^\/v1\/admin\/auth\/(2fa\/(setup|enable|disable)|sessions\/revoke-others)$/ },
+  { methods: ['DELETE'], path: /^\/v1\/admin\/auth\/sessions\/[0-9]+$/ },
 ];
 
 export async function POST(req: Request) {

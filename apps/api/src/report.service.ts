@@ -5,7 +5,8 @@ import { loadCashChecks, verifyPendingCashCounts } from './cash-check';
 import { EVENT_COLUMNS, rowToEvent, type EventRow } from './guard.service';
 import { buildExport, EXPORT_EVENT_TYPES, EXPORT_KINDS, toCsv, type ExportKind } from './sales-export';
 import { resolveRange } from './report-range';
-import { addDays, buildSalesReport, compareSales, DAY_MS, startOfLocalDay, type Comparison, type SalesReport } from './sales-report';
+import { buildTaxReport, MONTH_RE, taxReportCsv, type TaxReport } from './tax-report';
+import { addDays, buildSalesReport, compareSales, DAY_MS, localDate, startOfLocalDay, type Comparison, type SalesReport } from './sales-report';
 import type { Queryable } from './db/driver';
 
 export { MAX_REPORT_DAYS, RANGES, type RangePreset } from './report-range';
@@ -45,6 +46,43 @@ export class ReportService {
       const table = buildExport(kind as ExportKind, { events: [...rows, ...voids].map(rowToEvent), from, to, utcOffsetMinutes: off, now, fromMs, toMs });
       await q.query("insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, 'export.sales', $3::jsonb)", [auth.tenantId, auth.userId, JSON.stringify({ outletId, kind, from, to, rows: table.rows.length })]);
       return { filename: `${outletId}-${table.slug}-${from}_${to}.csv`, csv: toCsv(table) };
+    });
+  }
+
+  /**
+   * Laporan pajak bulanan (`month` = YYYY-MM, bulan berjalan dan yang sudah lewat). Mengembalikan struktur laporan dan CSV-nya; pembacaan tercatat di audit.
+   */
+  async taxReport(auth: ApiAuth, outletId: string, month: unknown, now = Date.now()): Promise<{ report: TaxReport; csv: string; filename: string }> {
+    if (typeof month !== 'string' || !MONTH_RE.test(month)) throw new BadRequestException('month harus berformat YYYY-MM');
+    return this.db.tenantTx(auth.tenantId, async (q) => {
+      const o = (await q.query<{ name: string; merchant_name: string | null; utc_offset_minutes: number; tax_percent: number; service_charge_percent: number; tax_on_service: boolean }>(
+        'select name, merchant_name, utc_offset_minutes, tax_percent, service_charge_percent, tax_on_service from outlet where id = $1', [outletId],
+      )).rows[0];
+      if (!o) throw new BadRequestException('outlet tidak ditemukan');
+      const off = o.utc_offset_minutes;
+      const today = localDate(now, off);
+      const from = `${month}-01`;
+      if (from > today) throw new BadRequestException('bulan tidak boleh di masa depan');
+      const next = Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1);
+      const last = new Date(next - DAY_MS).toISOString().slice(0, 10);
+      const to = last > today ? today : last;
+      const fromMs = startOfLocalDay(from, off);
+      const toMs = startOfLocalDay(to, off) + DAY_MS;
+      const rows = (await q.query<EventRow>(
+        `select ${EVENT_COLUMNS} from event
+         where outlet_id = $1 and device_time_ms >= $2 and device_time_ms < $3 and type = any($4::text[]) order by device_id, seq`,
+        [outletId, fromMs - 2 * DAY_MS, toMs + DAY_MS, EXPORT_EVENT_TYPES],
+      )).rows;
+      const voids = (await q.query<EventRow>(
+        `select ${EVENT_COLUMNS} from event where outlet_id = $1 and type = 'void.approved' and device_time_ms >= $2 and device_time_ms < $3 order by device_id, seq`,
+        [outletId, fromMs - DAY_MS, Math.max(toMs, now) + DAY_MS],
+      )).rows;
+      const report = buildTaxReport(
+        { events: [...rows, ...voids].map(rowToEvent), from, to, utcOffsetMinutes: off, now, fromMs, toMs },
+        { name: o.merchant_name ?? o.name, taxPercent: o.tax_percent, servicePercent: o.service_charge_percent, taxOnService: o.tax_on_service }, month,
+      );
+      await q.query("insert into audit_log (tenant_id, actor, action, detail) values ($1, $2, 'export.tax', $3::jsonb)", [auth.tenantId, auth.userId, JSON.stringify({ outletId, month })]);
+      return { report, csv: taxReportCsv(report), filename: `${outletId}-pajak-${month}.csv` };
     });
   }
 

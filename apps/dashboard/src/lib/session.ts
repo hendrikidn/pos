@@ -13,7 +13,7 @@ export async function callApi(req: Request, path: string, body: unknown, token?:
   const xff = req.headers.get('x-forwarded-for');
   const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(xff ? { 'x-forwarded-for': xff } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    headers: { 'content-type': 'application/json', ...(xff ? { 'x-forwarded-for': xff } : {}), ...(req.headers.get('user-agent') ? { 'user-agent': req.headers.get('user-agent')! } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
     cache: 'no-store',
   }).catch(() => null);

@@ -24,6 +24,8 @@ FROM node:22-bookworm-slim AS api
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+# Beberapa paket (mis. NestJS) dipasang npm di apps/api/node_modules, bukan di akar: wajib ikut disalin.
+COPY --from=deps --chown=node:node /app/apps/api/node_modules ./apps/api/node_modules
 COPY --chown=node:node package.json tsconfig.json ./
 COPY --chown=node:node packages ./packages
 COPY --chown=node:node apps/api ./apps/api

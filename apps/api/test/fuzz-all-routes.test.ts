@@ -17,7 +17,8 @@ describe('fuzz semua route', () => {
 
   it('tidak ada 5xx', { timeout: 180_000 }, async () => {
     const router = (h.app.getHttpAdapter().getInstance() as unknown as { _router?: { stack: { route?: { path: string; methods: Record<string, boolean> } }[] }; router?: { stack: unknown[] } });
-    const stack = (router._router?.stack ?? []) as { route?: { path: string; methods: Record<string, boolean> } }[];
+    // Express 4 menyimpan rute di `_router.stack`, Express 5 di `router.stack`.
+    const stack = (router._router?.stack ?? router.router?.stack ?? []) as { route?: { path: string; methods: Record<string, boolean> } }[];
     const routes = stack.filter((l) => l.route).flatMap((l) => Object.keys(l.route!.methods).map((m) => [m.toUpperCase(), l.route!.path] as const));
     expect(routes.length).toBeGreaterThan(100); // pastikan route benar-benar terbaca
     const SKIP = /login|password|otp|signup|enroll|admin|logout|platform/;
